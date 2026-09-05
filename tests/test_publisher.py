@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 import tempfile
+import json
+from unittest.mock import patch
 import unittest
 
 spec = importlib.util.spec_from_file_location('publisher', Path(__file__).resolve().parents[1] / 'scripts/publisher.py')
@@ -61,6 +63,38 @@ class Decisions(unittest.TestCase):
             self.assertEqual(before, p.recipe_hash(root))
             (root / 'scripts/package-linux.mjs').write_text('changed native packaging')
             self.assertNotEqual(before, p.recipe_hash(root))
+
+class Publication(unittest.TestCase):
+    def test_failed_upload_or_verification_never_promotes_draft(self):
+        for failure in ('upload', 'verification'):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                work = Path(directory)
+                out = work / 'artifacts'
+                out.mkdir()
+                plan = dict(build=True, repository='owner/builds', tag='test-tag', buildHash='a' * 64,
+                            publisherCommit='b' * 40, constructCommit='c' * 40, upstreamCommit='d' * 40,
+                            inventory='release', version='1.0.0', nodeVersion='26.8.1')
+                (work / 'plan.json').write_text(json.dumps(plan))
+                for name in p.ASSETS[:2]:
+                    (out / name).write_bytes(b'validated build')
+                (out / 'manifest.json').write_text(json.dumps(dict(buildHash=plan['buildHash'],
+                    assets={name: dict(sha256=p.digest(out / name)) for name in p.ASSETS[:2]})))
+                (out / 'SHA256SUMS').write_text('checksums')
+                calls = []
+                def command(*args, **kwargs):
+                    calls.append(args)
+                    if args[2] == 'upload' and failure == 'upload':
+                        raise RuntimeError('upload failed')
+                    if args[2] == 'download':
+                        for name in p.ASSETS:
+                            (work / 'uploaded' / name).write_bytes(b'corrupted uploaded bytes')
+                    return ''
+                with patch.object(p, 'api', return_value=None), patch.object(p, 'run', side_effect=command):
+                    with self.assertRaises((RuntimeError, ValueError)):
+                        p.publish(work)
+                self.assertTrue(any(c[2] == 'create' and '--draft' in c for c in calls))
+                self.assertFalse(any(c[2] == 'edit' for c in calls), 'Failed draft must never become latest')
+
 
 if __name__ == '__main__':
     unittest.main()
