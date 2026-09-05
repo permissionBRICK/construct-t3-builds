@@ -26,6 +26,14 @@ const p = pty.spawn('/bin/sh', ['-c', 'printf CONSTRUCT_PTY_OK'], {env:process.e
 let output = ''; const timer = setTimeout(() => process.exit(2), 10000);
 p.onData(s => output += s); p.onExit(() => {clearTimeout(timer); process.exit(output.includes('CONSTRUCT_PTY_OK') ? 0 : 1)});
 '''], cwd=runtime, env=env, check=True)
+    subprocess.run([runtime / 'bin/node', '--input-type=module', '-e', """
+import { FileFinder, closeLibrary } from '@ff-labs/fff-node';
+const result = FileFinder.create({basePath:process.cwd()});
+if (!result.ok) throw new Error(JSON.stringify(result.error));
+result.value.destroy();
+closeLibrary();
+console.log('PASS: native file finder loads from the packaged dependency closure');
+"""], cwd=runtime, env=env, check=True, timeout=30)
     with socket.socket() as s:
         s.bind(('127.0.0.1', 0))
         port = s.getsockname()[1]
