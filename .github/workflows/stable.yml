@@ -27,13 +27,8 @@ jobs:
           node-version-file: .node-version
       - name: Test publisher decisions
         run: python3 -m unittest discover -s tests -v
-      - name: Read public Construct source
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          repository: permissionBRICK/The-Construct
-          ref: main
-          path: work/construct
-          persist-credentials: false
+      - name: Read public Construct source (no credentials)
+        run: git clone --depth 1 --branch main https://github.com/permissionBRICK/The-Construct.git work/construct
       - name: Select stable version and compatible patch inventory
         id: plan
         env:
