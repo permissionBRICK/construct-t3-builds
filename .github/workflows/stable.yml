@@ -52,6 +52,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends p7zip-full
+          # A restored cache belongs to runner, but the builder/Wine run as root.
+          # Wine refuses to create its prefix beneath a differently owned parent.
+          sudo mkdir -p work/compiler
+          sudo chown -R root:root work/compiler
           sudo env "PATH=$PATH" "HOME=$HOME" bash scripts/build.sh "$PWD/work"
       - name: Make build caches readable to Actions
         if: always() && steps.plan.outputs.build == 'true'
