@@ -61,7 +61,7 @@ fs.copyFileSync(nodeBinary, path.join(destination, 'bin/node'));
 fs.chmodSync(path.join(destination, 'bin/node'), 0o755);
 fs.writeFileSync(path.join(destination, 'bin/t3'), `#!/bin/sh
 set -eu
-runtime="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
+runtime="$(CDPATH='' cd -- "$(dirname -- "$(readlink -f -- "$0")")/.." && pwd)"
 exec "$runtime/bin/node" "$runtime/apps/server/dist/bin.mjs" "$@"
 `, {mode:0o755});
 fs.copyFileSync(path.join(source, 'LICENSE'), path.join(destination, 'LICENSE'));

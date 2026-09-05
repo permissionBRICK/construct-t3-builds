@@ -15,9 +15,11 @@ with tempfile.TemporaryDirectory(prefix='t3-runtime-smoke-') as directory:
     runtime = root / 'runtime'
     runtime.mkdir()
     subprocess.run(['tar', '-xzf', sys.argv[1], '-C', str(runtime)], check=True)
+    launcher = root / 't3'
+    launcher.symlink_to(runtime / 'bin/t3')
     env = {k: v for k, v in os.environ.items() if not k.startswith(('T3CODE_', 'NODE_'))}
     env.update(HOME=str(root / 'home'), XDG_CONFIG_HOME=str(root / 'config'), XDG_CACHE_HOME=str(root / 'cache'))
-    subprocess.run([runtime / 'bin/t3', '--help'], cwd=root, env=env, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run([launcher, '--help'], cwd=root, env=env, check=True, stdout=subprocess.DEVNULL)
     subprocess.run([runtime / 'bin/node', '-e', '''
 const pty = require('node-pty');
 const p = pty.spawn('/bin/sh', ['-c', 'printf CONSTRUCT_PTY_OK'], {env:process.env});
@@ -28,7 +30,7 @@ p.onData(s => output += s); p.onExit(() => {clearTimeout(timer); process.exit(ou
         s.bind(('127.0.0.1', 0))
         port = s.getsockname()[1]
     with open(root / 'server.log', 'w+') as log:
-        process = subprocess.Popen([runtime / 'bin/t3', '--host', '127.0.0.1', '--port', str(port),
+        process = subprocess.Popen([launcher, '--host', '127.0.0.1', '--port', str(port),
                                     '--no-browser', '--base-dir', str(root / 'data')], cwd=root, env=env,
                                    stdout=log, stderr=subprocess.STDOUT)
         try:
