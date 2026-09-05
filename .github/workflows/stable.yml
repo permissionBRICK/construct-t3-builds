@@ -68,6 +68,7 @@ jobs:
       # activity. A monthly metadata commit keeps this artifacts-only repo active.
       # It is deliberately outside the binary recipe hash.
       - name: Keep the polling schedule active
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/keep-alive.py
