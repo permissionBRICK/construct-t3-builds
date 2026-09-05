@@ -16,7 +16,7 @@ T3CODE_BUILD_MODE=server bash "$REPO_DIR/bin/build-t3code.sh"
 source_dir="$(dirname "$(dirname "$(dirname "$(dirname "$(readlink -f "$work/t3")")")")")"
 node "$publisher/scripts/package-linux.mjs" "$source_dir" "$work/linux-runtime" "$(command -v node)"
 # The distributed runtime uses the exact Node executable that built its native modules.
-curl -fsSL "https://nodejs.org/dist/v${expected_node}/LICENSE" -o "$work/linux-runtime/NODE-LICENSE"
+curl -fsSL "https://raw.githubusercontent.com/nodejs/node/v${expected_node}/LICENSE" -o "$work/linux-runtime/NODE-LICENSE"
 tar -czf "$work/artifacts/t3code-server-linux-x64.tar.gz" -C "$work/linux-runtime" .
 python3 "$publisher/scripts/smoke.py" "$work/artifacts/t3code-server-linux-x64.tar.gz"
 T3CODE_BUILD_MODE=desktop bash "$REPO_DIR/bin/build-t3code.sh"
