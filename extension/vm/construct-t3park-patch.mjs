@@ -34,7 +34,7 @@
 import { readFileSync, writeFileSync, copyFileSync, existsSync, renameSync, chmodSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
-const VERSION = "v6";
+const VERSION = "v7";
 const MARKER = "/*__T3PARK " + VERSION + "*/";
 const MARKER_RE = /\/\*__T3PARK (v\d+)\*\//;
 const TOKEN_FILE = "/etc/construct/t3park-token";
@@ -53,7 +53,7 @@ if (!["apply", "revert", "status", "mint-token"].includes(mode)) {
 
 // ---------------------------------------------------------------------------
 // Anchors — exact strings from the t3 dist bundle (tab-indented, un-minified;
-// verified against the target nightly). Each must occur exactly once or we refuse.
+// verified against the current stable and nightly). Each must occur exactly once or we refuse.
 // ---------------------------------------------------------------------------
 
 // Inside handleSdkTelemetryMessage: the rate_limit_event branch. We prepend a
@@ -62,16 +62,15 @@ const ANCHOR_RATELIMIT = '\t\tif (message.type === "rate_limit_event") {\n';
 const PATCH_RATELIMIT = ANCHOR_RATELIMIT +
   "\t\t\tglobalThis.__t3park && globalThis.__t3park.noteRateLimit(context, message);\n";
 
-// Inside handleResultMessage: the unified result outcome. Claude Code
-// 2.1.232 can report an account-limit response as `subtype: success` while
-// also setting `is_error: true` and `api_error_status: 429`; T3's stock status
-// is therefore `completed`. The hook may override only that classified limit
-// result to `failed`, schedule the park, and add the auto-resume banner.
+// Hook the consumers of the computed result, independent of how the upstream
+// adapter derives it. This exact block is shared by the current stable/nightly.
 const ANCHOR_RESULT =
-  "\t\tconst { status, errorMessage } = resultOutcome(message);\n";
+  '\t\tif (status === "failed") yield* emitRuntimeError(context, errorMessage ?? "Claude turn failed.");\n' +
+  '\t\tyield* completeTurn(context, status, errorMessage, message);\n';
 const PATCH_RESULT =
-  "\t\tconst __t3parkOutcome = resultOutcome(message);\n" +
-  "\t\tconst { status, errorMessage } = globalThis.__t3park ? globalThis.__t3park.onTurnResult(context, __t3parkOutcome.status, __t3parkOutcome.errorMessage, message) : __t3parkOutcome;\n";
+  '\t\tconst __t3parkResult = globalThis.__t3park ? globalThis.__t3park.onTurnResult(context, status, errorMessage, message) : { status, errorMessage };\n' +
+  '\t\tif (__t3parkResult.status === "failed") yield* emitRuntimeError(context, __t3parkResult.errorMessage ?? "Claude turn failed.");\n' +
+  '\t\tyield* completeTurn(context, __t3parkResult.status, __t3parkResult.errorMessage, message);\n';
 
 // ---------------------------------------------------------------------------
 // Runtime footer, appended to the bundle. Top-level ESM, so imports are legal;

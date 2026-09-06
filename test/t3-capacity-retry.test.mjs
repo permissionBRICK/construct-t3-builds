@@ -8,11 +8,13 @@ import { pathToFileURL } from 'node:url';
 import { createServer } from 'node:http';
 const tmp = mkdtempSync(join(tmpdir(), 't3-capacity-'));
 const bundle = join(tmp, 'bin.mjs');
-writeFileSync(bundle, `function fixture(context, message) {
+writeFileSync(bundle, `function* fixture(context, message) {
 \t\tif (message.type === "rate_limit_event") {
     return;
   }
 \t\tconst { status, errorMessage } = resultOutcome(message);
+\t\tif (status === "failed") yield* emitRuntimeError(context, errorMessage ?? "Claude turn failed.");
+\t\tyield* completeTurn(context, status, errorMessage, message);
 }`);
 writeFileSync(join(tmp, 'token'), 'test-token');
 execFileSync(process.execPath, ['extension/vm/construct-t3park-patch.mjs', 'apply', '--bundle', bundle],
