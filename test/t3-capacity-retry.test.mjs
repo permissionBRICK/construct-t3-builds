@@ -12,8 +12,7 @@ writeFileSync(bundle, `function fixture(context, message) {
 \t\tif (message.type === "rate_limit_event") {
     return;
   }
-\t\tconst status = turnStatusFromResult(message);
-\t\tconst errorMessage = resultUserFacingError(message);
+\t\tconst { status, errorMessage } = resultOutcome(message);
 }`);
 writeFileSync(join(tmp, 'token'), 'test-token');
 execFileSync(process.execPath, ['extension/vm/construct-t3park-patch.mjs', 'apply', '--bundle', bundle],
