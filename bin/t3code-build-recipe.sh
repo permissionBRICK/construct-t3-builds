@@ -46,7 +46,7 @@ t3_recipe_use_node() {
 t3_recipe_prepare_source() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y --no-install-recommends build-essential ca-certificates curl git python3
+  apt-get install -y --no-install-recommends build-essential ca-certificates curl git python3 pkg-config libsecret-1-dev
   if [[ ! -x "${T3_NODE_DIR}/bin/pnpm" ]] || [[ "$("${T3_NODE_DIR}/bin/pnpm" --version 2>/dev/null)" != 11.10.0 ]]; then
     npm install --prefix "${T3_NODE_DIR}" -g pnpm@11.10.0
   fi
