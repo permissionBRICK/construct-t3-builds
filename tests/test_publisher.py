@@ -30,15 +30,18 @@ class Decisions(unittest.TestCase):
         self.assertNotEqual(first, self.choose(hashes={**self.hashes, 'release': 'changed'})['tag'])
         self.assertEqual(first, self.choose(hashes={**self.hashes, 'nightly': 'changed'})['tag'])
 
-    def test_whole_nightly_inventory_can_target_stable(self):
+    def test_channels_use_only_their_own_inventory(self):
         tried = []
-        def compatible(inventory):
-            tried.append(inventory)
-            return inventory == 'nightly'
-        result = self.choose(compatible=compatible)
-        self.assertEqual(['release', 'nightly'], tried)
-        self.assertEqual('nightly', result['inventory'])
-        self.assertTrue(result['tag'].startswith('t3-1.0.0-'))
+        result = self.choose(compatible=lambda inventory: tried.append(inventory) or False)
+        self.assertEqual(['release'], tried)
+        self.assertFalse(result['build'])
+        tried.clear()
+        nightly = p.choose('1.0.1-nightly.20260906.1', self.hashes, 'recipe', lambda _: False,
+                           lambda inventory: tried.append(inventory) or True, 'nightly')
+        self.assertEqual(['nightly'], tried)
+        self.assertTrue(nightly['build'])
+        self.assertNotEqual(p.identity('1.0.0', 'patch', 'recipe'),
+                            p.identity('1.0.0', 'patch', 'recipe', 'nightly'))
 
     def test_failed_inventories_do_not_publish_anything(self):
         result = self.choose(compatible=lambda _: False)
@@ -48,6 +51,8 @@ class Decisions(unittest.TestCase):
     def test_draft_incomplete_and_prerelease_are_never_reused(self):
         release = dict(draft=False, prerelease=False, assets=[dict(name=n) for n in p.ASSETS])
         self.assertTrue(p.complete_release(release))
+        self.assertTrue(p.complete_release({**release, 'prerelease': True}, 'nightly'))
+        self.assertFalse(p.complete_release(release, 'nightly'))
         for change in [dict(draft=True), dict(prerelease=True), dict(assets=[]), dict(assets=release['assets'][:-1])]:
             self.assertFalse(p.complete_release({**release, **change}))
 
@@ -72,8 +77,8 @@ class Publication(unittest.TestCase):
                 out = work / 'artifacts'
                 out.mkdir()
                 plan = dict(build=True, repository='owner/builds', tag='test-tag', buildHash='a' * 64,
-                            publisherCommit='b' * 40, constructCommit='c' * 40, upstreamCommit='d' * 40,
-                            inventory='release', version='1.0.0', nodeVersion='26.8.1')
+                            publisherCommit='b' * 40, buildRepositoryCommit='c' * 40, upstreamCommit='d' * 40,
+                            inventory='release', channel='stable', version='1.0.0', nodeVersion='26.8.1')
                 (work / 'plan.json').write_text(json.dumps(plan))
                 for name in p.ASSETS[:2]:
                     (out / name).write_bytes(b'validated build')

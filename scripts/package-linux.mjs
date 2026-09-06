@@ -67,3 +67,9 @@ exec "$runtime/bin/node" "$runtime/apps/server/dist/bin.mjs" "$@"
 fs.copyFileSync(path.join(source, 'LICENSE'), path.join(destination, 'LICENSE'));
 fs.writeFileSync(path.join(destination, 'package.json'), JSON.stringify({private:true, type:'module'}));
 console.log(`Packaged ${roots.length} runtime roots, ${seen.size} dependency instances.`);
+
+const patches = path.resolve(import.meta.dirname, '../extension/vm');
+fs.mkdirSync(path.join(destination, 'extension/vm'), {recursive:true});
+for (const name of ['construct-t3park-patch.mjs', 'construct-t3-opencode-monitor-patch.mjs']) {
+  fs.copyFileSync(path.join(patches, name), path.join(destination, 'extension/vm', name));
+}
