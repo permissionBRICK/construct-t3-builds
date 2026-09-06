@@ -1,5 +1,5 @@
 // Run the actual inventory's voice callbacks and upstream replacement callback
-// in React in Chromium. Audio/STT transport is the only mocked boundary.
+// with the real Lexical composer in Chromium. Audio/STT transport is mocked.
 // T3_TEST_SOURCE: matching upstream checkout; T3_TEST_TOOLS: package directory
 // providing esbuild + playwright. T3_TEST_CHANNEL defaults to release.
 import fs from 'node:fs';
@@ -24,14 +24,17 @@ const types = inserts.find(s => s.includes('type VoiceInsertionState')).split('t
 const voice = inserts.find(s => s.includes('const stopVoiceRecording = useCallback'));
 const upstream = fs.readFileSync(path.join(source, 'apps/web/src/components/chat/ChatComposer.tsx'), 'utf8');
 const replacement = upstream.slice(upstream.indexOf('  const applyPromptReplacement = useCallback('), upstream.indexOf('  const readComposerSnapshot = useCallback('));
+const editorLock = manifest.transforms.some(t => (t.replace?.startsWith('disabled={isVoiceRecording ||')) || (t.scope === '<ComposerPromptEditor' && t.insert?.includes('isVoiceRecording ||')));
+const changeGuard = inserts.find(s => s.includes('Voice owns the draft')) ?? '';
 const entry = `
 import React, {useState, useRef, useCallback, useEffect} from ${JSON.stringify(sourceRequire.resolve('react'))};
 import {createRoot} from ${JSON.stringify(sourceRequire.resolve('react-dom/client'))};
+import {ComposerPromptEditor} from ${JSON.stringify(path.join(source,"apps/web/src/components/ComposerPromptEditor.tsx"))};
 type VoiceInsertionState${types}
 const environmentId = 'env'; const environmentUnavailable = null; const supportsVoiceInput = true;
 const voiceInputSource = {source:window.clientVoice ? 'client' : 'host'}; const composerDraftTarget = 'thread';
 let nextSession = 0; const composerTargetKey = x => x; const randomUUID = () => String(++nextSession);
-const AsyncResult = {isFailure: r => r.failure, isSuccess: r => !r.failure}; const toastManager = {add: x => {throw Error(JSON.stringify(x))}};
+const AsyncResult = {isFailure: r => r.failure, isSuccess: r => !r.failure}; const toastManager = {add: x => window.toasts.push(x)};
 const collapseExpandedComposerCursor = (v,c) => c; const expandCollapsedComposerCursor = (v,c) => c;
 const detectComposerTrigger = () => null;
 const replaceTextRange = (value,start,end,text) => ({text:value.slice(0,start)+text+value.slice(end),cursor:start+text.length});
@@ -53,8 +56,6 @@ function Harness() {
  const [composerCursor,setComposerCursor] = useState(0);
  const setComposerTrigger = () => {};
  const composerEditorRef = useRef(null);
- const element = useRef(null);
- composerEditorRef.current = {readSnapshot: () => ({value:element.current.value,expandedCursor:element.current.selectionStart}),focusAt:c=>{element.current.focus();element.current.setSelectionRange(c,c)}};
  const readComposerSnapshot = useCallback(() => composerEditorRef.current.readSnapshot(), []);
  const onChangeActivePendingUserInputCustomAnswer = (id,text) => {
    window.writes.push(id);
@@ -76,8 +77,7 @@ function Harness() {
  const runStopVoiceInput = useCallback(async () => {
    window.stops++;
    if(window.offline) return {failure:true};
-   window.voiceEvent?.({type:'stopped',reason:'user-stop'});
-   window.endStream?.({failure:false});
+   if (!window.holdFinal) { window.voiceEvent?.({type:'stopped',reason:'user-stop'}); window.endStream?.({failure:false}); }
    return {failure:false,value:{stopped:true}};
  }, []);
  const runSendVoiceAudio = async ({chunk,sequence}) => {
@@ -87,87 +87,127 @@ function Harness() {
  };
  ${replacement}
  ${voice}
+ window.editorSnapshot=()=>composerEditorRef.current.readSnapshot();
+ window.focusEnd=()=>composerEditorRef.current.focusAtEnd();
+ window.longDraft=()=>{setPending(null);setPrompt('A long existing draft. '.repeat(1000))};
  window.changeQuestion = () => setPending(p => ({...p, id:'question-2'}));
  window.leaveQuestion = () => setPending(null);
  window.staleRef = () => {promptRef.current=prompt};
  window.changeChatDraft = () => setPrompt('saved background draft');
  return React.createElement('form',{'data-chat-composer-form':'true'},
-   React.createElement('textarea',{ref:element,value:pending?.customAnswer ?? prompt,onChange:e=>pending?setPending({...pending,customAnswer:e.target.value}):setPrompt(e.target.value)}),
+   React.createElement(ComposerPromptEditor,{editorRef:composerEditorRef,value:pending?.customAnswer ?? prompt,cursor:composerCursor,terminalContexts:[],skills:[],disabled:${editorLock ? 'isVoiceRecording' : 'false'},placeholder:'Compose',onChange:(text,cursor)=>{${changeGuard}setComposerCursor(cursor);pending?setPending({...pending,customAnswer:text}):setPrompt(text)},onPaste:()=>{}}),
    React.createElement('button',{type:'button',onPointerDown:e=>e.preventDefault(),onClick:toggleVoiceRecording,'data-recording':String(isVoiceRecording)},'Mic'),
    React.createElement('output',null,prompt), React.createElement('span',{'data-status':true},voiceStatus));
 }
-window.stops=0;window.writes=[];window.starts=[];window.offline=false;window.received=0;window.captured=0;
+window.holdFinal=false;window.toasts=[];window.stops=0;window.writes=[];window.starts=[];window.offline=false;window.received=0;window.captured=0;
 createRoot(document.getElementById('root')).render(React.createElement(Harness));
 `;
 const browser = await chromium.launch({headless:true, ...(process.env.T3_TEST_CHROMIUM ? {executablePath:process.env.T3_TEST_CHROMIUM} : {})});
 try {
- const bundle = await build({stdin:{contents:entry,loader:'tsx',resolveDir:source},bundle:true,write:false,platform:'browser',define:{'process.env.NODE_ENV':'"development"'}});
+ const bundle = await build({stdin:{contents:entry,loader:'tsx',resolveDir:source},bundle:true,write:false,platform:'browser',alias:{'~':path.join(source,'apps/web/src')},loader:{'.svg':'text'},jsx:'automatic',define:{'process.env.NODE_ENV':'"development"'}});
  const page = await browser.newPage();
+ await page.route('http://voice.test/**', route=>route.fulfill({contentType:'text/html',body:'<div id="root"></div>'}));
  page.setDefaultTimeout(2000);
  const errors=[];page.on('pageerror',e=>{errors.push(e.message); console.error('Browser:',e.message)});
  async function reset(client=false) {
-   await page.goto('about:blank');
+   await page.goto('http://voice.test');
    await page.setContent('<div id="root"></div>');
    await page.evaluate(value=>{window.clientVoice=value},client);
    await page.addScriptTag({content:bundle.outputFiles[0].text});
-   await page.locator('textarea').waitFor();
+   await page.locator('[contenteditable]').waitFor();
  }
  async function recording(value) { await page.waitForFunction(v=>document.querySelector('button')?.dataset.recording===String(v), value, {timeout:2000}); }
- await reset();
- await page.locator('textarea').focus();
- await page.locator('textarea').evaluate(el=>el.setSelectionRange(el.value.length,el.value.length));
- await page.getByText('Mic',{exact:true}).click();
- await recording(true);
+ const editor = page.locator('[contenteditable]');
+ const value = () => page.evaluate(()=>window.editorSnapshot().value);
+ async function textIs(text) {await page.waitForFunction(expected=>window.editorSnapshot().value===expected,text);}
+ async function editable(enabled) {await page.waitForFunction(expected=>document.querySelector('[contenteditable]').getAttribute('contenteditable')===String(expected),enabled);}
+ async function start() {await page.evaluate(()=>window.focusEnd());await page.getByText('Mic',{exact:true}).click();await recording(true);}
+ async function stop() {await page.getByText('Mic',{exact:true}).click();await recording(false);await editable(true);}
+
+ // Reproduces the old false manual-edit cancellation before React/Lexical commits.
+ await reset(); await start();
+ await page.evaluate(()=>{window.transcript('first');window.transcript('first second');window.transcript('first second third')});
+ await textIs('answer prefix first second third');
+ await recording(true);await editable(false);
+ assert.equal(await page.evaluate(()=>window.stops),0,'batched partials must not stop dictation');
+ await stop();
+
+ // Pending answers, unrelated draft changes and stale shared refs remain safe.
+ await reset();await start();
  await page.evaluate(()=>window.changeChatDraft());
- await recording(true);
  await page.evaluate(()=>{window.staleRef();window.transcript('spoken')});
- await page.waitForFunction(()=>document.querySelector('textarea').value==='answer prefix spoken');
- await recording(true);
+ await textIs('answer prefix spoken');
  await page.evaluate(()=>window.transcript('spoken answer'));
- await page.waitForFunction(()=>document.querySelector('textarea').value==='answer prefix spoken answer');
+ await textIs('answer prefix spoken answer');await recording(true);
  assert.equal(await page.locator('output').textContent(),'saved background draft');
  assert.deepEqual(await page.evaluate(()=>window.writes),['question-1','question-1']);
- assert.equal(await page.evaluate(()=>window.stops),0,'dictation must not stop itself');
- await page.locator('textarea').fill('my manual edit');
- await recording(false);
- await page.evaluate(()=>window.transcript('late result'));
- assert.equal(await page.locator('textarea').inputValue(),'my manual edit');
- await reset();
- await page.getByText('Mic',{exact:true}).click();await recording(true);
- await page.evaluate(()=>window.changeQuestion());await recording(false);
- await page.evaluate(()=>window.transcript('wrong question'));
- assert.equal(await page.locator('textarea').inputValue(),'answer prefix');
- assert.deepEqual(await page.evaluate(()=>window.writes),[]);
- await page.evaluate(()=>window.leaveQuestion());
- await page.locator('textarea').focus();
- await page.locator('textarea').evaluate(el=>el.setSelectionRange(el.value.length,el.value.length));
- await page.getByText('Mic',{exact:true}).click();await recording(true);
- await page.evaluate(()=>window.transcript('normal chat'));
- await page.waitForFunction(()=>document.querySelector('textarea').value==='chat draft stays here normal chat');
- // Client transport: a four-second outage keeps the microphone open and Stop drains after reconnect.
- await reset(true);
- await page.locator("textarea").evaluate(el=>el.setSelectionRange(el.value.length,el.value.length));
+ // Keyboard typing/deletion and browser paste cannot change the read-only editor.
+ await editor.click();await page.keyboard.type('manual edit');await page.keyboard.press('Backspace');
+ await editor.evaluate(el=>{const data=new DataTransfer();data.setData('text/plain','pasted edit');el.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:data}))});
+ assert.equal(await value(),'answer prefix spoken answer');await recording(true);
+ // Stop leaves the editor locked until the provider's final text has arrived.
+ await page.evaluate(()=>{window.holdFinal=true});
  await page.getByText('Mic',{exact:true}).click();
- await recording(true);
+ await page.waitForFunction(()=>window.stops===1);await editable(false);
+ await page.evaluate(()=>window.transcript('spoken answer finalized'));
+ await textIs('answer prefix spoken answer finalized');
+ await page.evaluate(()=>{window.voiceEvent({type:'stopped',reason:'user-stop'});window.endStream({failure:false})});
+ await recording(false);await editable(true);
+ await editor.fill('my manual edit');await textIs('my manual edit');
+ await page.evaluate(()=>window.transcript('late result'));
+ assert.equal(await value(),'my manual edit');
+
+ // A target change still cancels and rejects late transcripts.
+ await reset();await start();
+ await page.evaluate(()=>window.changeQuestion());await recording(false);await editable(true);
+ await page.evaluate(()=>window.transcript('wrong question'));
+ assert.equal(await value(),'answer prefix');
+ assert.deepEqual(await page.evaluate(()=>window.writes),[]);
+ await start();await page.evaluate(()=>window.leaveQuestion());await recording(false);
+ await page.evaluate(()=>window.transcript('wrong target'));
+ await textIs('chat draft stays here');
+
+ // Repeated recordings into a long draft, each receiving a burst of partials.
+ await reset();await page.evaluate(()=>window.longDraft());
+ let expected='A long existing draft. '.repeat(1000);await textIs(expected);
+ for(let iteration=0;iteration<5;iteration++) {
+   await start();await editable(false);
+   await page.evaluate(i=>{window.transcript('next');window.transcript('next phrase');window.transcript('next phrase '+i)},iteration);
+   expected+=(expected.endsWith(' ')?'':' ')+'next phrase '+iteration;
+   await textIs(expected);await recording(true);await stop();
+ }
+ assert.equal(await page.evaluate(()=>window.stops),5,'only explicit Stop requests');
+ await editor.fill('editable again');await textIs('editable again');
+
+ // Unexpected stream completion and server recording limits also release the lock.
+ await reset();await start();
+ await page.evaluate(()=>window.endStream({failure:false}));
+ await recording(false);await editable(true);
+ assert.equal(await page.evaluate(()=>window.toasts[0]?.type),'error');
+ await editor.fill('after failure');await textIs('after failure');
+ await reset();await start();
+ await page.evaluate(()=>{window.voiceEvent({type:'stopped',reason:'recording-limit'});window.endStream({failure:false})});
+ await recording(false);await editable(true);
+ assert.equal(await page.evaluate(()=>window.toasts[0]?.type),'info');
+
+ // Client transport: outage keeps capture open, and Stop drains after reconnect.
+ await reset(true);await start();
  await page.evaluate(()=>{window.audio();window.transcript('first words')});
  await page.waitForFunction(()=>window.received===3200);
  await page.evaluate(()=>window.disconnect());
  await page.waitForFunction(()=>document.querySelector('[data-status]').textContent.includes('Reconnecting'));
- for(let i=0;i<40;i++) {
-   await page.evaluate(()=>window.audio());
-   await page.waitForTimeout(100);
- }
- await recording(true);
+ for(let i=0;i<40;i++) {await page.evaluate(()=>window.audio());await page.waitForTimeout(100);}
+ await recording(true);await editable(false);
  assert.equal(await page.evaluate(()=>window.capturing),true);
  await page.getByText('Mic',{exact:true}).click();
- await page.waitForFunction(()=>!window.capturing);
- assert.equal(await page.evaluate(()=>window.stops),0, 'Stop waits for queued audio');
+ await page.waitForFunction(()=>!window.capturing);await editable(false);
+ assert.equal(await page.evaluate(()=>window.stops),0,'Stop waits for queued audio');
  await page.evaluate(()=>{window.offline=false});
- await recording(false);
+ await recording(false);await editable(true);
  assert.equal(await page.evaluate(()=>window.received),await page.evaluate(()=>window.captured));
- assert.equal(await page.locator('textarea').inputValue(),'answer prefix first words');
- assert.equal(await page.evaluate(()=>window.starts.slice(1).every(Boolean)),true,'reattach uses the same established session');
+ assert.equal(await value(),'answer prefix first words');
+ assert.equal(await page.evaluate(()=>window.starts.slice(1).every(Boolean)),true);
+ assert.deepEqual(await page.evaluate(()=>window.toasts),[]);
  assert.deepEqual(errors,[]);
- console.log('PASS: '+channel+' question dictation, cumulative transcripts, stale refs, manual edits, question switching, and normal chat');
+ console.log('PASS: '+channel+' real editor: batched partials, read-only capture/finalization, repeated long drafts, target changes, late results and offline Stop');
 } finally {await browser.close();}
-

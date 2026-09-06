@@ -81,6 +81,11 @@ through re-indentation) and the list of `conflicts`.
   the existing two-minute recording limit has an explicit stop reason. Browser
   microphone interruptions and unexpected provider socket closure report errors.
   Reconnection to the transcription provider itself is not attempted.
+  The composer is read-only from microphone startup through the final transcript;
+  Stop remains available and editing resumes on completion or failure. Transcript
+  updates use the session's latest requested text rather than the editor's delayed
+  rendered snapshot. Text mismatches no longer cancel recording; switching the
+  target thread or question still does. Submitting waits until recording finishes.
   Regression coverage includes delayed/lost uploads, scope cancellation and
   reattachment, final-result replay, offline Stop, and real browser AudioWorklet
   capture/flush. The publisher runs the voice unit and browser tests for each pair.
