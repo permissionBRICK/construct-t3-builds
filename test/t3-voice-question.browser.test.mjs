@@ -119,16 +119,32 @@ try {
  async function recording(value) { await page.waitForFunction(v=>document.querySelector('button')?.dataset.recording===String(v), value, {timeout:2000}); }
  const editor = page.locator('[contenteditable]');
  const value = () => page.evaluate(()=>window.editorSnapshot().value);
- async function textIs(text) {await page.waitForFunction(expected=>window.editorSnapshot().value===expected,text);}
+ async function textIs(text) {try {await page.waitForFunction(expected=>window.editorSnapshot().value===expected,text);} catch(error) {console.error('Editor state:',await page.evaluate(()=>({value:window.editorSnapshot().value,stops:window.stops,recording:document.querySelector('button').dataset.recording})));throw error;}}
  async function editable(enabled) {await page.waitForFunction(expected=>document.querySelector('[contenteditable]').getAttribute('contenteditable')===String(expected),enabled);}
  async function start() {await page.evaluate(()=>window.focusEnd());await page.getByText('Mic',{exact:true}).click();await recording(true);}
  async function stop() {await page.getByText('Mic',{exact:true}).click();await recording(false);await editable(true);}
+
+ // Recording must preserve focus so Ctrl+T can stop it before the first transcript.
+ await reset();await page.evaluate(()=>window.focusEnd());
+ await page.keyboard.press('Control+t');await recording(true);await editable(true);
+ assert.equal(await editor.evaluate(el=>document.activeElement===el),true,'starting voice keeps editor focus');
+ await page.keyboard.press('Control+t');await recording(false);
+ assert.equal(await page.evaluate(()=>window.stops),1);
+ // A mic-button start can also be stopped by the shortcut after a transcript.
+ await start();await page.evaluate(()=>window.transcript('shortcut test'));
+ await textIs('answer prefix shortcut test');
+ await page.keyboard.press('Control+t');await recording(false);
+ assert.equal(await page.evaluate(()=>window.stops),2);
+ // Holding the shortcut still stops on release.
+ await page.keyboard.down('Control');await page.keyboard.down('t');await recording(true);
+ await page.waitForTimeout(450);await page.keyboard.up('t');await page.keyboard.up('Control');
+ await recording(false);assert.equal(await page.evaluate(()=>window.stops),3);
 
  // Reproduces the old false manual-edit cancellation before React/Lexical commits.
  await reset(); await start();
  await page.evaluate(()=>{window.transcript('first');window.transcript('first second');window.transcript('first second third')});
  await textIs('answer prefix first second third');
- await recording(true);await editable(false);
+ await recording(true);await editable(true);
  assert.equal(await page.evaluate(()=>window.stops),0,'batched partials must not stop dictation');
  await stop();
 
@@ -141,14 +157,16 @@ try {
  await textIs('answer prefix spoken answer');await recording(true);
  assert.equal(await page.locator('output').textContent(),'saved background draft');
  assert.deepEqual(await page.evaluate(()=>window.writes),['question-1','question-1']);
- // Keyboard typing/deletion and browser paste cannot change the read-only editor.
- await editor.click();await page.keyboard.type('manual edit');await page.keyboard.press('Backspace');
- await editor.evaluate(el=>{const data=new DataTransfer();data.setData('text/plain','pasted edit');el.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:data}))});
- assert.equal(await value(),'answer prefix spoken answer');await recording(true);
- // Stop leaves the editor locked until the provider's final text has arrived.
+ // Editing remains available and does not stop recording. Subsequent speech may overwrite it.
+ await editor.fill('manual edit during recording');
+ await textIs('manual edit during recording');await recording(true);
+ assert.equal(await page.evaluate(()=>window.stops),0);
+ await page.evaluate(()=>window.transcript('spoken answer continues'));
+ await textIs('answer prefix spoken answer continues');await recording(true);
+ // Editing and the Stop button remain available while the provider finishes.
  await page.evaluate(()=>{window.holdFinal=true});
  await page.getByText('Mic',{exact:true}).click();
- await page.waitForFunction(()=>window.stops===1);await editable(false);
+ await page.waitForFunction(()=>window.stops===1);await editable(true);
  await page.evaluate(()=>window.transcript('spoken answer finalized'));
  await textIs('answer prefix spoken answer finalized');
  await page.evaluate(()=>{window.voiceEvent({type:'stopped',reason:'user-stop'});window.endStream({failure:false})});
@@ -171,15 +189,20 @@ try {
  await reset();await page.evaluate(()=>window.longDraft());
  let expected='A long existing draft. '.repeat(1000);await textIs(expected);
  for(let iteration=0;iteration<5;iteration++) {
-   await start();await editable(false);
+   await start();await editable(true);
    await page.evaluate(i=>{window.transcript('next');window.transcript('next phrase');window.transcript('next phrase '+i)},iteration);
    expected+=(expected.endsWith(' ')?'':' ')+'next phrase '+iteration;
    await textIs(expected);await recording(true);await stop();
  }
  assert.equal(await page.evaluate(()=>window.stops),5,'only explicit Stop requests');
  await editor.fill('editable again');await textIs('editable again');
+ await start();await editor.fill('manual normal chat edit');
+ await textIs('manual normal chat edit');await recording(true);
+ await page.evaluate(()=>window.transcript('continued speech'));
+ await textIs('editable again continued speech');await recording(true);await stop();
 
- // Unexpected stream completion and server recording limits also release the lock.
+
+ // Unexpected stream completion and server recording limits leave editing available.
  await reset();await start();
  await page.evaluate(()=>window.endStream({failure:false}));
  await recording(false);await editable(true);
@@ -197,10 +220,10 @@ try {
  await page.evaluate(()=>window.disconnect());
  await page.waitForFunction(()=>document.querySelector('[data-status]').textContent.includes('Reconnecting'));
  for(let i=0;i<40;i++) {await page.evaluate(()=>window.audio());await page.waitForTimeout(100);}
- await recording(true);await editable(false);
+ await recording(true);await editable(true);
  assert.equal(await page.evaluate(()=>window.capturing),true);
  await page.getByText('Mic',{exact:true}).click();
- await page.waitForFunction(()=>!window.capturing);await editable(false);
+ await page.waitForFunction(()=>!window.capturing);await editable(true);
  assert.equal(await page.evaluate(()=>window.stops),0,'Stop waits for queued audio');
  await page.evaluate(()=>{window.offline=false});
  await recording(false);await editable(true);
@@ -209,5 +232,5 @@ try {
  assert.equal(await page.evaluate(()=>window.starts.slice(1).every(Boolean)),true);
  assert.deepEqual(await page.evaluate(()=>window.toasts),[]);
  assert.deepEqual(errors,[]);
- console.log('PASS: '+channel+' real editor: batched partials, read-only capture/finalization, repeated long drafts, target changes, late results and offline Stop');
+ console.log('PASS: '+channel+' real editor: focus and stop shortcuts, editable capture/finalization, batched partials, repeated long drafts, target changes, late results and offline Stop');
 } finally {await browser.close();}
