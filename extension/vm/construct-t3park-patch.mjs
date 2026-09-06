@@ -53,7 +53,7 @@ if (!["apply", "revert", "status", "mint-token"].includes(mode)) {
 
 // ---------------------------------------------------------------------------
 // Anchors — exact strings from the t3 dist bundle (tab-indented, un-minified;
-// verified against t3@0.0.33). Each must occur exactly once or we refuse.
+// verified against the target nightly). Each must occur exactly once or we refuse.
 // ---------------------------------------------------------------------------
 
 // Inside handleSdkTelemetryMessage: the rate_limit_event branch. We prepend a
@@ -62,18 +62,16 @@ const ANCHOR_RATELIMIT = '\t\tif (message.type === "rate_limit_event") {\n';
 const PATCH_RATELIMIT = ANCHOR_RATELIMIT +
   "\t\t\tglobalThis.__t3park && globalThis.__t3park.noteRateLimit(context, message);\n";
 
-// Inside handleResultMessage: status + errorMessage computation. Claude Code
+// Inside handleResultMessage: the unified result outcome. Claude Code
 // 2.1.232 can report an account-limit response as `subtype: success` while
 // also setting `is_error: true` and `api_error_status: 429`; T3's stock status
 // is therefore `completed`. The hook may override only that classified limit
 // result to `failed`, schedule the park, and add the auto-resume banner.
 const ANCHOR_RESULT =
-  "\t\tconst status = turnStatusFromResult(message);\n" +
-  "\t\tconst errorMessage = resultUserFacingError(message);\n";
+  "\t\tconst { status, errorMessage } = resultOutcome(message);\n";
 const PATCH_RESULT =
-  "\t\tconst __t3parkResult = globalThis.__t3park ? globalThis.__t3park.onTurnResult(context, turnStatusFromResult(message), resultUserFacingError(message), message) : null;\n" +
-  "\t\tconst status = __t3parkResult ? __t3parkResult.status : turnStatusFromResult(message);\n" +
-  "\t\tconst errorMessage = __t3parkResult ? __t3parkResult.errorMessage : resultUserFacingError(message);\n";
+  "\t\tconst __t3parkOutcome = resultOutcome(message);\n" +
+  "\t\tconst { status, errorMessage } = globalThis.__t3park ? globalThis.__t3park.onTurnResult(context, __t3parkOutcome.status, __t3parkOutcome.errorMessage, message) : __t3parkOutcome;\n";
 
 // ---------------------------------------------------------------------------
 // Runtime footer, appended to the bundle. Top-level ESM, so imports are legal;

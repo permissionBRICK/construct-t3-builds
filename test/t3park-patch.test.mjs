@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -16,12 +16,13 @@ const tmp = mkdtempSync(join(tmpdir(), "construct-t3park-test-"));
 const bundle = join(tmp, "bin.mjs");
 const tokenPath = join(tmp, "token");
 const original = `
-function turnStatusFromResult(message) {
-  return message.subtype === "success" ? "completed" : "failed";
-}
-function resultUserFacingError(message) {
-  if (message.subtype === "success" || !Array.isArray(message.errors)) return;
-  return message.errors[0];
+export let outcomeCalls = 0;
+function resultOutcome(message) {
+  outcomeCalls++;
+  return message.fixtureOutcome ?? {
+    status: message.subtype === "success" ? "completed" : "failed",
+    errorMessage: message.subtype === "success" ? undefined : message.errors?.[0],
+  };
 }
 export function handleSdkTelemetryMessage(context, message) {
 \t\tif (message.type === "rate_limit_event") {
@@ -30,8 +31,7 @@ export function handleSdkTelemetryMessage(context, message) {
 }
 export function handleResultMessage(context, message) {
   if (message.type !== "result") return;
-\t\tconst status = turnStatusFromResult(message);
-\t\tconst errorMessage = resultUserFacingError(message);
+\t\tconst { status, errorMessage } = resultOutcome(message);
   return { status, errorMessage };
 }
 `;
@@ -60,6 +60,19 @@ async function waitFor(predicate, timeoutMs = 3000) {
 }
 
 writeFileSync(tokenPath, "fixture-token\n");
+const resultAnchor = "\t\tconst { status, errorMessage } = resultOutcome(message);\n";
+for (const [name, invalid] of [
+  ["missing", original.replace(resultAnchor, "")],
+  ["duplicate", original + resultAnchor],
+]) {
+  ok(`guard: refuses a ${name} result anchor without modifying the bundle`, () => {
+    writeFileSync(bundle, invalid);
+    assert.equal(JSON.parse(runPatcher("status")).compatible, false);
+    assert.throws(() => runPatcher("apply"), (error) => error.status === 2);
+    assert.equal(readFileSync(bundle, "utf8"), invalid);
+    assert.equal(existsSync(bundle + ".t3park-orig"), false);
+  });
+}
 writeFileSync(bundle, original);
 
 const dispatches = [];
@@ -136,6 +149,29 @@ try {
   });
   ok("classification: ordinary success remains completed", () => {
     assert.deepEqual(ordinary, { status: "completed", errorMessage: undefined });
+    assert.equal(fixture.outcomeCalls, 1, "compute the upstream outcome exactly once per result");
+  });
+  ok("classification: preserves upstream non-limit outcomes and errors", () => {
+    for (const status of ["failed", "interrupted", "cancelled"]) {
+      const outcome = { status, errorMessage: "Upstream terminal error" };
+      assert.deepEqual(fixture.handleResultMessage({ session: { threadId: "non-limit" } }, {
+        type: "result", fixtureOutcome: outcome,
+      }), outcome);
+    }
+    assert.equal(fixture.outcomeCalls, 4);
+  });
+  ok("classification: preserves the upstream outcome when the runtime is unavailable", () => {
+    const runtime = globalThis.__t3park;
+    try {
+      delete globalThis.__t3park;
+      const outcome = { status: "failed", errorMessage: "Claude API is overloaded (529). Try again shortly." };
+      assert.deepEqual(fixture.handleResultMessage({}, {
+        type: "result", fixtureOutcome: outcome,
+      }), outcome);
+      assert.equal(fixture.outcomeCalls, 5);
+    } finally {
+      globalThis.__t3park = runtime;
+    }
   });
   const context = { session: { threadId } };
   const resetsAt = Math.floor((Date.now() + 3600000) / 1000);
