@@ -20,6 +20,7 @@ export const startVoiceInput = createRuntimeCommand(connectionAtomRuntime, {
   execute: (target: {
     readonly environmentId: EnvironmentId;
     readonly sessionId: string;
+    readonly resume: boolean;
     /** Absent leaves the choice to the server, which records on the host. */
     readonly source?: VoiceInputSource;
     readonly onEvent: (event: VoiceInputStreamEvent) => void;
@@ -28,6 +29,7 @@ export const startVoiceInput = createRuntimeCommand(connectionAtomRuntime, {
       target.environmentId,
       runStream(WS_METHODS.voiceInputStart, {
         sessionId: target.sessionId,
+        resume: target.resume,
         ...(target.source === undefined ? {} : { source: target.source }),
       }),
     ).pipe(Stream.runForEach((event) => Effect.sync(() => target.onEvent(event)))),
@@ -53,12 +55,14 @@ export const sendVoiceAudio = createRuntimeCommand(connectionAtomRuntime, {
     readonly environmentId: EnvironmentId;
     readonly sessionId: string;
     readonly chunk: Uint8Array;
+    readonly sequence: number;
   }) =>
     runInEnvironment(
       target.environmentId,
       request(WS_METHODS.voiceInputAudio, {
         sessionId: target.sessionId,
         chunk: target.chunk,
+        sequence: target.sequence,
       }),
     ),
 });

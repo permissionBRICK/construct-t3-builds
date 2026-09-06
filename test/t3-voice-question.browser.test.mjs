@@ -29,14 +29,20 @@ import React, {useState, useRef, useCallback, useEffect} from ${JSON.stringify(s
 import {createRoot} from ${JSON.stringify(sourceRequire.resolve('react-dom/client'))};
 type VoiceInsertionState${types}
 const environmentId = 'env'; const environmentUnavailable = null; const supportsVoiceInput = true;
-const voiceInputSource = {source:'host'}; const composerDraftTarget = 'thread';
+const voiceInputSource = {source:window.clientVoice ? 'client' : 'host'}; const composerDraftTarget = 'thread';
 let nextSession = 0; const composerTargetKey = x => x; const randomUUID = () => String(++nextSession);
-const AsyncResult = {isFailure: () => false}; const toastManager = {add: x => {throw Error(JSON.stringify(x))}};
+const AsyncResult = {isFailure: r => r.failure, isSuccess: r => !r.failure}; const toastManager = {add: x => {throw Error(JSON.stringify(x))}};
 const collapseExpandedComposerCursor = (v,c) => c; const expandCollapsedComposerCursor = (v,c) => c;
 const detectComposerTrigger = () => null;
 const replaceTextRange = (value,start,end,text) => ({text:value.slice(0,start)+text+value.slice(end),cursor:start+text.length});
-const createVoiceAudioSender = () => {throw Error('unexpected client transport')};
-const startClientAudioCapture = () => {throw Error('unexpected client capture')};
+import {createVoiceAudioSender} from ${JSON.stringify(path.join(root, `patches/t3code-${channel}/overlays/apps/web/src/voice/voiceAudioSender.ts`))};
+import {recoverVoiceSubscription} from ${JSON.stringify(path.join(root, `patches/t3code-${channel}/overlays/apps/web/src/voice/voiceSessionRecovery.ts`))};
+const canReconnectVoiceInput = () => true;
+const startClientAudioCapture = ({onChunk}) => {
+ window.capturing=true;
+ window.audio=()=>{window.captured+=3200;onChunk(new Uint8Array(3200))};
+ return {stop:()=>{window.capturing=false},finish:async()=>{window.capturing=false}};
+};
 const MAX_PENDING_VOICE_CHUNKS = 8; const describeVoiceInputFailure = () => 'failure';
 function Harness() {
  const [prompt,setPrompt] = useState('chat draft stays here');
@@ -57,9 +63,28 @@ function Harness() {
  useEffect(() => {promptRef.current = activePendingProgress?.customAnswer ?? prompt}, [pending,prompt]);
  const [isVoiceRecording,setIsVoiceRecording] = useState(false);
  const [voiceLevel,setVoiceLevel] = useState(0);
+ const [voiceStatus,setVoiceStatus] = useState("Recording");
  const voiceInsertionRef = useRef(null); const voiceShortcutRef = useRef(null);
- const runStartVoiceInput = ({onEvent}) => {window.transcript=text=>onEvent({type:'transcript',text});return new Promise(()=>{})};
- const runStopVoiceInput = useCallback(() => {window.stops++}, []); const runSendVoiceAudio = () => {};
+ const runStartVoiceInput = ({onEvent,resume}) => {
+   window.starts.push(resume);
+   if(window.offline) return Promise.resolve({failure:true,cause:{}});
+   window.transcript=text=>onEvent({type:'transcript',text});
+   window.voiceEvent=onEvent;
+   queueMicrotask(()=>onEvent({type:'listening'}));
+   return new Promise(resolve=>{window.endStream=resolve;window.disconnect=()=>{window.offline=true;resolve({failure:true,cause:{}})}});
+ };
+ const runStopVoiceInput = useCallback(async () => {
+   window.stops++;
+   if(window.offline) return {failure:true};
+   window.voiceEvent?.({type:'stopped',reason:'user-stop'});
+   window.endStream?.({failure:false});
+   return {failure:false,value:{stopped:true}};
+ }, []);
+ const runSendVoiceAudio = async ({chunk,sequence}) => {
+   if(window.offline) return {failure:true};
+   if(sequence===window.received) window.received+=chunk.length;
+   return {failure:false,value:{accepted:true,nextSequence:window.received}};
+ };
  ${replacement}
  ${voice}
  window.changeQuestion = () => setPending(p => ({...p, id:'question-2'}));
@@ -69,9 +94,9 @@ function Harness() {
  return React.createElement('form',{'data-chat-composer-form':'true'},
    React.createElement('textarea',{ref:element,value:pending?.customAnswer ?? prompt,onChange:e=>pending?setPending({...pending,customAnswer:e.target.value}):setPrompt(e.target.value)}),
    React.createElement('button',{type:'button',onPointerDown:e=>e.preventDefault(),onClick:toggleVoiceRecording,'data-recording':String(isVoiceRecording)},'Mic'),
-   React.createElement('output',null,prompt));
+   React.createElement('output',null,prompt), React.createElement('span',{'data-status':true},voiceStatus));
 }
-window.stops=0;window.writes=[];
+window.stops=0;window.writes=[];window.starts=[];window.offline=false;window.received=0;window.captured=0;
 createRoot(document.getElementById('root')).render(React.createElement(Harness));
 `;
 const browser = await chromium.launch({headless:true, ...(process.env.T3_TEST_CHROMIUM ? {executablePath:process.env.T3_TEST_CHROMIUM} : {})});
@@ -80,9 +105,10 @@ try {
  const page = await browser.newPage();
  page.setDefaultTimeout(2000);
  const errors=[];page.on('pageerror',e=>{errors.push(e.message); console.error('Browser:',e.message)});
- async function reset() {
+ async function reset(client=false) {
    await page.goto('about:blank');
    await page.setContent('<div id="root"></div>');
+   await page.evaluate(value=>{window.clientVoice=value},client);
    await page.addScriptTag({content:bundle.outputFiles[0].text});
    await page.locator('textarea').waitFor();
  }
@@ -118,6 +144,29 @@ try {
  await page.getByText('Mic',{exact:true}).click();await recording(true);
  await page.evaluate(()=>window.transcript('normal chat'));
  await page.waitForFunction(()=>document.querySelector('textarea').value==='chat draft stays here normal chat');
+ // Client transport: a four-second outage keeps the microphone open and Stop drains after reconnect.
+ await reset(true);
+ await page.locator("textarea").evaluate(el=>el.setSelectionRange(el.value.length,el.value.length));
+ await page.getByText('Mic',{exact:true}).click();
+ await recording(true);
+ await page.evaluate(()=>{window.audio();window.transcript('first words')});
+ await page.waitForFunction(()=>window.received===3200);
+ await page.evaluate(()=>window.disconnect());
+ await page.waitForFunction(()=>document.querySelector('[data-status]').textContent.includes('Reconnecting'));
+ for(let i=0;i<40;i++) {
+   await page.evaluate(()=>window.audio());
+   await page.waitForTimeout(100);
+ }
+ await recording(true);
+ assert.equal(await page.evaluate(()=>window.capturing),true);
+ await page.getByText('Mic',{exact:true}).click();
+ await page.waitForFunction(()=>!window.capturing);
+ assert.equal(await page.evaluate(()=>window.stops),0, 'Stop waits for queued audio');
+ await page.evaluate(()=>{window.offline=false});
+ await recording(false);
+ assert.equal(await page.evaluate(()=>window.received),await page.evaluate(()=>window.captured));
+ assert.equal(await page.locator('textarea').inputValue(),'answer prefix first words');
+ assert.equal(await page.evaluate(()=>window.starts.slice(1).every(Boolean)),true,'reattach uses the same established session');
  assert.deepEqual(errors,[]);
  console.log('PASS: '+channel+' question dictation, cumulative transcripts, stale refs, manual edits, question switching, and normal chat');
 } finally {await browser.close();}

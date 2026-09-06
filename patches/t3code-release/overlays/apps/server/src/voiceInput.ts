@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off - this module is the
-// callback boundary for a native recorder and the ws client; their lifetimes are
-// still scope-bound by the Effect stream returned at the bottom of the file.
+// callback boundary for a native recorder and the ws client; their lifetimes
+// survive a subscriber disconnect for a bounded reconnection window.
 import {
   VoiceInputError,
   type VoiceInputSource,
@@ -18,11 +18,12 @@ import WebSocket from "ws";
 
 const VOICE_STREAM_URL = "wss://api.anthropic.com/api/ws/speech_to_text/voice_stream";
 const KEEP_ALIVE_MS = 8_000;
-const SILENCE_TIMEOUT_MS = 15_000;
+export const VOICE_RECONNECT_GRACE_MS = 30_000;
+const AUDIO_TIMEOUT_MS = 35_000;
 const MAX_RECORDING_MS = 120_000;
 const CLOSE_GRACE_MS = 3_000;
 const LEVEL_INTERVAL_MS = 75;
-export const FIRST_CLIENT_CHUNK_TIMEOUT_MS = 8_000;
+export const FIRST_CLIENT_CHUNK_TIMEOUT_MS = 35_000;
 export const NO_CLIENT_AUDIO_MESSAGE = "No microphone audio arrived from the client.";
 export const HOST_BRIDGE_UNAVAILABLE_MESSAGE =
   "The host microphone bridge is unavailable. Enable microphone passthrough in Construct and keep its VS Code extension running.";
@@ -138,9 +139,7 @@ class ClientAudioSource implements VoiceAudioSource {
 
   start(handlers: VoiceAudioSourceHandlers): void {
     this.handlers = handlers;
-    // A client that never gets microphone permission would otherwise sit in a
-    // silent "listening" state until the 15 s silence timer ends it with no
-    // explanation at all.
+    // Allow the reconnect window before reporting missing microphone audio.
     this.firstChunkTimer = setTimeout(
       () => handlers.fail(NO_CLIENT_AUDIO_MESSAGE),
       FIRST_CLIENT_CHUNK_TIMEOUT_MS,
@@ -214,13 +213,19 @@ function voiceStreamUrl(): string {
   return `${VOICE_STREAM_URL}?${query.toString()}`;
 }
 
-class VoiceSession {
+export class VoiceSession {
   readonly id: string;
-  private readonly callbacks: VoiceSessionCallbacks;
+  private callbacks: VoiceSessionCallbacks | null = null;
+  private detachTimer: NodeJS.Timeout | null = null;
+  private retentionTimer: NodeJS.Timeout | null = null;
+  private terminalError: VoiceInputError | null = null;
+  private nextSequence = 0;
+  private listening = false;
+  private stopReason = "user-stop";
   private readonly source: VoiceAudioSource;
   private socket: WebSocket | null = null;
   private keepAlive: NodeJS.Timeout | null = null;
-  private silenceTimer: NodeJS.Timeout | null = null;
+  private audioTimer: NodeJS.Timeout | null = null;
   private maximumTimer: NodeJS.Timeout | null = null;
   private closeTimer: NodeJS.Timeout | null = null;
   private committed: string[] = [];
@@ -229,16 +234,46 @@ class VoiceSession {
   private stopping = false;
   private ended = false;
 
-  constructor(id: string, source: VoiceAudioSource, callbacks: VoiceSessionCallbacks) {
+  constructor(id: string, source: VoiceAudioSource) {
     this.id = id;
     this.source = source;
-    this.callbacks = callbacks;
   }
 
-  /** Returns false when this session has no use for client-pushed audio. */
-  pushAudio(chunk: Uint8Array): boolean {
-    if (this.stopping || this.ended) return false;
-    return this.source.push(chunk);
+  attach(callbacks: VoiceSessionCallbacks): void {
+    if (this.detachTimer) clearTimeout(this.detachTimer);
+    this.detachTimer = null;
+    this.callbacks = callbacks;
+    if (this.fullTranscript())
+      callbacks.event({ type: "transcript", text: this.fullTranscript(), final: this.ended });
+    if (this.terminalError) callbacks.error(this.terminalError);
+    else if (this.ended) {
+      callbacks.event({ type: "stopped", reason: this.stopReason });
+      callbacks.complete();
+    } else if (this.listening) callbacks.event({ type: "listening" });
+  }
+
+  detach(callbacks: VoiceSessionCallbacks): void {
+    // A late finalizer from an old socket must not detach its replacement.
+    if (this.callbacks !== callbacks) return;
+    this.callbacks = null;
+    if (this.ended) return;
+    this.detachTimer = setTimeout(() => {
+      this.fail("Voice connection did not return within 30 seconds.", true);
+    }, VOICE_RECONNECT_GRACE_MS);
+  }
+
+  /** Byte offsets provide ordered delivery and deduplicate lost acknowledgements. */
+  pushAudio(chunk: Uint8Array, sequence: number): { accepted: boolean; nextSequence: number } {
+    let accepted = false;
+    if (!this.stopping && !this.ended && this.source.kind === "client") {
+      if (sequence < this.nextSequence && sequence + chunk.byteLength <= this.nextSequence)
+        accepted = true;
+      else if (sequence === this.nextSequence && this.socket?.readyState === WebSocket.OPEN) {
+        accepted = this.source.push(chunk);
+        if (accepted) this.nextSequence += chunk.byteLength;
+      }
+    }
+    return { accepted, nextSequence: this.nextSequence };
   }
 
   start(): void {
@@ -258,11 +293,13 @@ class VoiceSession {
         socket.send(JSON.stringify({ type: "CloseStream" }));
         return;
       }
-      this.callbacks.event({ type: "listening" });
+      this.listening = true;
+      this.callbacks?.event({ type: "listening" });
       socket.send(JSON.stringify({ type: "KeepAlive" }));
       this.source.start({
         audio: (chunk) => {
           if (this.stopping) return;
+          this.resetAudioTimer();
           if (this.source.emitsLevels) this.emitAudioLevel(chunk);
           if (socket.readyState === WebSocket.OPEN) socket.send(chunk);
         },
@@ -272,8 +309,8 @@ class VoiceSession {
         if (socket.readyState === WebSocket.OPEN)
           socket.send(JSON.stringify({ type: "KeepAlive" }));
       }, KEEP_ALIVE_MS);
-      this.maximumTimer = setTimeout(() => this.stop(), MAX_RECORDING_MS);
-      this.resetSilenceTimer();
+      this.maximumTimer = setTimeout(() => this.stop("recording-limit"), MAX_RECORDING_MS);
+      this.resetAudioTimer();
     });
 
     socket.on("message", (raw) => {
@@ -286,8 +323,7 @@ class VoiceSession {
       if (message.type === "TranscriptInterim" || message.type === "TranscriptText") {
         if (message.data) {
           this.interim = message.data;
-          this.callbacks.event({ type: "transcript", text: this.fullTranscript(), final: false });
-          this.resetSilenceTimer();
+          this.callbacks?.event({ type: "transcript", text: this.fullTranscript(), final: false });
         }
         return;
       }
@@ -295,8 +331,7 @@ class VoiceSession {
         const segment = this.interim.trim();
         if (segment) this.committed.push(segment);
         this.interim = "";
-        this.callbacks.event({ type: "transcript", text: this.fullTranscript(), final: true });
-        this.resetSilenceTimer();
+        this.callbacks?.event({ type: "transcript", text: this.fullTranscript(), final: true });
         return;
       }
       if (message.type === "TranscriptError") {
@@ -308,12 +343,17 @@ class VoiceSession {
     socket.on("error", (error) => {
       if (!this.stopping) this.fail(`Claude voice WebSocket error: ${error.message}`, true);
     });
-    socket.on("close", () => this.finish());
+    socket.on("close", (code) => {
+      if (!this.stopping)
+        this.fail(`Transcription connection closed unexpectedly (code ${code}).`, true);
+      else this.finish();
+    });
   }
 
-  stop(): void {
+  stop(reason = "user-stop"): void {
     if (this.stopping || this.ended) return;
     this.stopping = true;
+    this.stopReason = reason;
     this.source.stop();
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify({ type: "CloseStream" }));
@@ -321,6 +361,10 @@ class VoiceSession {
     } else {
       this.finish();
     }
+  }
+
+  failToStart(message: string): void {
+    this.fail(message, true);
   }
 
   abort(): void {
@@ -345,17 +389,24 @@ class VoiceSession {
     }
     const rms = sampleCount > 0 ? Math.sqrt(sumSquares / sampleCount) : 0;
     const value = Math.min(1, Math.max(0, (rms - 0.006) * 10));
-    this.callbacks.event({ type: "level", value });
+    this.callbacks?.event({ type: "level", value });
   }
 
-  private resetSilenceTimer(): void {
-    if (this.silenceTimer) clearTimeout(this.silenceTimer);
-    this.silenceTimer = setTimeout(() => this.stop(), SILENCE_TIMEOUT_MS);
+  private resetAudioTimer(): void {
+    if (this.audioTimer) clearTimeout(this.audioTimer);
+    this.audioTimer = setTimeout(
+      () => this.fail("Microphone audio stopped arriving for 35 seconds.", true),
+      AUDIO_TIMEOUT_MS,
+    );
   }
 
   private fail(message: string, fatal: boolean): void {
     if (this.ended) return;
-    this.callbacks.error(new VoiceInputError({ message, fatal }));
+    this.terminalError = new VoiceInputError({ message, fatal });
+    void Effect.runFork(
+      Effect.logWarning("Voice session stopped", { sessionId: this.id, reason: message }),
+    );
+    this.callbacks?.error(this.terminalError);
     this.abort();
   }
 
@@ -365,12 +416,29 @@ class VoiceSession {
     this.source.stop();
     if (this.socket && this.socket.readyState !== WebSocket.CLOSED) this.socket.terminate();
     this.socket = null;
-    for (const timer of [this.keepAlive, this.silenceTimer, this.maximumTimer, this.closeTimer]) {
+    for (const timer of [
+      this.keepAlive,
+      this.audioTimer,
+      this.maximumTimer,
+      this.closeTimer,
+      this.detachTimer,
+    ]) {
       if (timer) clearTimeout(timer);
     }
-    this.keepAlive = this.silenceTimer = this.maximumTimer = this.closeTimer = null;
-    activeVoiceSessions.delete(this.id);
-    if (notify) this.callbacks.complete();
+    this.keepAlive = this.audioTimer = this.maximumTimer = this.closeTimer = null;
+    this.detachTimer = null;
+    // Retain the final transcript/reason so a reconnect cannot restart a finished recording.
+    this.retentionTimer = setTimeout(() => {
+      if (activeVoiceSessions.get(this.id) === this) activeVoiceSessions.delete(this.id);
+    }, VOICE_RECONNECT_GRACE_MS);
+    this.retentionTimer.unref?.();
+    if (notify) {
+      void Effect.runFork(
+        Effect.logInfo("Voice session stopped", { sessionId: this.id, reason: this.stopReason }),
+      );
+      this.callbacks?.event({ type: "stopped", reason: this.stopReason });
+      this.callbacks?.complete();
+    }
   }
 }
 
@@ -382,18 +450,30 @@ const activeVoiceSessions = new Map<string, VoiceSession>();
  * learns nothing beyond "not accepted".
  */
 export function routeVoiceAudio(
-  sessions: ReadonlyMap<string, { pushAudio: (chunk: Uint8Array) => boolean }>,
+  sessions: ReadonlyMap<
+    string,
+    {
+      pushAudio: (
+        chunk: Uint8Array,
+        sequence: number,
+      ) => { accepted: boolean; nextSequence: number };
+    }
+  >,
   sessionId: string,
   chunk: Uint8Array,
-): boolean {
-  return sessions.get(sessionId)?.pushAudio(chunk) ?? false;
+  sequence: number,
+): { accepted: boolean; nextSequence: number } {
+  return (
+    sessions.get(sessionId)?.pushAudio(chunk, sequence) ?? { accepted: false, nextSequence: 0 }
+  );
 }
 
 export function pushVoiceAudio(
   sessionId: string,
   chunk: Uint8Array,
-): Effect.Effect<{ accepted: boolean }> {
-  return Effect.sync(() => ({ accepted: routeVoiceAudio(activeVoiceSessions, sessionId, chunk) }));
+  sequence: number,
+): Effect.Effect<{ accepted: boolean; nextSequence: number }> {
+  return Effect.sync(() => routeVoiceAudio(activeVoiceSessions, sessionId, chunk, sequence));
 }
 
 export function stopVoiceInput(sessionId: string): Effect.Effect<{ stopped: boolean }> {
@@ -407,30 +487,43 @@ export function stopVoiceInput(sessionId: string): Effect.Effect<{ stopped: bool
 export function startVoiceInput(
   sessionId: string,
   source: VoiceInputSource | undefined,
+  resume: boolean,
 ): Stream.Stream<VoiceInputStreamEvent, VoiceInputError> {
   return Stream.callback<VoiceInputStreamEvent, VoiceInputError>((queue) =>
     Effect.acquireRelease(
       Effect.sync(() => {
-        for (const active of activeVoiceSessions.values()) active.stop();
-        const session = new VoiceSession(sessionId, createVoiceAudioSource(source), {
+        const callbacks: VoiceSessionCallbacks = {
           event: (event) => void Effect.runFork(Queue.offer(queue, event)),
           error: (error) => void Effect.runFork(Queue.fail(queue, error)),
-          complete: () =>
-            void Effect.runFork(
-              Queue.offer(queue, { type: "stopped" }).pipe(Effect.andThen(Queue.end(queue))),
-            ),
-        });
-        activeVoiceSessions.set(sessionId, session);
-        try {
-          session.start();
-        } catch (error) {
-          session.abort();
-          const message = error instanceof Error ? error.message : String(error);
-          void Effect.runFork(Queue.fail(queue, new VoiceInputError({ message, fatal: true })));
+          complete: () => void Effect.runFork(Queue.end(queue)),
+        };
+        let session = activeVoiceSessions.get(sessionId);
+        if (!session && resume) {
+          callbacks.error(
+            new VoiceInputError({
+              message: "The voice session expired. Start a new recording.",
+              fatal: true,
+            }),
+          );
+          return () => {};
         }
-        return session;
+        if (session) session.attach(callbacks);
+        else {
+          for (const active of activeVoiceSessions.values())
+            active.stop("replaced-by-new-recording");
+          session = new VoiceSession(sessionId, createVoiceAudioSource(source));
+          activeVoiceSessions.set(sessionId, session);
+          session.attach(callbacks);
+          try {
+            session.start();
+          } catch (error) {
+            session.failToStart(error instanceof Error ? error.message : String(error));
+          }
+        }
+        const attached = session;
+        return () => attached.detach(callbacks);
       }),
-      (session) => Effect.sync(() => session.stop()),
+      (detach) => Effect.sync(detach),
     ).pipe(Effect.forkScoped),
   );
 }

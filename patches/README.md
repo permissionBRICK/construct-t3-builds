@@ -73,6 +73,17 @@ through re-indentation) and the list of `conflicts`.
 ## What the inventories add to T3 Code
 
 - **Voice input** (`voiceInput.*` RPCs, composer mic button, client or host capture).
+  Client recordings retain up to 30 seconds of unacknowledged PCM and reattach the
+  same server session after connection loss. Ordered byte offsets make retries
+  idempotent; Stop flushes capture and drains uploads before closing transcription.
+  The server retains detached sessions and completed results for 30 seconds.
+  Microphone inactivity (35 seconds) is separate from transcription latency;
+  the existing two-minute recording limit has an explicit stop reason. Browser
+  microphone interruptions and unexpected provider socket closure report errors.
+  Reconnection to the transcription provider itself is not attempted.
+  Regression coverage includes delayed/lost uploads, scope cancellation and
+  reattachment, final-result replay, offline Stop, and real browser AudioWorklet
+  capture/flush. The publisher runs the voice unit and browser tests for each pair.
 - **Public base URL** (`T3CODE_PUBLIC_BASE_URL` for pairing URLs behind the TLS proxy).
 - **Construct updates** in the Desktop app (update Construct / reprovision the VM).
 - **Disk-space warning** (`construct.diskSpace` RPC, capability `constructDiskSpace`):

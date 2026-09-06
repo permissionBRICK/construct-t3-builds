@@ -175,9 +175,18 @@ class T3VoiceCaptureProcessor extends AudioWorkletProcessor {
     this.size = options.processorOptions.blockSize;
     this.buffer = new Float32Array(this.size);
     this.filled = 0;
+    this.finished = false;
+    this.port.onmessage = (event) => {
+      if (event.data !== "finish") return;
+      if (this.filled) this.port.postMessage(this.buffer.slice(0, this.filled));
+      this.filled = 0;
+      this.finished = true;
+      this.port.postMessage("finished");
+    };
   }
 
   process(inputs) {
+    if (this.finished) return true;
     const channel = inputs[0] && inputs[0][0];
     if (!channel) return true;
     for (let index = 0; index < channel.length; index += 1) {
@@ -198,6 +207,8 @@ registerProcessor("t3-voice-capture", T3VoiceCaptureProcessor);
 export type ClientAudioCapture = {
   /** Idempotent: releases the microphone, the graph and the audio context. */
   stop(): void;
+  /** Flush the last partial audio block before releasing capture. */
+  finish(): Promise<void>;
 };
 
 export type ClientAudioCaptureOptions = {
@@ -220,8 +231,13 @@ export function startClientAudioCapture(options: ClientAudioCaptureOptions): Cli
   let workletNode: AudioWorkletNode | null = null;
   let moduleUrl: string | null = null;
   let lastLevelAt = 0;
+  let finishResolve: (() => void) | null = null;
+  let finishTimer: ReturnType<typeof setTimeout> | null = null;
 
   const release = () => {
+    if (finishTimer) clearTimeout(finishTimer);
+    finishResolve?.();
+    finishResolve = null;
     if (workletNode) {
       workletNode.port.close();
       workletNode.disconnect();
@@ -257,6 +273,14 @@ export function startClientAudioCapture(options: ClientAudioCaptureOptions): Cli
         },
       });
       if (stopped) return release();
+      for (const track of stream.getAudioTracks()) {
+        track.addEventListener("ended", () =>
+          fail("Android or the browser stopped the microphone. Start a new recording."),
+        );
+        track.addEventListener("mute", () =>
+          fail("The browser interrupted microphone capture. Your transcript has been kept."),
+        );
+      }
 
       // Browsers that honour the hint hand back 16 kHz directly; the rest keep
       // the device rate and the resampler below deals with it.
@@ -266,6 +290,13 @@ export function startClientAudioCapture(options: ClientAudioCaptureOptions): Cli
         context = new AudioContext();
       }
       if (context.state === "suspended") await context.resume();
+      context.addEventListener("statechange", () => {
+        if (!stopped && context && context.state !== "running") {
+          fail(
+            "The browser paused microphone capture. Keep the app visible and start a new recording.",
+          );
+        }
+      });
       if (stopped) return release();
 
       moduleUrl = URL.createObjectURL(
@@ -285,6 +316,11 @@ export function startClientAudioCapture(options: ClientAudioCaptureOptions): Cli
       });
       workletNode.port.addEventListener("message", (event) => {
         if (stopped) return;
+        if (event.data === "finished") {
+          stopped = true;
+          release();
+          return;
+        }
         const samples = resample((event as MessageEvent<Float32Array>).data);
         if (samples.length === 0) return;
         const now = Date.now();
@@ -307,6 +343,21 @@ export function startClientAudioCapture(options: ClientAudioCaptureOptions): Cli
   })();
 
   return {
+    finish: () => {
+      if (stopped || !workletNode) {
+        stopped = true;
+        release();
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => {
+        finishResolve = resolve;
+        finishTimer = setTimeout(
+          () => fail("The browser stopped responding while finishing microphone capture."),
+          1_000,
+        );
+        workletNode!.port.postMessage("finish");
+      });
+    },
     stop: () => {
       if (stopped) return;
       stopped = true;
