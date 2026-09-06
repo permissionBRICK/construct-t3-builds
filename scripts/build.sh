@@ -9,7 +9,11 @@ CONSTRUCT_VERSION="$(field buildRepositoryCommit)"
 T3CODE_CHANNEL="$(field channel)"
 export T3CODE_BUILD_REPOSITORY_COMMIT="${CONSTRUCT_VERSION}"
 export REPO_DIR T3CODE_SOURCE_VERSION T3CODE_INVENTORY CONSTRUCT_VERSION T3CODE_CHANNEL
-export T3CODE_CACHE_ROOT="$work/sources" T3CODE_ARTIFACT_ROOT="$work/artifacts"
+# NSIS 3's native include handling crashes on long pnpm paths. Keep compilation
+# under a short temporary root even when Actions checks out under a long path.
+export T3CODE_CACHE_ROOT="$(mktemp -d /tmp/t3-src.XXXXXX)"
+trap 'rm -r -- "$T3CODE_CACHE_ROOT"' EXIT
+export T3CODE_ARTIFACT_ROOT="$work/artifacts"
 export T3CODE_COMPILER_CACHE="${T3CODE_COMPILER_CACHE:-$work/compiler}"
 export T3CODE_STATUS_PATH="$work/status" T3CODE_LAUNCHER="$work/t3"
 expected_node="$(field nodeVersion)"
