@@ -1,77 +1,77 @@
 # Construct T3 Code builds
 
-This public repository owns the build workflow and binary releases for
+This public repository owns the stable and nightly patches, source transforms,
+overlays, runtime patchers, build recipe, tests, and binary releases for
 [The Construct](https://github.com/permissionBRICK/The-Construct)'s patched T3 Code.
-It does not fork the patch inventory. Every build reads an exact public Construct
-commit and an exact upstream stable tag.
+Builds never read Construct main. Patch repairs and feature changes belong here.
+The inventories target only the latest tag of their own channel, following
+[the patch rules](patches/README.md).
 
-Every 30 minutes (at :17 and :47), on pushes here, and on manual workflow dispatch:
+## Build and publish
 
-1. Resolve `t3@latest` from npm and hash the relevant Construct build inputs.
-2. Reuse an existing complete release for that version and patch/recipe hash.
-   **Unrelated Construct commits do not rebuild binaries.** Nightly-only edits do
-   not invalidate a release built with the stable inventory.
-3. If a build is needed, check the complete `release` inventory against the exact
-   stable source. If it fails, try the complete prepared `nightly` inventory
-   against that same stable tag. Never mix inventories or install a nightly
-   upstream version into the stable channel.
-4. Build the patched server/web/Desktop once. Package a Linux runtime with its
-   native dependency closure and pinned Node, plus the unsigned Windows installer.
-5. Extract the Linux package into a temporary directory and verify CLI startup,
-   a real native PTY, and the served web UI. Verify the Windows PE and NSIS archive.
-6. Upload assets to a draft release, download them again to verify checksums,
-   then publish the complete pair as latest. Patch/build failures leave the
-   previous published release untouched. Jarvis Lite repairs are picked up on
-   the next poll after they reach Construct main.
+Pushes to main, manual dispatch, and the :17/:47 upstream poll run independent
+stable and nightly jobs. Each resolves its npm tag (`latest` or `nightly`), checks
+its own inventory against that exact upstream tag, and builds a matched Linux
+server / Windows desktop pair. Stable never borrows the nightly inventory.
+Complete releases with the same version and recipe identity are reused. Failed
+validation or builds leave the last published pair available.
 
-The Windows installer is built on Ubuntu using Wine; CI does not exercise the
-interactive Windows installation UI. Linux targets Ubuntu 24.04 x64. The bundled
-Node runtime prevents global Node upgrades from breaking native dependencies.
+The builder compiles shared JavaScript once, packages a Linux runtime with pinned
+Node and its native dependencies, and cross-compiles the Windows NSIS installer
+using Wine. It smoke-tests Linux CLI, native PTY and HTTP serving, checks Windows
+PE/NSIS structure, uploads to a draft, downloads and verifies every asset, and
+only then publishes. Windows installation UI is not exercised by Linux CI.
 
-## Assets and identity
+Stable releases become GitHub's **latest**. Nightly releases are **prereleases**
+and never replace latest. Consumers select a complete published nightly release
+from the releases API. Both channels then use immutable asset URLs from the
+manifest and verify size/SHA-256. No published asset is overwritten.
 
-- `T3Code-Construct-Setup.exe`
-- `t3code-server-linux-x64.tar.gz` (`bin/t3` is the entry point)
-- `manifest.json` (exact versions, commits, inventory, identity, asset URLs/hashes)
-- `SHA256SUMS`
+Assets: `T3Code-Construct-Setup.exe`, `t3code-server-linux-x64.tar.gz`,
+`manifest.json`, `SHA256SUMS`. Tags: `t3-<version>-<full build hash>`.
+Stable discovery: `/releases/latest/download/manifest.json`.
+Nightly discovery: `/repos/permissionBRICK/construct-t3-builds/releases`, filter
+non-draft prereleases with a nightly identity and all four assets.
 
-Tags are immutable identities: `t3-<upstream version>-<full build hash>`.
-Fetch `/releases/latest/download/manifest.json` to select the last validated pair,
-then use its immutable asset URLs. Always verify SHA-256 before installing.
+## Identity and local builds
 
-The source patch hash comes from Construct's `t3_build_integration_hash`: selected
-inventory, overlays, source transformer, runtime patchers, and artifact recipe.
-The publisher recipe hash covers `config.json`, `scripts/build.sh`, and
-`scripts/package-linux.mjs`. `patchHash` in the distributed manifest combines both
-so a packaging/runtime change also updates the host. `sourcePatchHash` retains the
-original Construct hash. `buildHash` additionally includes the upstream version.
-Commit IDs are provenance, never cache keys. Workflow/docs/test changes do not
-invalidate binaries. Change `formatVersion` in config for an explicit migration.
+The selected inventory, transformer, two runtime patchers and artifact recipe
+form `sourcePatchHash`. Publisher packaging/config inputs contribute to
+`patchHash`; upstream version and channel additionally identify `buildHash`.
+Commit IDs are provenance, not cache keys. Docs/workflow/test changes alone do
+not rebuild binaries. Manifests record `buildRepositoryCommit` and upstream commit.
 
-Package downloads, Cargo compilation, and Electron downloads use Actions caches
-across releases. JavaScript task caches are not enabled: testing three successive
-releases found no cross-release build-task hits.
+Construct defaults to prebuilt pairs for both channels. Explicit local builds
+fetch main at one resolved commit into `/var/cache/construct/t3code-builds/<sha>`.
+The server manifest records that commit; deferred Windows packaging uses the
+same checkout even if main advances. `bin/build-t3code.sh` here is the real builder;
+Construct's corresponding script is only its provisioning entry point.
 
-## Credentials and triggers
+Jarvis Lite polls both npm channels every 15 minutes. Only changed versions start
+patch validation and, on conflict, a repair PR in this repository. Merging the PR
+triggers publication. Claude/OpenCode repairs still belong to Construct.
 
-There are **no cross-repository secrets**. Public Construct/upstream reads need no
-private credential. Publishing and the monthly activity marker use this repo's
-own automatically supplied `GITHUB_TOKEN` (`contents: write`). The build step
-receives no GitHub token and checkouts do not retain credentials.
+No cross-repository credentials or dispatch secrets are needed. Publishing uses
+this repository's `GITHUB_TOKEN`; the build step receives no token. The stable
+job's monthly activity marker prevents GitHub's schedule inactivity cutoff.
 
-Polling is intentional: a public upstream release cannot directly trigger another
-repository's workflow without the upstream cooperating or a dispatch credential.
-GitHub schedules can be delayed. A monthly metadata commit prevents GitHub's
-60-day inactivity cutoff for public scheduled workflows; it is excluded from all
-binary hashes. No Construct release entries are created.
+## Verification
 
-## Development
+```sh
+python3 -m unittest discover -s tests -v
+node test/t3-source-transform.test.mjs
+node test/t3-source-contract.test.cjs
+node test/t3-build-cache.test.mjs
+node test/t3park-patch.test.mjs
+node test/t3-capacity-retry.test.mjs
+node extension/test/t3-opencode-monitor-patch.test.mjs
+bash test/t3-build-node.test.sh
+bash test/t3-build-diskcheck.test.sh
+python3 scripts/publisher.py plan --channel stable
+python3 scripts/publisher.py plan --channel nightly --work work-nightly
+```
 
-Python 3.11+, Node from `.node-version`, Bash, and Git are required.
-`python3 -m unittest discover -s tests -v` tests reuse and inventory selection.
-`python3 scripts/publisher.py plan --construct /path/to/construct` writes
-`work/plan.json`. `sudo env PATH="$PATH" HOME="$HOME" bash scripts/build.sh "$PWD/work"`
-builds in isolation; it never changes the machine's installed T3 launcher/service.
-The builder needs Ubuntu build packages, Wine, Rust, and `p7zip-full` for archive
-validation. Publishing is a separate authenticated command:
-`python3 scripts/publisher.py publish`.
+Plans and builds use isolated paths and never restart the live T3 service.
+Build with `bash scripts/build.sh <absolute work directory>` on Ubuntu 24.04
+as root with the pinned Node from `.node-version`. Publication is a separate
+`python3 scripts/publisher.py publish --work <directory>` step.

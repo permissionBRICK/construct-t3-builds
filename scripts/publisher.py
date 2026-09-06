@@ -31,8 +31,8 @@ def recipe_hash(root=ROOT):
     return hashlib.sha256(''.join(f'{digest(root / p)}  {p}\n' for p in paths).encode()).hexdigest()
 
 
-def identity(version, patch_hash, recipe):
-    return hashlib.sha256(f'{version}\nstable\n{patch_hash}\n{recipe}\n'.encode()).hexdigest()
+def identity(version, patch_hash, recipe, channel="stable"):
+    return hashlib.sha256(f'{version}\n{channel}\n{patch_hash}\n{recipe}\n'.encode()).hexdigest()
 
 
 def patch_hash(construct, inventory):
@@ -57,15 +57,15 @@ def api(url):
         raise
 
 
-def complete_release(release):
-    return bool(release and not release['draft'] and not release['prerelease']
+def complete_release(release, channel="stable"):
+    return bool(release and not release['draft'] and release['prerelease'] == (channel == 'nightly')
                 and set(ASSETS) <= {a['name'] for a in release['assets']})
 
 
-def choose(version, hashes, recipe, existing, compatible):
+def choose(version, hashes, recipe, existing, compatible, channel="stable"):
     """Try complete inventories independently; never mix patches from two channels."""
-    for inventory in ('release', 'nightly'):
-        build = identity(version, hashes[inventory], recipe)
+    for inventory in (('nightly',) if channel == 'nightly' else ('release',)):
+        build = identity(version, hashes[inventory], recipe, channel)
         tag = f't3-{version}-{build}'
         if existing(tag):
             return dict(inventory=inventory, tag=tag, buildHash=build, build=False,
@@ -73,13 +73,15 @@ def choose(version, hashes, recipe, existing, compatible):
         if compatible(inventory):
             return dict(inventory=inventory, tag=tag, buildHash=build, build=True,
                         sourcePatchHash=hashes[inventory])
-    return dict(build=False, reason='Neither complete patch inventory applies to the stable source.')
+    return dict(build=False, reason=f'The {channel} patch inventory does not apply to its upstream source.')
 
 
-def plan(work, repository, construct):
-    version = api('https://registry.npmjs.org/t3/latest')['version']
-    if not re.fullmatch(r'\d+\.\d+\.\d+', version):
-        raise ValueError(f'Expected a stable npm version, got {version!r}')
+def plan(work, repository, construct, channel="stable"):
+    npm_tag = 'nightly' if channel == 'nightly' else 'latest'
+    version = api(f'https://registry.npmjs.org/t3/{npm_tag}')['version']
+    pattern = r'\d+\.\d+\.\d+-nightly\.\d+\.\d+' if channel == 'nightly' else r'\d+\.\d+\.\d+'
+    if not re.fullmatch(pattern, version):
+        raise ValueError(f'Expected a {channel} npm version, got {version!r}')
     construct = construct.resolve()
     hashes = {i: patch_hash(construct, i) for i in ('release', 'nightly')}
     source = work / 'upstream'
@@ -100,10 +102,10 @@ def plan(work, repository, construct):
         return status['compatible']
 
     result = choose(version, hashes, recipe_hash(),
-                    lambda tag: complete_release(api(f'https://api.github.com/repos/{repository}/releases/tags/{tag}')),
-                    compatible)
-    result.update(version=version, channel='stable', constructCommit=run('git', '-C', construct, 'rev-parse', 'HEAD'),
-                  constructDirectory=str(construct), publisherRecipeHash=recipe_hash(), repository=repository,
+                    lambda tag: complete_release(api(f'https://api.github.com/repos/{repository}/releases/tags/{tag}'), channel),
+                    compatible, channel)
+    result.update(version=version, channel=channel, buildRepositoryCommit=run('git', '-C', construct, 'rev-parse', 'HEAD'),
+                  sourceDirectory=str(construct), publisherRecipeHash=recipe_hash(), repository=repository,
                   publisherCommit=run('git', '-C', ROOT, 'rev-parse', 'HEAD'), **CONFIG)
     if result['build']:
         result['upstreamCommit'] = run('git', '-C', source, 'rev-parse', 'HEAD')
@@ -128,7 +130,7 @@ def finalize(work):
                     # Host compares patchHash; include publisher recipe so runtime/packaging changes update the pair.
                     patchHash=hashlib.sha256(f'{plan["sourcePatchHash"]}\n{plan["publisherRecipeHash"]}\n'.encode()).hexdigest(),
                     buildHash=plan['buildHash'], publisherRecipeHash=plan['publisherRecipeHash'],
-                    publisherCommit=plan['publisherCommit'], constructCommit=plan['constructCommit'],
+                    publisherCommit=plan['publisherCommit'], buildRepositoryCommit=plan['buildRepositoryCommit'],
                     inventory=plan['inventory'], nodeVersion=plan['nodeVersion'], target=plan['target'],
                     formatVersion=plan['formatVersion'], releaseTag=plan['tag'])
     base = f'https://github.com/{plan["repository"]}/releases/download/{plan["tag"]}'
@@ -152,17 +154,17 @@ def publish(work):
         if digest(out / name) != manifest['assets'][name]['sha256']:
             raise ValueError(f'Asset changed after validation: {name}')
     existing = api(f'https://api.github.com/repos/{repository}/releases/tags/{tag}')
-    if complete_release(existing):
+    if complete_release(existing, plan['channel']):
         print('Already published; preserving immutable assets.')
         return
     if existing and not existing['draft']:
         raise ValueError('Published release is incomplete; refusing to modify published assets')
     if not existing:
         notes = work / 'release-notes.md'
-        notes.write_text(f'Patched T3 Code **{plan["version"]}**, stable channel, using the **{plan["inventory"]}** inventory.\n\n'
+        notes.write_text(f'Patched T3 Code **{plan["version"]}**, {plan["channel"]} channel, using the **{plan["inventory"]}** inventory.\n\n'
                          f'Windows x64 installer and Ubuntu 24.04 x64 server runtime (bundled Node {plan["nodeVersion"]}). '
                          'The Windows installer is unsigned.\n\n'
-                         f'Construct: https://github.com/{CONFIG["constructRepository"]}/commit/{plan["constructCommit"]}\n\n'
+                         f'Build sources: https://github.com/{plan["repository"]}/commit/{plan["publisherCommit"]}\n\n'
                          f'Upstream: https://github.com/{CONFIG["upstreamRepository"]}/commit/{plan["upstreamCommit"]}\n\n'
                          f'Build identity: `{tag}`. See `manifest.json` for exact inputs and checksums.\n')
         run('gh', 'release', 'create', tag, '--repo', repository, '--draft', '--target', plan['publisherCommit'],
@@ -175,7 +177,9 @@ def publish(work):
     for name in ASSETS:
         if digest(downloaded / name) != digest(out / name):
             raise ValueError(f'Uploaded checksum mismatch: {name}')
-    run('gh', 'release', 'edit', tag, '--repo', repository, '--draft=false', '--latest')
+    run('gh', 'release', 'edit', tag, '--repo', repository, '--draft=false',
+        '--prerelease' if plan['channel'] == 'nightly' else '--prerelease=false',
+        '--latest=false' if plan['channel'] == 'nightly' else '--latest')
     print(f'Published https://github.com/{repository}/releases/tag/{tag}')
 
 
@@ -184,12 +188,13 @@ if __name__ == '__main__':
     parser.add_argument('command', choices=['plan', 'finalize', 'publish'])
     parser.add_argument('--work', type=Path, default=ROOT / 'work')
     parser.add_argument('--repository', default='permissionBRICK/construct-t3-builds')
-    parser.add_argument('--construct', type=Path, default=ROOT / 'work/construct')
+    parser.add_argument('--construct', type=Path, default=ROOT)
+    parser.add_argument('--channel', choices=['stable', 'nightly'], default='stable')
     args = parser.parse_args()
     args.work = args.work.resolve()
     args.work.mkdir(parents=True, exist_ok=True)
     if args.command == 'plan':
-        plan(args.work, args.repository, args.construct)
+        plan(args.work, args.repository, args.construct, args.channel)
     elif args.command == 'finalize':
         finalize(args.work)
     else:

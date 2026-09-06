@@ -1,4 +1,4 @@
-name: Publish stable T3 pair
+name: Publish T3 pairs
 on:
   push:
     branches: [main]
@@ -9,11 +9,15 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: stable-publisher
+  group: t3-publisher
   cancel-in-progress: false
 
 jobs:
   publish:
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: [stable, nightly]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -25,15 +29,22 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version-file: .node-version
-      - name: Test publisher decisions
-        run: python3 -m unittest discover -s tests -v
-      - name: Read public Construct source (no credentials)
-        run: git clone --depth 1 --branch main https://github.com/permissionBRICK/The-Construct.git work/construct
-      - name: Select stable version and compatible patch inventory
+      - name: Test build and publisher contracts
+        run: |
+          python3 -m unittest discover -s tests -v
+          node test/t3-source-transform.test.mjs
+          node test/t3-source-contract.test.cjs
+          node test/t3-build-cache.test.mjs
+          node test/t3park-patch.test.mjs
+          node test/t3-capacity-retry.test.mjs
+          node extension/test/t3-opencode-monitor-patch.test.mjs
+          bash test/t3-build-node.test.sh
+          bash test/t3-build-diskcheck.test.sh
+      - name: Select channel version and its patch inventory
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/publisher.py plan --repository "$GITHUB_REPOSITORY"
+        run: python3 scripts/publisher.py plan --repository "$GITHUB_REPOSITORY" --channel "${{ matrix.channel }}"
       - name: Restore reusable compiler and download caches
         if: steps.plan.outputs.build == 'true'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -72,7 +83,7 @@ jobs:
       # activity. A monthly metadata commit keeps this artifacts-only repo active.
       # It is deliberately outside the binary recipe hash.
       - name: Keep the polling schedule active
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.channel == 'stable' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/keep-alive.py

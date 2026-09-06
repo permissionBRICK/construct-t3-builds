@@ -1,6 +1,4 @@
 {
-  "constructRepository": "permissionBRICK/The-Construct",
-  "constructRef": "main",
   "upstreamRepository": "pingdotgg/t3code",
   "nodeVersion": "26.8.1",
   "target": "ubuntu-24.04-linux-x64+windows-x64",
