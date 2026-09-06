@@ -14,6 +14,7 @@ export const DEFAULT_VOICE_INPUT_SOURCE: VoiceInputSource = "host";
 export const VoiceInputStartInput = Schema.Struct({
   sessionId: Schema.String,
   source: Schema.optional(VoiceInputSource),
+  resume: Schema.Boolean,
 });
 export type VoiceInputStartInput = typeof VoiceInputStartInput.Type;
 
@@ -27,12 +28,14 @@ export const VOICE_INPUT_MAX_CHUNK_BYTES = 64 * 1024;
 
 export const VoiceInputAudioInput = Schema.Struct({
   sessionId: Schema.String,
+  sequence: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
   chunk: Schema.Uint8ArrayFromBase64.check(Schema.isMaxLength(VOICE_INPUT_MAX_CHUNK_BYTES)),
 });
 export type VoiceInputAudioInput = typeof VoiceInputAudioInput.Type;
 
 export const VoiceInputAudioResult = Schema.Struct({
   accepted: Schema.Boolean,
+  nextSequence: Schema.Number,
 });
 export type VoiceInputAudioResult = typeof VoiceInputAudioResult.Type;
 
@@ -57,7 +60,7 @@ export const VoiceInputStreamEvent = Schema.Union([
     text: Schema.String,
     final: Schema.Boolean,
   }),
-  Schema.Struct({ type: Schema.Literal("stopped") }),
+  Schema.Struct({ type: Schema.Literal("stopped"), reason: Schema.String }),
 ]);
 export type VoiceInputStreamEvent = typeof VoiceInputStreamEvent.Type;
 

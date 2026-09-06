@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   CLIENT_VOICE_FAILURE_DESCRIPTION,
+  canReconnectVoiceInput,
   describeVoiceInputFailure,
   HOST_VOICE_FAILURE_DESCRIPTION,
 } from "./voiceInputFailure";
@@ -45,5 +46,21 @@ describe("describeVoiceInputFailure", () => {
     expect(
       describeVoiceInputFailure(Cause.fail(new VoiceInputError({ message: "   " })), "client"),
     ).toBe(CLIENT_VOICE_FAILURE_DESCRIPTION);
+  });
+});
+
+describe("voice reconnect classification", () => {
+  it("retries transport failures and temporary unavailability", () => {
+    expect(canReconnectVoiceInput(Cause.fail({ _tag: "RpcClientError" }))).toBe(true);
+    expect(canReconnectVoiceInput(Cause.fail({ _tag: "EnvironmentRpcUnavailableError" }))).toBe(
+      true,
+    );
+  });
+  it("does not retry provider errors, defects, or cancellation", () => {
+    expect(
+      canReconnectVoiceInput(Cause.fail(new VoiceInputError({ message: "expired", fatal: true }))),
+    ).toBe(false);
+    expect(canReconnectVoiceInput(Cause.die(new Error("defect")))).toBe(false);
+    expect(canReconnectVoiceInput(Cause.interrupt())).toBe(false);
   });
 });
