@@ -29,10 +29,14 @@ export function handleSdkTelemetryMessage(context, message) {
     return "telemetry";
   }
 }
-export function handleResultMessage(context, message) {
+function* emitRuntimeError() {}
+function* completeTurn(context, status, errorMessage) { yield { status, errorMessage }; }
+export function handleResultMessage(context, message) { return resultGenerator(context, message).next().value; }
+function* resultGenerator(context, message) {
   if (message.type !== "result") return;
 \t\tconst { status, errorMessage } = resultOutcome(message);
-  return { status, errorMessage };
+\t\tif (status === "failed") yield* emitRuntimeError(context, errorMessage ?? "Claude turn failed.");
+\t\tyield* completeTurn(context, status, errorMessage, message);
 }
 `;
 
@@ -60,7 +64,8 @@ async function waitFor(predicate, timeoutMs = 3000) {
 }
 
 writeFileSync(tokenPath, "fixture-token\n");
-const resultAnchor = "\t\tconst { status, errorMessage } = resultOutcome(message);\n";
+const resultAnchor = '\t\tif (status === "failed") yield* emitRuntimeError(context, errorMessage ?? "Claude turn failed.");\n' +
+  '\t\tyield* completeTurn(context, status, errorMessage, message);\n';
 for (const [name, invalid] of [
   ["missing", original.replace(resultAnchor, "")],
   ["duplicate", original + resultAnchor],
@@ -119,14 +124,14 @@ const port = fakeApi.address().port;
 try {
   runPatcher("apply");
   const status = JSON.parse(runPatcher("status"));
-  ok("apply: installs v6 with a pristine backup", () => {
+  ok("apply: installs v7 with a pristine backup", () => {
     assert.equal(status.patched, true);
-    assert.equal(status.version, "v6");
+    assert.equal(status.version, "v7");
     assert.equal(status.backup, true);
   });
   ok("apply: remains idempotent", () => {
-    assert.match(runPatcher("apply"), /already patched \(v6\)/);
-    assert.equal((readFileSync(bundle, "utf8").match(/\/\*__T3PARK v6\*\//g) || []).length, 1);
+    assert.match(runPatcher("apply"), /already patched \(v7\)/);
+    assert.equal((readFileSync(bundle, "utf8").match(/\/\*__T3PARK v7\*\//g) || []).length, 1);
   });
 
   process.env.T3CODE_HOME = join(tmp, "isolated-t3");
