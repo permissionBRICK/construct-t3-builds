@@ -228,7 +228,9 @@ T3MONITOR_PATCHER="${REPO_DIR}/extension/vm/construct-t3-opencode-monitor-patch.
 mkdir -p "${CACHE_ROOT}" "${ARTIFACT_ROOT}" "$(dirname "${STATUS_PATH}")"
 PATCH_HASH="$(t3_build_integration_hash "${RECIPE}" "${SOURCE_TRANSFORMER}" "${SOURCE_MANIFEST}" "${SOURCE_OVERLAYS}" "${T3PARK_PATCHER}" "${T3MONITOR_PATCHER}")"
 BUILD_HASH="$(printf '%s\n' "${VERSION}" "${CHANNEL}" "${PATCH_HASH}" | sha256sum | awk '{print $1}')"
-SOURCE_KEY="${SAFE_VERSION}-${BUILD_HASH:0:12}"
+# The hash already includes the version/channel; long nightly names can overflow
+# NSIS include-path buffers once pnpm dependency paths are appended.
+SOURCE_KEY="${BUILD_HASH:0:20}"
 SOURCE_DIR="${CACHE_ROOT}/${SOURCE_KEY}"
 
 server_current=false
