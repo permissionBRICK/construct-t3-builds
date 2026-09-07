@@ -78,8 +78,8 @@
     },
     {
       "path": "apps/web/src/components/ChatView.tsx",
-      "before": ") : activeRightPanelSurface?.kind === \"agents\" ? (",
-      "insert": ") : activeRightPanelSurface?.kind === \"omniloop\" ? (\n      <OmniloopPanel environmentId={activeThreadRef?.environmentId ?? null} />\n"
+      "before": ") : renderedRightPanelSurface?.kind === \"agents\" ? (",
+      "insert": ") : renderedRightPanelSurface?.kind === \"omniloop\" ? (\n      <OmniloopPanel environmentId={activeThreadRef?.environmentId ?? null} />\n"
     },
     {
       "path": "apps/web/src/components/ChatView.tsx",
@@ -202,13 +202,13 @@
       "optional": true
     },
     {
-      "path": "apps/desktop/src/updates/DesktopUpdates.test.ts",
+      "path": "apps/desktop/src/updates/updatesTestHarness.ts",
       "after": "readonly env?: Record<string, string | undefined>;",
       "insert": "  /** Construct builds carry `<t3 version>-construct.<hash>`; the default is a stock build. */\n  readonly appVersion?: string;\n",
       "optional": true
     },
     {
-      "path": "apps/desktop/src/updates/DesktopUpdates.test.ts",
+      "path": "apps/desktop/src/updates/updatesTestHarness.ts",
       "find": "    appVersion: \"1.2.3\",",
       "replace": "    appVersion: options.appVersion ?? \"1.2.3\",",
       "optional": true
@@ -427,7 +427,7 @@
     },
     {
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
-      "after": "const [isComposerFocused, setIsComposerFocused] = useState(false);",
+      "after": "} = useComposerFocusState();",
       "insert": "  const [isVoiceRecording, setIsVoiceRecording] = useState(false);\n  const [voiceLevel, setVoiceLevel] = useState(0);\n  const [voiceStatus, setVoiceStatus] = useState(\"Recording\");\n"
     },
     {
@@ -508,7 +508,7 @@
     },
     {
       "path": "apps/web/src/components/settings/SettingsPanels.tsx",
-      "before": "<SettingsRow\n{...searchableSetting(\"provider-update-checks\")}",
+      "after": "<SettingsSection id=\"behavior\" title=\"Behavior\">",
       "insert": "        {showVoiceInputSource ? (\n          <SettingsRow\n            {...searchableSetting(\"voice-input-source\")}\n            description=\"Choose where voice input records. Automatic uses this device's microphone when it is available, and the Construct host bridge otherwise.\"\n            resetAction={\n              settings.voiceInputSource !== DEFAULT_UNIFIED_SETTINGS.voiceInputSource ? (\n                <SettingResetButton\n                  label=\"voice input source\"\n                  onClick={() =>\n                    updateSettings({\n                      voiceInputSource: DEFAULT_UNIFIED_SETTINGS.voiceInputSource,\n                    })\n                  }\n                />\n              ) : null\n            }\n            control={\n              <Select\n                value={settings.voiceInputSource}\n                onValueChange={(value) => {\n                  if (isVoiceInputSourcePreference(value)) {\n                    updateSettings({ voiceInputSource: value });\n                  }\n                }}\n              >\n                <SelectTrigger className=\"w-full sm:w-52\" aria-label=\"Voice input source\">\n                  <SelectValue>{VOICE_INPUT_SOURCE_LABELS[settings.voiceInputSource]}</SelectValue>\n                </SelectTrigger>\n                <SelectPopup align=\"end\" alignItemWithTrigger={false}>\n                  {Object.entries(VOICE_INPUT_SOURCE_LABELS).map(([value, label]) => (\n                    <SelectItem hideIndicator key={value} value={value}>\n                      {label}\n                    </SelectItem>\n                  ))}\n                </SelectPopup>\n              </Select>\n            }\n          />\n        ) : null}\n\n"
     },
     {
@@ -613,7 +613,7 @@
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "before": "export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {",
+      "before": "const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {",
       "insert": "export const WsVoiceInputStartRpc = Rpc.make(WS_METHODS.voiceInputStart, {\n  payload: VoiceInputStartInput,\n  success: VoiceInputStreamEvent,\n  error: Schema.Union([VoiceInputError, EnvironmentAuthorizationError]),\n  stream: true,\n});\n\nexport const WsVoiceInputStopRpc = Rpc.make(WS_METHODS.voiceInputStop, {\n  payload: VoiceInputStopInput,\n  success: VoiceInputStopResult,\n  error: EnvironmentAuthorizationError,\n});\n\n// Effect RPC has no client-to-server streams, so client-captured microphone\n// audio arrives as one unary call per ~100 ms chunk.\nexport const WsVoiceInputAudioRpc = Rpc.make(WS_METHODS.voiceInputAudio, {\n  payload: VoiceInputAudioInput,\n  success: VoiceInputAudioResult,\n  error: EnvironmentAuthorizationError,\n});\n\n"
     },
     {
@@ -633,7 +633,7 @@
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "before": "export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {",
+      "before": "const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {",
       "insert": "export const WsConstructDiskSpaceRpc = Rpc.make(WS_METHODS.constructDiskSpace, {\n  payload: Schema.Struct({}),\n  success: ConstructDiskSpace,\n  error: Schema.Union([ConstructDiskSpaceError, EnvironmentAuthorizationError]),\n});\n\n"
     },
     {
@@ -653,7 +653,7 @@
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "before": "export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {",
+      "before": "const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {",
       "insert": "export const WsConstructOmniloopStatusRpc = Rpc.make(WS_METHODS.constructOmniloopStatus, {\n  payload: Schema.Struct({}),\n  success: ConstructOmniloopStatus,\n  error: Schema.Union([ConstructOmniloopError, EnvironmentAuthorizationError]),\n});\n\nexport const WsConstructOmniloopTicketRpc = Rpc.make(WS_METHODS.constructOmniloopTicket, {\n  payload: Schema.Struct({}),\n  success: ConstructOmniloopTicket,\n  error: Schema.Union([ConstructOmniloopError, EnvironmentAuthorizationError]),\n});\n\nexport const WsConstructOmniloopWorkflowsRpc = Rpc.make(WS_METHODS.constructOmniloopWorkflows, {\n  payload: ConstructOmniloopWorkflowsInput,\n  success: ConstructOmniloopWorkflowsResult,\n  error: Schema.Union([ConstructOmniloopError, EnvironmentAuthorizationError]),\n});\n\n"
     },
     {
@@ -663,7 +663,7 @@
     },
     {
       "path": "packages/contracts/src/settings.ts",
-      "after": "export const DEFAULT_TERMINAL_FONT_SIZE: TerminalFontSize = 12;",
+      "after": "export type TerminalFontSize = typeof TerminalFontSize.Type;",
       "insert": "/**\n * Where voice input records. `auto` captures on this device when the browser\n * or desktop app can reach a microphone and the server accepts pushed audio,\n * and otherwise falls back to the host recorder bridge. Client-local because\n * the microphone it picks is this device's.\n */\nexport const VoiceInputSourcePreference = Schema.Literals([\"auto\", \"client\", \"host\"]);\nexport type VoiceInputSourcePreference = typeof VoiceInputSourcePreference.Type;\nexport const DEFAULT_VOICE_INPUT_SOURCE_PREFERENCE: VoiceInputSourcePreference = \"auto\";\n\n"
     },
     {
@@ -792,6 +792,11 @@
       "insert": "      // Handle only terminal Codex failures; runtime.warning is Codex's own retry.\n      if (shouldApplyThreadLifecycle && !conflictsWithActiveTurn && event.provider === \"codex\" &&\n          (event.type === \"runtime.error\" || event.type === \"turn.started\" || event.type === \"turn.completed\")) {\n        const notice = (globalThis as typeof globalThis & {\n          __t3park?: { onCodexEvent?: (thread: unknown, event: unknown) => string | undefined };\n        }).__t3park?.onCodexEvent?.(thread, event);\n        if (notice && event.type === \"turn.completed\") {\n          event = { ...event, payload: { ...event.payload, errorMessage: notice } };\n        }\n      }\n"
     },
     {
+      "path": "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts",
+      "find": "        isTerminalTurn\n      ) {",
+      "replace": "        event.type === \"turn.completed\" ||\n        event.type === \"turn.aborted\"\n      ) {"
+    },
+    {
       "path": "apps/desktop/src/electron/ElectronProtocol.ts",
       "find": "    \"frame-src 'self' https://challenges.cloudflare.com\",",
       "replace": "    // The Omniloop panel embeds a ticketed dashboard from the selected VM.\n    // Keep cross-origin frames restricted to that proxy path.\n    \"frame-src 'self' http://*:*/construct/omniloop/ https://*:*/construct/omniloop/ https://challenges.cloudflare.com\","
@@ -827,6 +832,11 @@
       "before": "if (noProviderAvailable || isSendDisabled) {",
       "scope": "const submitComposer = useCallback(",
       "insert": "      if (voiceInsertionRef.current) {\n        event?.preventDefault();\n        return;\n      }\n"
+    },
+    {
+      "path": "packages/client-runtime/src/state/runtime.ts",
+      "find": "function runInEnvironment<A, E, R>(",
+      "replace": "export function runInEnvironment<A, E, R>("
     }
   ]
 }
