@@ -71,6 +71,14 @@ python3 scripts/publisher.py plan --channel stable
 python3 scripts/publisher.py plan --channel nightly --work work-nightly
 ```
 
+The update popup also has an isolated Chromium regression test. Run it for each
+inventory with `T3_TEST_SOURCE` pointing at its patched upstream checkout with
+installed dependencies, `T3_TEST_TOOLS` at a package directory providing esbuild
+and Playwright, and `T3_TEST_CHANNEL=release|nightly`:
+`node test/t3-update-notification.browser.test.mjs`. Set `T3_TEST_CHROMIUM` to use
+an existing Chromium executable. The test checks named targeting, navigation,
+stale clicks, missing matches and promoted draft routes without launching scripts.
+
 Plans and builds use isolated paths and never restart the live T3 service.
 Build with `bash scripts/build.sh <absolute work directory>` on Ubuntu 24.04
 as root with the pinned Node from `.node-version`. Publication is a separate

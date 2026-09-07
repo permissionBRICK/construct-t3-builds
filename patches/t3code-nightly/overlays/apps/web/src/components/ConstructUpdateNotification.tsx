@@ -1,12 +1,17 @@
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef } from "react";
 
+import { useComposerDraftStore } from "../composerDraftStore";
+import { useEnvironments } from "../state/environments";
+import { resolveActiveThreadRouteRef, resolveThreadRouteTarget } from "../threadRoutes";
+import { constructLinkedRemotes } from "./constructInstances.logic";
 import { isElectron } from "../env";
 import { useDismissedProviderUpdateNotificationKeys } from "../providerUpdateDismissal";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
 import { startConstructUpdate } from "./constructUpdate";
 import {
   getConstructDisabledReason,
+  getConstructThreadUpdateInfo,
   getConstructUpdateActionLabel,
   getConstructUpdateDetail,
   getConstructUpdateHeadline,
@@ -33,7 +38,25 @@ export function ConstructUpdateNotification() {
 function ConstructUpdateNotificationContent() {
   const navigate = useNavigate();
   const state = useDesktopUpdateState();
-  const info = getConstructUpdateInfo(state);
+  const { environments } = useEnvironments();
+  const routeTarget = useParams({
+    strict: false,
+    select: (params) => resolveThreadRouteTarget(params),
+  });
+  const draftThread = useComposerDraftStore((store) =>
+    routeTarget?.kind === "draft" ? store.getDraftSession(routeTarget.draftId) : null,
+  );
+  const threadRef = resolveActiveThreadRouteRef(routeTarget, draftThread);
+  const remote =
+    constructLinkedRemotes(
+      environments.map((environment) => ({
+        environmentId: String(environment.environmentId),
+        label: environment.label,
+        displayUrl: environment.displayUrl,
+        targetKind: environment.entry.target._tag,
+      })),
+    ).find((candidate) => candidate.id === threadRef?.environmentId) ?? null;
+  const info = getConstructThreadUpdateInfo(getConstructUpdateInfo(state), remote);
   // Nothing to offer while updates are disabled: the facts stay visible in Settings.
   const notificationKey =
     info === null || getConstructDisabledReason(state) !== null
@@ -51,6 +74,7 @@ function ConstructUpdateNotificationContent() {
   const closeActiveToast = useCallback(() => {
     const active = activeToastRef.current;
     if (active === null) return;
+    seenConstructUpdateNotificationKeys.delete(active.key);
     toastManager.close(active.toastId);
     activeToastRef.current = null;
   }, []);
@@ -81,7 +105,14 @@ function ConstructUpdateNotificationContent() {
     const runAction = () => {
       const bridge = window.desktopBridge;
       const current = infoRef.current;
-      if (!bridge || current === null) return;
+      // A queued click from a toast replaced during navigation must never launch
+      // the new thread's VM under the old VM's displayed name.
+      if (
+        !bridge ||
+        current === null ||
+        getConstructUpdateNotificationKey(current) !== notificationKey
+      )
+        return;
       toastManager.close(toastId);
       activeToastRef.current = null;
       void startConstructUpdate(bridge, current);
@@ -98,7 +129,10 @@ function ConstructUpdateNotificationContent() {
         description: getConstructUpdateDetail(info),
         timeout: 0,
         actionProps: {
-          children: getConstructUpdateActionLabel(action),
+          children:
+            action === "reprovision"
+              ? `Reprovision ${info.vmName}`
+              : getConstructUpdateActionLabel(action),
           onClick: runAction,
         },
         actionVariant: "default",

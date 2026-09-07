@@ -1,16 +1,13 @@
 import type { ConstructUpdateInfo, DesktopBridge } from "@t3tools/contracts";
 
-import {
-  getConstructLaunchOutcome,
-  getConstructUpdateActionLabel,
-} from "./constructUpdate.logic";
+import { getConstructLaunchOutcome, getConstructUpdateActionLabel } from "./constructUpdate.logic";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
-type ConstructUpdateBridge = Pick<DesktopBridge, "downloadUpdate">;
+type ConstructUpdateBridge = Pick<DesktopBridge, "downloadUpdate" | "reprovisionConstructInstance">;
 
 /**
  * Run the Construct action the Desktop app currently offers (`downloadUpdate` is the
- * stock IPC the Construct build repurposes for "launch the host script"). Shared by the
+ * stock IPC for host updates; VM reprovisioning always passes the displayed name). Shared by the
  * sidebar pill, the About section, the update popup and the Providers entry so they
  * launch and report identically. Resolves true when a script was started.
  */
@@ -21,7 +18,11 @@ export async function startConstructUpdate(
   if (info.action === null || info.runningAction !== null) return false;
   const actionLabel = getConstructUpdateActionLabel(info.action);
   try {
-    const outcome = getConstructLaunchOutcome(await bridge.downloadUpdate());
+    const outcome = getConstructLaunchOutcome(
+      info.action === "reprovision"
+        ? await bridge.reprovisionConstructInstance(info.vmName)
+        : await bridge.downloadUpdate(),
+    );
     if (outcome.kind === "started") {
       toastManager.add(
         stackedThreadToast({

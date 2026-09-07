@@ -12,11 +12,22 @@ for(const channel of ['release','nightly']) {
   }}]});
  const {startConstructUpdate}=await import('data:text/javascript;base64,'+Buffer.from(result.outputFiles[0].text).toString('base64'));
  let calls=0;
- const info={action:'reprovision',runningAction:null};
- const bridge={downloadUpdate:async()=>{calls++;return {accepted:true,completed:false,state:{construct:{...info,runningAction:'reprovision'}}};}};
+ const info={action:'reprovision',runningAction:null,vmName:'thread-vm'};
+ let hostCalls=0;
+ const targets=[];
+ const resultFor=action=>({accepted:true,completed:false,state:{construct:{...info,runningAction:action}}});
+ const bridge={
+  downloadUpdate:async()=>{hostCalls++;return resultFor('update-construct');},
+  reprovisionConstructInstance:async name=>{calls++;targets.push(name);return resultFor('reprovision');},
+ };
  assert.equal(await startConstructUpdate(bridge,info),true);
  assert.equal(calls,1,'one explicit action must launch without a second confirmation');
  assert.equal(await startConstructUpdate(bridge,{...info,runningAction:'reprovision'}),false);
+ assert.equal(calls,1);
+ assert.deepEqual(targets,['thread-vm'],'reprovision must name the displayed thread VM');
+ assert.equal(hostCalls,0,'reprovision must not use the host/default-VM launch');
+ assert.equal(await startConstructUpdate(bridge,{...info,action:'update-construct'}),true);
+ assert.equal(hostCalls,1);
  assert.equal(calls,1);
  console.log(`PASS ${channel}: one click launches once; running action is guarded`);
 }
