@@ -5,6 +5,35 @@ import type {
   DesktopUpdateState,
 } from "@t3tools/contracts";
 
+import { planConstructProviderRows, type ConstructLinkedRemote } from "./constructInstances.logic";
+
+/** The popup follows the current thread's remote, including that VM's own markers.
+ * Host updates apply to this PC; VM offers require an unambiguous registry match. */
+export function getConstructThreadUpdateInfo(
+  info: ConstructUpdateInfo | null,
+  remote: ConstructLinkedRemote | null,
+): ConstructUpdateInfo | null {
+  if (info === null || info.action === "update-construct") return info;
+  if (remote === null) return null;
+  const row = planConstructProviderRows({
+    remotes: [remote],
+    info,
+    t3LatestByChannel: info.t3LatestByChannel,
+  }).find((candidate) => candidate.id === remote.id && candidate.linked);
+  if (!row || row.instanceName === null) return null;
+  const instance = info.instances.find((candidate) => candidate.name === row.instanceName)!;
+  return {
+    ...info,
+    vmName: instance.name,
+    vmHost: instance.vmHost,
+    provisionedCommit: row.provisionedCommit,
+    provisionStale: row.provisionStale,
+    t3LatestVersion: row.t3LatestVersion,
+    t3UpdateAvailable: row.t3UpdateAvailable,
+    action: row.provisionStale || row.t3UpdateAvailable ? "reprovision" : null,
+  };
+}
+
 /**
  * Presentation helpers for Construct-managed updates (Construct-built Desktop
  * apps only; `state.construct` is absent everywhere else). The Desktop main
@@ -93,7 +122,7 @@ export function getConstructUpdateDetail(info: ConstructUpdateInfo): string {
       const provisioned = shortConstructCommit(info.provisionedCommit) ?? "an older Construct";
       const installed = shortConstructCommit(info.installedCommit) ?? "a newer one";
       reasons.push(
-        `The VM was provisioned with Construct ${provisioned}, but this PC has ${installed}.`,
+        `VM "${info.vmName}" was provisioned with Construct ${provisioned}, but this PC has ${installed}.`,
       );
     }
     if (info.t3UpdateAvailable && info.t3LatestVersion !== null) {
@@ -102,7 +131,7 @@ export function getConstructUpdateDetail(info: ConstructUpdateInfo): string {
       );
     }
     reasons.push(
-      "Reprovisioning applies the installed Construct to the VM, rebuilds the patched T3 Code and installs the new Desktop app silently.",
+      `Reprovisioning VM "${info.vmName}" applies the installed Construct, rebuilds the patched T3 Code and installs the new Desktop app silently.`,
     );
     return reasons.join(" ");
   }
@@ -141,6 +170,7 @@ export function getConstructUpdateNotificationKey(info: ConstructUpdateInfo): st
   return [
     "construct",
     info.action,
+    ...(info.action === "reprovision" ? [info.vmName, info.vmHost] : []),
     info.installedCommit ?? "-",
     info.provisionedCommit ?? "-",
     info.t3UpdateAvailable ? (info.t3LatestVersion ?? "-") : "-",

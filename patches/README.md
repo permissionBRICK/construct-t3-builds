@@ -92,6 +92,11 @@ through re-indentation) and the list of `conflicts`.
   capture/flush. The publisher runs the voice unit and browser tests for each pair.
 - **Public base URL** (`T3CODE_PUBLIC_BASE_URL` for pairing URLs behind the TLS proxy).
 - **Construct updates** in the Desktop app (update Construct / reprovision the VM).
+  The reprovision popup resolves the active thread's linked remote to a Construct
+  instance, shows its name, and launches that exact instance. Its offer uses that
+  VM's provisioning marker and T3 channel. Without an unambiguous match, no VM
+  popup is offered. Switching threads replaces the offer; host Construct updates
+  remain available independently of the active thread.
 - **Disk-space warning** (`construct.diskSpace` RPC, capability `constructDiskSpace`):
   a prompt when the VM disk is almost full or only the root reserve is left.
 - **Omniloop tab** (`construct.omniloop*` RPCs, capability `constructOmniloop`, proxy

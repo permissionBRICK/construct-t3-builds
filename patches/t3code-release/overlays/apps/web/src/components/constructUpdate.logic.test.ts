@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
 import type {
   ConstructUpdateInfo,
+  ConstructInstanceInfo,
   DesktopUpdateActionResult,
   DesktopUpdateState,
 } from "@t3tools/contracts";
 
 import {
   getConstructLaunchOutcome,
+  getConstructThreadUpdateInfo,
   getConstructUpdateButtonLabel,
   getConstructUpdateDetail,
   getConstructUpdateHeadline,
@@ -103,8 +105,8 @@ describe("construct update presentation", () => {
     expect(getConstructUpdateHeadline(stale)).toBe("VM reprovision pending");
     expect(getConstructUpdateDetail(stale)).toContain("provisioned with Construct b262652");
     expect(getConstructUpdateDetail(stale)).toContain("this PC has dc44958");
+    expect(getConstructUpdateDetail(stale)).toContain('VM "agent-vm"');
     expect(getConstructUpdateButtonLabel(stale)).toBe("Reprovision VM");
-
 
     const t3: ConstructUpdateInfo = {
       ...current,
@@ -115,7 +117,7 @@ describe("construct update presentation", () => {
     expect(getConstructUpdateHeadline(t3)).toBe("T3 Code update available");
     expect(getConstructUpdateDetail(t3)).toContain("T3 Code 0.0.39 is available upstream");
     expect(getConstructUpdateNotificationKey(t3)).toBe(
-      `construct:reprovision:${INSTALLED}:${INSTALLED}:0.0.39`,
+      `construct:reprovision:agent-vm:agent-vm.mshome.net:${INSTALLED}:${INSTALLED}:0.0.39`,
     );
 
     const both: ConstructUpdateInfo = {
@@ -211,5 +213,94 @@ describe("construct update presentation", () => {
         state: { ...baseState, construct: current },
       }),
     ).toEqual({ kind: "nothing" });
+  });
+});
+
+describe("thread VM update offers", () => {
+  const vm = (
+    name: string,
+    port: number,
+    provisionedCommit = PROVISIONED,
+  ): ConstructInstanceInfo => ({
+    name,
+    vmHost: "host.example",
+    publicHost: "host.example",
+    hostAlias: name,
+    isDefault: name === "offline-default",
+    provisionedCommit,
+    channel: "latest",
+    t3Port: port,
+    t3Enabled: true,
+    t3BaseUrl: `https://host.example:${port}`,
+    t3Link: null,
+  });
+  const remote = { id: "thread-environment", baseUrl: "https://host.example:2302" };
+  const info = { ...current, instances: [vm("offline-default", 2301), vm("thread-vm", 2302)] };
+
+  it("offers the thread VM even when the default has no host-wide offer", () => {
+    const offer = getConstructThreadUpdateInfo(info, remote)!;
+    expect(offer.vmName).toBe("thread-vm");
+    expect(offer.action).toBe("reprovision");
+    expect(offer.provisionedCommit).toBe(PROVISIONED);
+    expect(getConstructUpdateDetail(offer)).toContain('VM "thread-vm"');
+  });
+
+  it("does not borrow the default VM's stale status", () => {
+    const offer = getConstructThreadUpdateInfo(
+      {
+        ...info,
+        action: "reprovision",
+        provisionStale: true,
+        instances: [vm("offline-default", 2301), vm("thread-vm", 2302, INSTALLED)],
+      },
+      remote,
+    )!;
+    expect(offer.action).toBeNull();
+    expect(getConstructUpdateNotificationKey(offer)).toBeNull();
+  });
+
+  it("never falls back for a missing, unknown or ambiguous thread remote", () => {
+    expect(getConstructThreadUpdateInfo(info, null)).toBeNull();
+    expect(
+      getConstructThreadUpdateInfo(info, { ...remote, baseUrl: "https://unknown:5178" }),
+    ).toBeNull();
+    expect(
+      getConstructThreadUpdateInfo(
+        { ...info, instances: [...info.instances, vm("duplicate", 2302)] },
+        remote,
+      ),
+    ).toBeNull();
+  });
+
+  it("uses the matched VM's channel for upstream offers", () => {
+    const offer = getConstructThreadUpdateInfo(
+      {
+        ...info,
+        instances: [{ ...vm("thread-vm", 2302, INSTALLED), channel: "nightly" }],
+        t3LatestByChannel: { latest: "0.0.38", nightly: "0.0.39-nightly.20260907" },
+      },
+      remote,
+    )!;
+    expect(offer.action).toBe("reprovision");
+    expect(offer.t3LatestVersion).toBe("0.0.39-nightly.20260907");
+  });
+
+  it("separates identical offers on different VMs and suppresses them during a launch", () => {
+    const first = getConstructThreadUpdateInfo(info, remote)!;
+    const second = getConstructThreadUpdateInfo(info, {
+      ...remote,
+      baseUrl: "https://host.example:2301",
+    })!;
+    expect(getConstructUpdateNotificationKey(first)).not.toBe(
+      getConstructUpdateNotificationKey(second),
+    );
+    expect(
+      getConstructUpdateNotificationKey({ ...first, runningAction: "reprovision" }),
+    ).toBeNull();
+  });
+
+  it("keeps the host Construct update available without a thread", () => {
+    const host = { ...info, action: "update-construct" as const };
+    expect(getConstructThreadUpdateInfo(host, null)).toBe(host);
   });
 });
