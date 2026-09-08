@@ -58,7 +58,7 @@ export const ConstructOmniloopWorkflowsResult = Schema.Struct({
 });
 export type ConstructOmniloopWorkflowsResult = typeof ConstructOmniloopWorkflowsResult.Type;
 
-export class ConstructOmniloopError extends Schema.TaggedErrorClass<ConstructOmniloopError>()(
+export class ConstructOmniloopError extends Schema.TaggedError<ConstructOmniloopError>()(
   "ConstructOmniloopError",
   { message: Schema.String },
 ) {}

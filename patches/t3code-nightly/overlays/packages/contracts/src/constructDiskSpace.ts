@@ -23,7 +23,7 @@ export const ConstructDiskSpace = Schema.Struct({
 });
 export type ConstructDiskSpace = typeof ConstructDiskSpace.Type;
 
-export class ConstructDiskSpaceError extends Schema.TaggedErrorClass<ConstructDiskSpaceError>()(
+export class ConstructDiskSpaceError extends Schema.TaggedError<ConstructDiskSpaceError>()(
   "ConstructDiskSpaceError",
   { message: Schema.String },
 ) {}
