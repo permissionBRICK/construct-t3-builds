@@ -11,6 +11,7 @@ import {
   matchConstructRemoteToInstance,
   planConstructAutoLink,
   planConstructProviderRows,
+  planConstructSettingsButton,
 } from "./constructInstances.logic.ts";
 
 const INSTALLED = "dc44958114c7c43145c8f7830f6185235a1d752b";
@@ -51,6 +52,7 @@ const INSTANCES = [AGENT, FAR, WORK];
 
 function info(over: Partial<ConstructUpdateInfo> = {}): ConstructUpdateInfo {
   return {
+    companionInstalled: false,
     repo: "permissionBRICK/The-Construct",
     ref: "main",
     scriptsDir: "C:\\scripts",
@@ -483,5 +485,50 @@ describe("planConstructAutoLink", () => {
     assert.deepEqual(planConstructAutoLink({ info: info({ instances: [agent], runningAction: "reprovision" }), remotes: [], inFlight: none, now: NOW }), []);
     assert.deepEqual(planConstructAutoLink({ info: info({ instances: [agent], scriptsDir: null }), remotes: [], inFlight: none, now: NOW }), []);
     assert.deepEqual(planConstructAutoLink({ info: null, remotes: [], inFlight: none, now: NOW }), []);
+  });
+});
+
+describe("Companion Settings buttons", () => {
+  const tooltip = "Install the Construct Companion (Update Construct installs it)";
+  const remotes = [{ id: "work", baseUrl: "http://work-vm.mshome.net:5177" }];
+
+  it("plans the host button from installation status", () => {
+    assert.deepEqual(planConstructSettingsButton(false), { disabled: true, tooltip });
+    assert.deepEqual(planConstructSettingsButton(true), { disabled: false, tooltip: null });
+  });
+
+  it("disables matched instance settings with the installation tooltip when absent", () => {
+    const [row] = planConstructProviderRows({ remotes, info: info(), companionInstalled: false });
+    assert.equal(row?.instanceName, "work-vm");
+    assert.deepEqual(row?.settingsButton, { disabled: true, tooltip });
+  });
+
+  it("enables linked and unlinked settings during reprovision when installed", () => {
+    const unlinked = instance({ name: "unlinked-vm", t3Enabled: true, t3Port: 5177 });
+    const rows = planConstructProviderRows({
+      remotes,
+      companionInstalled: true,
+      info: info({ runningAction: "reprovision", instances: [WORK, unlinked] }),
+    });
+    assert.deepEqual(
+      rows.map((row) => row.instanceName),
+      ["work-vm", "unlinked-vm"],
+    );
+    for (const row of rows) {
+      assert.deepEqual(row.settingsButton, { disabled: false, tooltip: null });
+      assert.isFalse(row.canReprovision);
+    }
+  });
+
+  it("does not enable settings for an unmatched remote or an unknown installation", () => {
+    const [unknown] = planConstructProviderRows({
+      remotes: [{ id: "other", baseUrl: "http://other:5177" }],
+      companionInstalled: true,
+      info: info(),
+    });
+    assert.isNull(unknown?.instanceName);
+    assert.isTrue(unknown?.settingsButton.disabled);
+    const [missing] = planConstructProviderRows({ remotes, info: info() });
+    assert.isTrue(missing?.settingsButton.disabled);
   });
 });

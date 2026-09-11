@@ -158,7 +158,18 @@ export function matchConstructRemoteToInstance(
   return null;
 }
 
+export const CONSTRUCT_COMPANION_INSTALL_TOOLTIP =
+  "Install the Construct Companion (Update Construct installs it)";
+
+export function planConstructSettingsButton(companionInstalled: boolean) {
+  return {
+    disabled: !companionInstalled,
+    tooltip: companionInstalled ? null : CONSTRUCT_COMPANION_INSTALL_TOOLTIP,
+  };
+}
+
 export interface ConstructProviderRow {
+  readonly settingsButton: ReturnType<typeof planConstructSettingsButton>;
   readonly id: string;
   readonly baseUrl: string;
   /** The instance name for a Construct VM, else the app's own label / the host. */
@@ -293,6 +304,7 @@ function isNewerT3Version(latest: string | null, installed: string): boolean {
  * Pure.
  */
 export function planConstructProviderRows(input: {
+  readonly companionInstalled?: boolean;
   readonly remotes: ReadonlyArray<ConstructLinkedRemote>;
   readonly info: ConstructUpdateInfo | null;
   /** Newest upstream release per channel. The app's own channel is always known; the
@@ -323,6 +335,7 @@ export function planConstructProviderRows(input: {
             ? `Automatic link failed: ${marker.error ?? "unknown error"}`
             : "Linked before; the connection was removed from this app.";
       return {
+        settingsButton: planConstructSettingsButton(input.companionInstalled === true),
         id: `instance:${instance.name}`,
         baseUrl: instance.t3BaseUrl ?? "",
         label: instance.name,
@@ -360,6 +373,7 @@ export function planConstructProviderRows(input: {
         ...base,
         label: remote.label ?? (host || remote.baseUrl),
         instanceName: null,
+        settingsButton: planConstructSettingsButton(false),
         provisionedCommit: null,
         provisionStale: false,
         t3LatestVersion: null,
@@ -380,6 +394,7 @@ export function planConstructProviderRows(input: {
       ...base,
       label: instance.name,
       instanceName: instance.name,
+      settingsButton: planConstructSettingsButton(input.companionInstalled === true),
       provisionedCommit: own,
       provisionStale: stale,
       t3LatestVersion: latest,

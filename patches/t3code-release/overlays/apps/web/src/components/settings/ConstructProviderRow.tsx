@@ -13,6 +13,7 @@ import {
   constructLinkedRemotes,
   getConstructRowDetail,
   planConstructProviderRows,
+  planConstructSettingsButton,
   type ConstructProviderRow,
 } from "../constructInstances.logic";
 import {
@@ -72,6 +73,7 @@ function ConstructProviderSectionContent() {
         ),
         info,
         t3LatestByChannel: info?.t3LatestByChannel ?? {},
+        companionInstalled: info?.companionInstalled === true,
       }),
     [environments, info],
   );
@@ -175,7 +177,11 @@ function ConstructProviderSectionContent() {
                 </TooltipPopup>
               </Tooltip>
             </span>
-            <span className="flex h-5 shrink-0 items-center">
+            <span className="flex h-5 shrink-0 items-center gap-2">
+              <ConstructSettingsButton
+                instanceName={null}
+                state={planConstructSettingsButton(info.companionInstalled)}
+              />
               <Button
                 type="button"
                 size="xs"
@@ -327,7 +333,10 @@ function ConstructInstanceRow({
           <span className="line-clamp-2 [overflow-wrap:anywhere]">{detail}</span>
         </span>
       </span>
-      <span className="flex h-5 shrink-0 items-center">
+      <span className="flex h-5 shrink-0 items-center gap-2">
+        {row.instanceName === null ? null : (
+          <ConstructSettingsButton instanceName={row.instanceName} state={row.settingsButton} />
+        )}
         {row.instanceName === null ? null : !row.linked ? (
           <Button
             type="button"
@@ -357,5 +366,49 @@ function ConstructInstanceRow({
         )}
       </span>
     </div>
+  );
+}
+
+function ConstructSettingsButton({
+  instanceName,
+  state,
+}: {
+  readonly instanceName: string | null;
+  readonly state: ReturnType<typeof planConstructSettingsButton>;
+}) {
+  const open = async () => {
+    try {
+      if (!(await window.desktopBridge?.openConstructCompanion(instanceName))) {
+        throw new Error("The Construct Companion could not be opened.");
+      }
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not open Construct Companion",
+          description: error instanceof Error ? error.message : "Launch failed.",
+        }),
+      );
+    }
+  };
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="inline-flex" />}>
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          disabled={state.disabled}
+          onClick={() => void open()}
+          aria-label={instanceName === null ? "Construct settings" : `Settings for ${instanceName}`}
+        >
+          Settings
+        </Button>
+      </TooltipTrigger>
+      <TooltipPopup>
+        {state.tooltip ??
+          (instanceName === null ? "Open Construct panel" : `Open settings for ${instanceName}`)}
+      </TooltipPopup>
+    </Tooltip>
   );
 }
