@@ -99,45 +99,24 @@ export function getConstructUpdateHeadline(info: ConstructUpdateInfo): string {
 /** One or two sentences under the headline: what changed and what the action does. */
 export function getConstructUpdateDetail(info: ConstructUpdateInfo): string {
   if (info.runningAction !== null) {
-    const title =
-      info.runningAction === "update-construct" ? "Construct update" : "Construct reprovision";
     return info.runningAction === "reprovision"
-      ? `Follow the "${title}" console window. When the reprovision installs a new T3 Code Desktop build, this app closes and reopens on its own; otherwise it picks the result up when the window closes.`
-      : `Follow the "${title}" console window. This app picks the result up when the window closes; reprovision the VM afterwards to apply the update there.`;
+      ? "Running in a console window. The app restarts by itself if a new Desktop build is installed."
+      : "Running in a console window. The result shows up here when it closes.";
   }
   if (info.action === "update-construct") {
-    const latest = shortConstructCommit(info.latestCommit);
-    const installed = shortConstructCommit(info.installedCommit) ?? "an unknown version";
-    const change = `A newer Construct release (${latest}) is published; this PC has ${installed}.`;
-    return `${change} Updating refreshes the Construct scripts and the VS Code control panel here; reprovision the VM afterwards to apply it there.`;
+    return "A new Construct update is available. Click to install it on this PC. This doesn't interrupt your work in T3 Code.";
   }
   if (info.action === "reprovision") {
-    const reasons: string[] = [];
+    const interrupt = "This might interrupt your agents if they get an update too.";
     if (info.provisionStale) {
-      const provisioned = shortConstructCommit(info.provisionedCommit) ?? "an older Construct";
-      const installed = shortConstructCommit(info.installedCommit) ?? "a newer one";
-      reasons.push(
-        `VM "${info.vmName}" was provisioned with Construct ${provisioned}, but this PC has ${installed}.`,
-      );
+      return `The latest Construct update has not yet been installed onto "${info.vmName}". Click to reprovision and update all your tools. ${interrupt}`;
     }
-    if (info.t3UpdateAvailable && info.t3LatestVersion !== null) {
-      reasons.push(
-        `T3 Code ${info.t3LatestVersion} is available upstream (this build is ${info.t3Version}).`,
-      );
-    }
-    reasons.push(
-      `Reprovisioning VM "${info.vmName}" applies the installed Construct, rebuilds the patched T3 Code and installs the new Desktop app silently.`,
-    );
-    return reasons.join(" ");
+    return `T3 Code ${info.t3LatestVersion ?? "update"} is available. Click to reprovision "${info.vmName}" and install it. ${interrupt}`;
   }
   if (info.error !== null) return info.error;
-  const parts = [`Construct ${getConstructVersionLabel(info)} is installed and provisioned`];
-  parts.push(
-    info.t3LatestVersion === null
-      ? `this build is T3 Code ${info.t3Version}`
-      : `T3 Code ${info.t3Version} is the newest release on its channel`,
-  );
-  return `${parts.join(", and ")}.`;
+  return info.t3LatestVersion === null
+    ? `Up to date · T3 Code ${info.t3Version}`
+    : `Up to date · T3 Code ${info.t3Version} (newest on its channel)`;
 }
 
 /** Sidebar pill tooltip. */

@@ -69,7 +69,7 @@ describe("construct update presentation", () => {
   it("describes an up-to-date install", () => {
     expect(getConstructVersionLabel(current)).toBe("main@dc44958");
     expect(getConstructUpdateHeadline(current)).toBe("Construct is up to date");
-    expect(getConstructUpdateDetail(current)).toContain("T3 Code 0.0.38 is the newest release");
+    expect(getConstructUpdateDetail(current)).toBe("Up to date · T3 Code 0.0.38 (newest on its channel)");
     expect(getConstructUpdateTooltip(current)).toBe("Construct and T3 Code are up to date");
     expect(getConstructUpdateButtonLabel(current)).toBe("Check for Updates");
     expect(getConstructUpdateNotificationKey(current)).toBeNull();
@@ -83,8 +83,9 @@ describe("construct update presentation", () => {
       action: "update-construct",
     };
     expect(getConstructUpdateHeadline(info)).toBe("Construct update available");
-    expect(getConstructUpdateDetail(info)).toContain("A newer Construct release (fffffff) is published; this PC has dc44958.");
-    expect(getConstructUpdateDetail(info)).toContain("reprovision the VM afterwards");
+    expect(getConstructUpdateDetail(info)).toBe(
+      "A new Construct update is available. Click to install it on this PC. This doesn't interrupt your work in T3 Code.",
+    );
     expect(getConstructUpdateTooltip(info)).toBe(
       "Construct update available — click to update Construct on this PC.",
     );
@@ -92,9 +93,7 @@ describe("construct update presentation", () => {
     expect(getConstructUpdateNotificationKey(info)).toBe(
       `construct:update-construct:${INSTALLED}:${INSTALLED}:-`,
     );
-    expect(getConstructUpdateDetail({ ...info, installedCommit: null })).toContain(
-      "A newer Construct release (fffffff) is published; this PC has an unknown version.",
-    );
+    expect(getConstructUpdateDetail({ ...info, installedCommit: null })).toBe(getConstructUpdateDetail(info));
     expect(getConstructUpdateNotificationKey({ ...info, latestCommit: "e".repeat(40) })).toBe(
       getConstructUpdateNotificationKey(info),
     );
@@ -108,9 +107,9 @@ describe("construct update presentation", () => {
       action: "reprovision",
     };
     expect(getConstructUpdateHeadline(stale)).toBe("VM reprovision pending");
-    expect(getConstructUpdateDetail(stale)).toContain("provisioned with Construct b262652");
-    expect(getConstructUpdateDetail(stale)).toContain("this PC has dc44958");
-    expect(getConstructUpdateDetail(stale)).toContain('VM "agent-vm"');
+    expect(getConstructUpdateDetail(stale)).toBe(
+      'The latest Construct update has not yet been installed onto "agent-vm". Click to reprovision and update all your tools. This might interrupt your agents if they get an update too.',
+    );
     expect(getConstructUpdateButtonLabel(stale)).toBe("Reprovision VM");
 
     const t3: ConstructUpdateInfo = {
@@ -120,7 +119,9 @@ describe("construct update presentation", () => {
       action: "reprovision",
     };
     expect(getConstructUpdateHeadline(t3)).toBe("T3 Code update available");
-    expect(getConstructUpdateDetail(t3)).toContain("T3 Code 0.0.39 is available upstream");
+    expect(getConstructUpdateDetail(t3)).toBe(
+      'T3 Code 0.0.39 is available. Click to reprovision "agent-vm" and install it. This might interrupt your agents if they get an update too.',
+    );
     expect(getConstructUpdateNotificationKey(t3)).toBe(
       `construct:reprovision:agent-vm:agent-vm.mshome.net:${INSTALLED}:${INSTALLED}:0.0.39`,
     );
@@ -132,8 +133,7 @@ describe("construct update presentation", () => {
       provisionedCommit: PROVISIONED,
     };
     expect(getConstructUpdateHeadline(both)).toBe("VM reprovision pending");
-    expect(getConstructUpdateDetail(both)).toContain("b262652");
-    expect(getConstructUpdateDetail(both)).toContain("0.0.39");
+    expect(getConstructUpdateDetail(both)).toBe(getConstructUpdateDetail(stale));
   });
 
   it("marks a running script and a failed check", () => {
@@ -247,7 +247,7 @@ describe("thread VM update offers", () => {
     expect(offer.vmName).toBe("thread-vm");
     expect(offer.action).toBe("reprovision");
     expect(offer.provisionedCommit).toBe(PROVISIONED);
-    expect(getConstructUpdateDetail(offer)).toContain('VM "thread-vm"');
+    expect(getConstructUpdateDetail(offer)).toContain('onto "thread-vm"');
   });
 
   it("does not borrow the default VM's stale status", () => {

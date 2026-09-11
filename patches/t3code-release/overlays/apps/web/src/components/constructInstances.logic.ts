@@ -333,7 +333,7 @@ export function planConstructProviderRows(input: {
           ? "Not linked in this app yet."
           : marker.status === "failed"
             ? `Automatic link failed: ${marker.error ?? "unknown error"}`
-            : "Linked before; the connection was removed from this app.";
+            : "Link removed from this app.";
       return {
         settingsButton: planConstructSettingsButton(input.companionInstalled === true),
         id: `instance:${instance.name}`,
@@ -379,7 +379,7 @@ export function planConstructProviderRows(input: {
         t3LatestVersion: null,
         t3UpdateAvailable: false,
         canReprovision: false,
-        note: `Not a Construct instance of this PC${host ? ` (${host})` : ""} — Construct can only reprovision VMs listed in its instance registry.`,
+        note: `Not a Construct instance of this PC${host ? ` (${host})` : ""}.`,
       };
     }
     const own = instance.provisionedCommit;

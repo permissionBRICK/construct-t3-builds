@@ -247,7 +247,7 @@ function ConstructInstanceRow({
         stackedThreadToast({
           type: "error",
           title: `Could not link ${row.instanceName}`,
-          description: "This Desktop build cannot mint pairing links; pair the VM from the Construct panel instead.",
+          description: "Pair the VM from the Construct panel instead.",
         }),
       );
       return;
@@ -260,7 +260,7 @@ function ConstructInstanceRow({
           stackedThreadToast({
             type: "success",
             title: `Linked ${row.instanceName}`,
-            description: "The VM's T3 server was added as a remote environment. It reconnects on app startup.",
+            description: "Added as a remote environment.",
           }),
         );
       } else if (!outcome.interrupted) {
@@ -288,8 +288,7 @@ function ConstructInstanceRow({
           ? stackedThreadToast({
               type: "info",
               title: `Reprovisioning ${row.instanceName}`,
-              description:
-                "Follow the Construct reprovision console window. When it installs a new T3 Code Desktop build, this app closes and reopens on its own.",
+              description: "Running in a console window. The app restarts by itself if a new Desktop build is installed.",
             })
           : stackedThreadToast({
               type: "error",
