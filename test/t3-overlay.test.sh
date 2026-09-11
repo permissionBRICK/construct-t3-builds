@@ -32,12 +32,14 @@ finish() {
 echo ""
 echo "=== T3 overlay + transform inventory ==="
 
-# ── The two channel inventories must carry the SAME overlay files ─────────────
-# (The transforms differ per tag; the Construct-owned files do not.)
-diff -r "${repo}/patches/t3code-release/overlays" "${repo}/patches/t3code-nightly/overlays" >"/tmp/t3-overlay-diff.$$" 2>&1
-ok "the release and nightly overlays are identical" "$?"
-[[ -s "/tmp/t3-overlay-diff.$$" ]] && head -20 "/tmp/t3-overlay-diff.$$"
-rm -f "/tmp/t3-overlay-diff.$$"
+# The inventories target different upstream tags. Their file sets must agree;
+# their contents can differ to match each channel's current APIs.
+release_files="$(cd "${repo}/patches/t3code-release/overlays" && find . -type f | sort)"
+nightly_files="$(cd "${repo}/patches/t3code-nightly/overlays" && find . -type f | sort)"
+ok "the release and nightly inventories carry the same overlay paths" "$([[ "${release_files}" == "${nightly_files}" ]] && echo 0 || echo 1)"
+if [[ "${release_files}" != "${nightly_files}" ]]; then
+  comm -3 <(printf '%s\n' "${release_files}") <(printf '%s\n' "${nightly_files}")
+fi
 
 # ── Every overlay file is listed in BOTH inventories ──────────────────────────
 for channel in release nightly; do

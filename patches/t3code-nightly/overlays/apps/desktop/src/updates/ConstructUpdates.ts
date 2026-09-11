@@ -107,6 +107,74 @@ export function constructCompareUrl(markers: ConstructMarkers): string | null {
   return `https://api.github.com/repos/${markers.repo}/compare/${markers.installedCommit}...${markers.ref}`;
 }
 
+// ── Construct Companion ─────────────────────────────────────────────────────────
+
+/** Pure Windows path resolution, including the Companion's TEMP fallback. */
+export function resolveConstructCompanionPath(
+  localAppData: string | undefined,
+  temp: string | undefined,
+): string | null {
+  const base = localAppData || temp;
+  if (!base || !NodePath.win32.isAbsolute(base)) return null;
+  return NodePath.win32.join(base, "Programs", "ConstructCompanion", "ConstructCompanion.exe");
+}
+
+export function findConstructCompanion(
+  localAppData: string | undefined,
+  temp: string | undefined,
+  platform: string,
+  fs: ConstructFileSystem,
+): string | null {
+  if (platform !== "win32") return null;
+  const executable = resolveConstructCompanionPath(localAppData, temp);
+  if (executable === null) return null;
+  const marker = NodePath.win32.join(NodePath.win32.dirname(executable), "install.json");
+  return fs.fileMtimeMs(marker) !== null && fs.fileMtimeMs(executable) !== null ? executable : null;
+}
+
+/** Start/activate the per-user Companion; never wait for its process to exit. */
+export function openConstructCompanion(
+  instanceName: string | null,
+  options: {
+    readonly localAppData: string | undefined;
+    readonly temp: string | undefined;
+    readonly platform: string;
+    readonly fs: ConstructFileSystem;
+    readonly onError: (error: Error) => void;
+    readonly spawn?: typeof NodeChildProcess.spawn;
+  },
+): boolean {
+  const executable = findConstructCompanion(
+    options.localAppData,
+    options.temp,
+    options.platform,
+    options.fs,
+  );
+  if (executable === null) return false;
+  if (instanceName !== null) {
+    const registry = readConstructInstancesFromRegistry(
+      options.localAppData,
+      options.fs,
+      NodePath.win32.join,
+    );
+    if (!registry.instances.some((instance) => instance.name === instanceName)) return false;
+  }
+  try {
+    const child = (options.spawn ?? NodeChildProcess.spawn)(
+      executable,
+      instanceName === null ? ["--panel"] : ["--settings", "--instance", instanceName],
+      { detached: true, stdio: "ignore", shell: false, windowsHide: true },
+    );
+    // A failed asynchronous spawn must not become an unhandled EventEmitter error.
+    child.once("error", options.onError);
+    child.unref();
+    return true;
+  } catch (error) {
+    options.onError(error instanceof Error ? error : new Error(String(error)));
+    return false;
+  }
+}
+
 // ── Install markers ─────────────────────────────────────────────────────────────
 
 export interface ConstructMarkers {
@@ -1354,6 +1422,7 @@ export function isNewerConstructT3Version(
 // ── Derivation ──────────────────────────────────────────────────────────────────
 
 export interface ConstructCheckSnapshot {
+  readonly companionInstalled: boolean;
   readonly scriptsDir: string | null;
   readonly markers: ConstructMarkers;
   readonly target: ConstructVmTarget;
@@ -1404,6 +1473,7 @@ export function deriveConstructUpdateInfo(snapshot: ConstructCheckSnapshot): Con
     snapshot.channel,
   );
   return {
+    companionInstalled: snapshot.companionInstalled,
     repo: snapshot.markers.repo,
     ref: snapshot.markers.ref,
     scriptsDir: snapshot.scriptsDir,
@@ -1516,6 +1586,8 @@ export function applyConstructInfoToState(
 // ── The check ───────────────────────────────────────────────────────────────────
 
 export interface ConstructCheckOptions {
+  readonly platform?: string;
+  readonly temp?: string;
   readonly appVersion: string;
   readonly localAppData: string | undefined;
   readonly fs: ConstructFileSystem;
@@ -1613,6 +1685,9 @@ export async function checkConstructUpdates(
   }
 
   return deriveConstructUpdateInfo({
+    companionInstalled: findConstructCompanion(
+      options.localAppData, options.temp, options.platform ?? process.platform, options.fs,
+    ) !== null,
     scriptsDir,
     markers,
     target,
