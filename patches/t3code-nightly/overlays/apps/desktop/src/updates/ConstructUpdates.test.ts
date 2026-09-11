@@ -1,3 +1,5 @@
+import { EventEmitter } from "node:events";
+import type { spawn as nodeSpawn } from "node:child_process";
 import { assert, describe, it } from "@effect/vitest";
 import type { ConstructUpdateInfo, DesktopUpdateState } from "@t3tools/contracts";
 
@@ -12,6 +14,9 @@ import {
   DEFAULT_CONSTRUCT_VM_TARGET,
   deriveConstructUpdateInfo,
   findConstructScriptsDir,
+  resolveConstructCompanionPath,
+  findConstructCompanion,
+  openConstructCompanion,
   isConstructManagedBuild,
   isConstructProvisionStale,
   isNewerConstructT3Version,
@@ -283,6 +288,7 @@ describe("ConstructUpdates action + state derivation", () => {
 
   it("folds an available action into an `available` state the stock pill understands", () => {
     const info = deriveConstructUpdateInfo({
+      companionInstalled: false,
       scriptsDir: SCRIPTS_DIR,
       instances: [],
       target: DEFAULT_CONSTRUCT_VM_TARGET,
@@ -308,6 +314,7 @@ describe("ConstructUpdates action + state derivation", () => {
 
   it("publishes per-VM staleness and keeps the default instance's reprovision offer", () => {
     const t3 = deriveConstructUpdateInfo({
+      companionInstalled: false,
       scriptsDir: SCRIPTS_DIR,
       instances: [],
       target: DEFAULT_CONSTRUCT_VM_TARGET,
@@ -332,6 +339,7 @@ describe("ConstructUpdates action + state derivation", () => {
     );
 
     const stale = deriveConstructUpdateInfo({
+      companionInstalled: false,
       scriptsDir: SCRIPTS_DIR,
       instances: [],
       target: DEFAULT_CONSTRUCT_VM_TARGET,
@@ -356,6 +364,7 @@ describe("ConstructUpdates action + state derivation", () => {
   it("marks a running script as an indeterminate download and a failed check as an error", () => {
     const running = applyConstructInfoToState(baseState, {
       ...deriveConstructUpdateInfo({
+        companionInstalled: false,
         scriptsDir: SCRIPTS_DIR,
         instances: [],
         target: DEFAULT_CONSTRUCT_VM_TARGET,
@@ -379,6 +388,7 @@ describe("ConstructUpdates action + state derivation", () => {
     const failed = applyConstructInfoToState(
       baseState,
       deriveConstructUpdateInfo({
+        companionInstalled: false,
         scriptsDir: SCRIPTS_DIR,
         instances: [],
         target: DEFAULT_CONSTRUCT_VM_TARGET,
@@ -400,6 +410,7 @@ describe("ConstructUpdates action + state derivation", () => {
     const current = applyConstructInfoToState(
       baseState,
       deriveConstructUpdateInfo({
+        companionInstalled: false,
         scriptsDir: SCRIPTS_DIR,
         instances: [],
         target: DEFAULT_CONSTRUCT_VM_TARGET,
@@ -514,6 +525,7 @@ describe("checkConstructUpdates", () => {
 
   it("re-reads the markers locally and carries the remote results over while a script runs", async () => {
     const previous: ConstructUpdateInfo = {
+      companionInstalled: false,
       repo: "permissionBRICK/The-Construct",
       ref: "main",
       scriptsDir: SCRIPTS_DIR,
@@ -553,6 +565,7 @@ describe("checkConstructUpdates", () => {
 
   it("drops carried-over compare results once the installed commit changed", async () => {
     const previous: ConstructUpdateInfo = {
+      companionInstalled: false,
       repo: "permissionBRICK/The-Construct",
       ref: "main",
       scriptsDir: SCRIPTS_DIR,
@@ -1884,5 +1897,204 @@ describe("parseConstructPairingLinkOutput", () => {
     if (!crashed.ok) assert.include(crashed.error, "something broke");
     const silent = parseConstructPairingLinkOutput("", { code: 0, stderr: "" });
     assert.isFalse(silent.ok);
+  });
+});
+
+describe("Construct Companion", () => {
+  const base = "C:\\Users\\Alice Smith & Bob\\AppData\\Local";
+  const executable = `${base}\\Programs\\ConstructCompanion\\ConstructCompanion.exe`;
+  const marker = `${base}\\Programs\\ConstructCompanion\\install.json`;
+  const files = {
+    [executable]: { mtime: 1 },
+    [marker]: { mtime: 1 },
+    [`${base}\\The-Construct\\instances.json`]: {
+      mtime: 1,
+      text: JSON.stringify({ version: 1, instances: { "work-vm": {} } }),
+    },
+  };
+
+  it("resolves the fixed Windows path without quoting or shell escaping", () => {
+    assert.equal(resolveConstructCompanionPath(base, "D:\\Temp"), executable);
+    assert.equal(resolveConstructCompanionPath(`${base}\\`, undefined), executable);
+  });
+
+  it("uses TEMP only when LOCALAPPDATA is absent and refuses relative paths", () => {
+    assert.equal(resolveConstructCompanionPath(undefined, base), executable);
+    assert.equal(resolveConstructCompanionPath("", base), executable);
+    assert.isNull(resolveConstructCompanionPath(undefined, undefined));
+    assert.isNull(resolveConstructCompanionPath("relative", undefined));
+  });
+
+  it("requires both the install marker and the executable, on Windows", () => {
+    assert.equal(findConstructCompanion(base, undefined, "win32", makeFs({ files })), executable);
+    assert.isNull(findConstructCompanion(base, undefined, "linux", makeFs({ files })));
+    assert.isNull(
+      findConstructCompanion(
+        base,
+        undefined,
+        "win32",
+        makeFs({
+          files: {
+            [executable]: files[executable],
+          },
+        }),
+      ),
+    );
+    assert.isNull(
+      findConstructCompanion(
+        base,
+        undefined,
+        "win32",
+        makeFs({
+          files: {
+            [marker]: files[marker],
+          },
+        }),
+      ),
+    );
+  });
+
+  function launchFixture() {
+    const calls: unknown[][] = [];
+    const errors: Error[] = [];
+    const child = new EventEmitter();
+    let unrefs = 0;
+    Object.assign(child, {
+      unref: () => {
+        unrefs++;
+      },
+    });
+    const spawn = ((...args: unknown[]) => {
+      calls.push(args);
+      return child;
+    }) as unknown as typeof nodeSpawn;
+    return {
+      calls,
+      errors,
+      child,
+      unrefs: () => unrefs,
+      options: {
+        localAppData: base,
+        temp: undefined,
+        platform: "win32",
+        fs: makeFs({ files }),
+        spawn,
+        onError: (error: Error) => {
+          errors.push(error);
+        },
+      },
+    };
+  }
+
+  it("launches the host panel detached and returns before any process event", () => {
+    const fixture = launchFixture();
+    assert.isTrue(openConstructCompanion(null, fixture.options));
+    assert.deepEqual(fixture.calls, [
+      [
+        executable,
+        ["--panel"],
+        {
+          detached: true,
+          stdio: "ignore",
+          shell: false,
+          windowsHide: true,
+        },
+      ],
+    ]);
+    assert.equal(fixture.unrefs(), 1);
+    assert.equal(fixture.child.listenerCount("exit"), 0);
+  });
+
+  it("passes the selected registered instance as separate settings arguments", () => {
+    const fixture = launchFixture();
+    assert.isTrue(openConstructCompanion("work-vm", fixture.options));
+    assert.deepEqual(fixture.calls[0]?.[1], ["--settings", "--instance", "work-vm"]);
+    assert.isTrue(openConstructCompanion("agent-vm", fixture.options));
+    assert.deepEqual(fixture.calls[1]?.[1], ["--settings", "--instance", "agent-vm"]);
+  });
+
+  it("uses the displayed registry when only the Companion install falls back to TEMP", () => {
+    const fixture = launchFixture();
+    const tempFiles = {
+      ...files,
+      [`${base}\\The-Construct\\instances.json`]: {
+        mtime: 1,
+        text: JSON.stringify({ version: 1, instances: { "agent-vm": null, "work-vm": {} } }),
+      },
+    };
+    const options = {
+      ...fixture.options,
+      localAppData: undefined,
+      temp: base,
+      fs: makeFs({ files: tempFiles }),
+    };
+    // T3 synthesizes agent-vm without LOCALAPPDATA; TEMP must not retarget that row.
+    assert.isTrue(openConstructCompanion("agent-vm", options));
+    assert.deepEqual(fixture.calls[0]?.[1], ["--settings", "--instance", "agent-vm"]);
+    assert.isFalse(openConstructCompanion("work-vm", options));
+    assert.equal(fixture.calls.length, 1);
+  });
+
+  it("rejects unknown or malformed instances without falling back to the host panel", () => {
+    const fixture = launchFixture();
+    for (const name of ["missing-vm", "", "--panel", "work-vm & calc.exe"]) {
+      assert.isFalse(openConstructCompanion(name, fixture.options));
+    }
+    assert.deepEqual(fixture.calls, []);
+  });
+
+  it("rechecks installation at activation time and never launches on other platforms", () => {
+    const fixture = launchFixture();
+    assert.isFalse(openConstructCompanion(null, { ...fixture.options, fs: makeFs({}) }));
+    assert.isFalse(openConstructCompanion(null, { ...fixture.options, platform: "linux" }));
+    assert.deepEqual(fixture.calls, []);
+  });
+
+  it("handles both asynchronous and synchronous spawn errors", () => {
+    const fixture = launchFixture();
+    assert.isTrue(openConstructCompanion(null, fixture.options));
+    const error = new Error("spawn failed");
+    fixture.child.emit("error", error);
+    assert.deepEqual(fixture.errors, [error]);
+    assert.isFalse(
+      openConstructCompanion(null, {
+        ...fixture.options,
+        spawn: (() => {
+          throw error;
+        }) as unknown as typeof nodeSpawn,
+      }),
+    );
+    assert.deepEqual(fixture.errors, [error, error]);
+  });
+
+  it("publishes freshly detected installation state on local refreshes", async () => {
+    const options = {
+      appVersion: "0.0.40-construct.abcdef12",
+      localAppData: base,
+      platform: "win32",
+      runningAction: null,
+      now: () => "now",
+      joinPath: join,
+    } as const;
+    const installed = await checkConstructUpdates({
+      ...options,
+      previous: null,
+      fs: makeFs({ files }),
+    });
+    assert.isTrue(installed.companionInstalled);
+    const removed = await checkConstructUpdates({
+      ...options,
+      previous: installed,
+      fs: makeFs({}),
+    });
+    assert.isFalse(removed.companionInstalled);
+    const fallback = await checkConstructUpdates({
+      ...options,
+      localAppData: undefined,
+      temp: base,
+      previous: null,
+      fs: makeFs({ files }),
+    });
+    assert.isTrue(fallback.companionInstalled);
   });
 });
