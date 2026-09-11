@@ -33,6 +33,8 @@ Stable discovery: `/releases/latest/download/manifest.json`.
 Nightly discovery: `/repos/permissionBRICK/construct-t3-builds/releases`, filter
 non-draft prereleases with a nightly identity and all four assets.
 
+The Desktop app discovers Construct updates from the published release manifest, the same as the control panel.
+
 ## Identity and local builds
 
 The selected inventory, transformer, two runtime patchers and artifact recipe

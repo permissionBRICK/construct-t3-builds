@@ -83,10 +83,6 @@ export function getConstructVersionLabel(info: ConstructUpdateInfo): string {
   return commit === null ? info.ref : `${info.ref}@${commit}`;
 }
 
-function commitCount(count: number): string {
-  return `${count} new commit${count === 1 ? "" : "s"}`;
-}
-
 export function getConstructUpdateHeadline(info: ConstructUpdateInfo): string {
   if (info.runningAction === "update-construct") return "Construct update running";
   if (info.runningAction === "reprovision") return "Construct reprovision running";
@@ -110,10 +106,9 @@ export function getConstructUpdateDetail(info: ConstructUpdateInfo): string {
       : `Follow the "${title}" console window. This app picks the result up when the window closes; reprovision the VM afterwards to apply the update there.`;
   }
   if (info.action === "update-construct") {
-    const change =
-      info.behind !== null && info.behind > 0
-        ? `Construct ${info.ref} has ${commitCount(info.behind)} since the version installed on this PC.`
-        : `The Construct commit installed on this PC is no longer on ${info.ref}.`;
+    const latest = shortConstructCommit(info.latestCommit);
+    const installed = shortConstructCommit(info.installedCommit) ?? "an unknown version";
+    const change = `A newer Construct release (${latest}) is published; this PC has ${installed}.`;
     return `${change} Updating refreshes the Construct scripts and the VS Code control panel here; reprovision the VM afterwards to apply it there.`;
   }
   if (info.action === "reprovision") {
@@ -163,8 +158,8 @@ export function getConstructUpdateButtonLabel(info: ConstructUpdateInfo): string
   return "Check for Updates";
 }
 
-/** Identity of an offer, for "show the popup once per offer". Excludes the behind-count
- *  so every new upstream commit does not re-raise a dismissed prompt. */
+/** Identity of an offer, for "show the popup once per offer". Excludes the published commit
+ *  so every newly published release does not re-raise a dismissed prompt. */
 export function getConstructUpdateNotificationKey(info: ConstructUpdateInfo): string | null {
   if (info.action === null || info.runningAction !== null) return null;
   return [
