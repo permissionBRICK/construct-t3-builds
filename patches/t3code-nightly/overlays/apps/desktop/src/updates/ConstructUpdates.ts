@@ -11,7 +11,7 @@
 // and silently installed on this PC. So the Desktop app's update control
 // mirrors what the VS Code control panel does instead:
 //
-//   1. Construct itself is behind its GitHub ref  -> "update-construct"
+//   1. A different Construct release is published  -> "update-construct"
 //      (Update-Construct.ps1: refreshes the scripts + VS Code panel on this PC;
 //      the panel's own "Update Construct" button does exactly this).
 //   2. The VM was provisioned with a different Construct than the one installed
@@ -102,9 +102,9 @@ export function constructT3RegistryUrl(channel: DesktopUpdateChannel): string {
     : "https://registry.npmjs.org/t3/latest";
 }
 
-export function constructCompareUrl(markers: ConstructMarkers): string | null {
-  if (!markers.installedCommit) return null;
-  return `https://api.github.com/repos/${markers.repo}/compare/${markers.installedCommit}...${markers.ref}`;
+export function constructManifestUrl(markers: ConstructMarkers): string | null {
+  if (!markers.installedCommit || markers.ref !== "main" || !REPO_PATTERN.test(markers.repo)) return null;
+  return `https://github.com/${markers.repo}/releases/latest/download/manifest.json`;
 }
 
 // ── Construct Companion ─────────────────────────────────────────────────────────
@@ -1354,11 +1354,10 @@ export type ConstructFetchJson = (url: string) => Promise<ConstructJsonResponse 
 export const fetchConstructJson: ConstructFetchJson = async (url) => {
   try {
     const response = await fetch(url, {
+      redirect: "follow",
       headers: {
         "User-Agent": "construct-t3code-desktop",
-        Accept: url.includes("registry.npmjs.org")
-          ? "application/json"
-          : "application/vnd.github+json",
+        Accept: "application/json",
       },
       signal: AbortSignal.timeout(8_000),
     });
@@ -1370,25 +1369,33 @@ export const fetchConstructJson: ConstructFetchJson = async (url) => {
   }
 };
 
-export interface ConstructCompareResult {
+export interface ConstructManifestResult {
   readonly available: boolean;
-  /** Commits behind; null when the distance is unknown. */
-  readonly behind: number | null;
+  readonly commit: string;
 }
 
-/** Shape a GitHub compare response (base = installed ... head = ref). A 404 means the
- *  installed commit no longer exists on the remote (history rewrite / force-push): the
- *  only sane offer is "update", with no distance — the panel does the same. */
-export function constructUpdateFromCompare(
-  response: ConstructJsonResponse | null,
-): ConstructCompareResult | null {
-  if (response === null) return null;
-  if (response.status === 404) return { available: true, behind: null };
-  const json = response.json;
-  if (typeof json !== "object" || json === null) return null;
-  const aheadBy = (json as { ahead_by?: unknown }).ahead_by;
-  if (typeof aheadBy !== "number" || !Number.isFinite(aheadBy)) return null;
-  return { available: aheadBy > 0, behind: aheadBy };
+/** Validate the complete published host release, as the control panel does. A different
+ *  commit means an update is published, without implying a commit distance. */
+export function constructUpdateFromManifest(
+  value: unknown,
+  markers: ConstructMarkers,
+): ConstructManifestResult | null {
+  if (constructManifestUrl(markers) === null || typeof value !== "object" || value === null) return null;
+  const json = value as Record<string, unknown>;
+  if (
+    json.schemaVersion !== 1 || json.repository !== markers.repo ||
+    json.ref !== "refs/heads/main" || typeof json.commit !== "string" ||
+    !/^[0-9a-f]{40}$/.test(json.commit) || json.releaseTag !== `host-${json.commit}` ||
+    json.sourceAsset !== `construct-source-${json.commit}.zip` ||
+    typeof json.sourceSha256 !== "string" || !/^[0-9a-f]{64}$/.test(json.sourceSha256) ||
+    typeof json.sourceSizeBytes !== "number" || !Number.isSafeInteger(json.sourceSizeBytes) ||
+    json.sourceSizeBytes <= 0 || json.sourceSizeBytes > 1073741824 ||
+    json.payloadAsset !== `construct-host-${json.commit.slice(0, 7)}-win-x64.zip` ||
+    typeof json.payloadSha256 !== "string" || !/^[0-9a-f]{64}$/.test(json.payloadSha256) ||
+    typeof json.payloadSizeBytes !== "number" || !Number.isSafeInteger(json.payloadSizeBytes) ||
+    json.payloadSizeBytes <= 0 || json.payloadSizeBytes > 1073741824
+  ) return null;
+  return { available: !json.commit.startsWith(markers.installedCommit!), commit: json.commit };
 }
 
 /** The version string of an npm dist-tag manifest (`registry.npmjs.org/t3/<tag>`). */
@@ -1429,7 +1436,7 @@ export interface ConstructCheckSnapshot {
   /** Every instance this PC manages, with its own provisioned commit and channel — the
    *  renderer pairs them with the remotes T3 is linked to (B14, plan §4.12). */
   readonly instances: ReadonlyArray<ConstructInstanceInfo>;
-  readonly compare: ConstructCompareResult | null;
+  readonly manifest: ConstructManifestResult | null;
   readonly t3Version: string;
   readonly t3LatestVersion: string | null;
   /** The newest release on each channel this PC's instances run (see the check). */
@@ -1465,7 +1472,7 @@ export function resolveConstructAction(input: {
 }
 
 export function deriveConstructUpdateInfo(snapshot: ConstructCheckSnapshot): ConstructUpdateInfo {
-  const constructUpdateAvailable = snapshot.compare?.available === true;
+  const constructUpdateAvailable = snapshot.manifest?.available === true;
   const provisionStale = isConstructProvisionStale(snapshot.markers);
   const t3UpdateAvailable = isNewerConstructT3Version(
     snapshot.t3LatestVersion,
@@ -1482,7 +1489,7 @@ export function deriveConstructUpdateInfo(snapshot: ConstructCheckSnapshot): Con
     instances: snapshot.instances,
     installedCommit: snapshot.markers.installedCommit,
     provisionedCommit: snapshot.markers.provisionedCommit,
-    behind: snapshot.compare?.behind ?? null,
+    latestCommit: snapshot.manifest?.commit ?? null,
     constructUpdateAvailable,
     provisionStale,
     t3Version: snapshot.t3Version,
@@ -1509,9 +1516,7 @@ export function shortConstructCommit(commit: string | null): string | null {
 export function constructAvailableVersionLabel(info: ConstructUpdateInfo): string | null {
   const action = info.runningAction ?? info.action;
   if (action === "update-construct") {
-    return info.behind !== null && info.behind > 0
-      ? `Construct ${info.ref} (${info.behind} commit${info.behind === 1 ? "" : "s"} behind)`
-      : `Construct ${info.ref}`;
+    return `Construct ${info.ref}`;
   }
   if (action === "reprovision") {
     if (info.t3UpdateAvailable && info.t3LatestVersion !== null) {
@@ -1641,7 +1646,7 @@ export async function checkConstructUpdates(
 
   // Remote results: fresh when a fetcher is given, else carried over from the previous
   // check as long as they still describe the same installed commit / channel.
-  let compare: ConstructCompareResult | null = null;
+  let manifest: ConstructManifestResult | null = null;
   let t3LatestVersion: string | null = null;
   // The upstream release per channel. Rows are per instance and instances can be on
   // DIFFERENT channels (plan §4.12), so a row on the other channel would otherwise be
@@ -1654,10 +1659,13 @@ export async function checkConstructUpdates(
   const otherChannel: DesktopUpdateChannel = channel === "nightly" ? "latest" : "nightly";
   const someInstanceOnOtherChannel = instances.some((i) => i.channel === otherChannel);
   if (options.fetchJson) {
-    const compareUrl = constructCompareUrl(markers);
-    if (compareUrl !== null) {
-      compare = constructUpdateFromCompare(await options.fetchJson(compareUrl));
-      if (compare === null) errors.push("Could not check GitHub for Construct updates.");
+    const manifestUrl = constructManifestUrl(markers);
+    if (manifestUrl !== null) {
+      const response = await options.fetchJson(manifestUrl);
+      manifest = response !== null && response.status >= 200 && response.status < 300
+        ? constructUpdateFromManifest(response.json, markers)
+        : null;
+      if (manifest === null) errors.push("Could not check GitHub for Construct updates.");
     }
     t3LatestVersion = constructT3VersionFromRegistry(
       await options.fetchJson(constructT3RegistryUrl(channel)),
@@ -1670,8 +1678,9 @@ export async function checkConstructUpdates(
       );
     }
   } else if (previous !== null) {
-    if (previous.installedCommit === markers.installedCommit && previous.installedCommit !== null) {
-      compare = { available: previous.constructUpdateAvailable, behind: previous.behind };
+    if (previous.installedCommit === markers.installedCommit && constructManifestUrl(markers) !== null &&
+        previous.latestCommit != null) {
+      manifest = { available: previous.constructUpdateAvailable, commit: previous.latestCommit };
     }
     t3LatestVersion = previous.t3LatestVersion;
     // Optional chaining: `previous` can come from a state this build did not write
@@ -1692,7 +1701,7 @@ export async function checkConstructUpdates(
     markers,
     target,
     instances,
-    compare,
+    manifest,
     t3Version,
     t3LatestVersion,
     t3LatestByChannel,

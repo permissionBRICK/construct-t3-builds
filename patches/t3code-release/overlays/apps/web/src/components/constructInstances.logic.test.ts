@@ -61,7 +61,7 @@ function info(over: Partial<ConstructUpdateInfo> = {}): ConstructUpdateInfo {
     instances: INSTANCES,
     installedCommit: INSTALLED,
     provisionedCommit: INSTALLED,
-    behind: null,
+    latestCommit: null,
     constructUpdateAvailable: false,
     provisionStale: false,
     t3Version: "0.0.38",
