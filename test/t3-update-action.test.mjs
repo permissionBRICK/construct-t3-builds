@@ -37,7 +37,7 @@ for(const channel of ['release','nightly']) {
   'data:text/javascript;base64,'+Buffer.from(presentation.outputFiles[0].text).toString('base64'));
  const hostInfo={...info,action:'update-construct'};
  assert.equal(getConstructUpdateDetail(hostInfo),
-  'A newer Construct release (fffffff) is published; this PC has ddddddd. Updating refreshes the Construct scripts and the VS Code control panel here; reprovision the VM afterwards to apply it there.');
+  "A new Construct update is available. Click to install it on this PC. This doesn't interrupt your work in T3 Code.");
  assert.equal(getConstructUpdateNotificationKey(hostInfo),
   getConstructUpdateNotificationKey({...hostInfo,latestCommit:'e'.repeat(40)}));
  assert.equal(await startConstructUpdate(bridge,{...info,action:null,constructUpdateAvailable:false,latestCommit:null}),false);
