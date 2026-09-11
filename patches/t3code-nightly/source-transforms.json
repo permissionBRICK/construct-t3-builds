@@ -461,8 +461,8 @@
     },
     {
       "path": "apps/web/src/components/settings/SettingsPanels.tsx",
-      "find": "import { useProjects } from \"../../state/entities\";",
-      "replace": "import { useProjects, useServerConfigs } from \"../../state/entities\";"
+      "after": "import { EMPTY_SERVER_PROVIDERS } from \"../../state/server\";",
+      "insert": "import { useServerConfigs } from \"../../state/entities\";\n"
     },
     {
       "path": "apps/web/src/components/settings/SettingsPanels.tsx",
@@ -496,7 +496,7 @@
     },
     {
       "path": "apps/web/src/components/settings/SettingsPanels.tsx",
-      "before": "<SettingsRow\nserverScoped\n{...searchableSetting(\"provider-update-checks\")}",
+      "after": "<SettingsSection id=\"behavior\" title=\"Behavior\">",
       "insert": "        {showVoiceInputSource ? (\n          <SettingsRow\n            {...searchableSetting(\"voice-input-source\")}\n            description=\"Choose where voice input records. Automatic uses this device's microphone when it is available, and the Construct host bridge otherwise.\"\n            resetAction={\n              settings.voiceInputSource !== DEFAULT_UNIFIED_SETTINGS.voiceInputSource ? (\n                <SettingResetButton\n                  label=\"voice input source\"\n                  onClick={() =>\n                    updateSettings({\n                      voiceInputSource: DEFAULT_UNIFIED_SETTINGS.voiceInputSource,\n                    })\n                  }\n                />\n              ) : null\n            }\n            control={\n              <Select\n                value={settings.voiceInputSource}\n                onValueChange={(value) => {\n                  if (isVoiceInputSourcePreference(value)) {\n                    updateSettings({ voiceInputSource: value });\n                  }\n                }}\n              >\n                <SelectTrigger className=\"w-full sm:w-52\" aria-label=\"Voice input source\">\n                  <SelectValue>{VOICE_INPUT_SOURCE_LABELS[settings.voiceInputSource]}</SelectValue>\n                </SelectTrigger>\n                <SelectPopup align=\"end\" alignItemWithTrigger={false}>\n                  {Object.entries(VOICE_INPUT_SOURCE_LABELS).map(([value, label]) => (\n                    <SelectItem hideIndicator key={value} value={value}>\n                      {label}\n                    </SelectItem>\n                  ))}\n                </SelectPopup>\n              </Select>\n            }\n          />\n        ) : null}\n\n"
     },
     {
