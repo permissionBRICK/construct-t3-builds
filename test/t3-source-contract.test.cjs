@@ -42,6 +42,36 @@ ok("source transforms: stream PCM amplitude into a live mic-button level effect"
 for (const channel of ["release", "nightly"]) {
   const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, "patches", `t3code-${channel}`, "source-transforms.json"), "utf8"));
   const inserts = manifest.transforms.map((t) => (t.insert || t.replace || "")).join("\n");
+  const companionDesktopPath = "apps/desktop/src/updates/ConstructUpdates.ts";
+  const companionRowPath = "apps/web/src/components/settings/ConstructProviderRow.tsx";
+  const companionLogicPath = "apps/web/src/components/constructInstances.logic.ts";
+  const channelOverlayRoot = path.join(repoRoot, "patches", `t3code-${channel}`, "overlays");
+  const companionDesktop = fs.readFileSync(path.join(channelOverlayRoot, companionDesktopPath), "utf8");
+  const companionRow = fs.readFileSync(path.join(channelOverlayRoot, companionRowPath), "utf8");
+  const companionLogic = fs.readFileSync(path.join(channelOverlayRoot, companionLogicPath), "utf8");
+  ok(`Companion (${channel}): both renderer overlays and the desktop overlay are inventoried`,
+    [companionDesktopPath, companionRowPath, companionLogicPath].every(p => manifest.overlays.includes(p)));
+  ok(`Companion (${channel}): one typed bridge activation method is wired through IPC`,
+    /openConstructCompanion: \(instanceName: string \| null\) => Promise<boolean>/.test(inserts) &&
+    /CONSTRUCT_OPEN_COMPANION_CHANNEL = "desktop:construct-open-companion"/.test(inserts) &&
+    /ipcRenderer\.invoke\(IpcChannels\.CONSTRUCT_OPEN_COMPANION_CHANNEL, instanceName\)/.test(inserts) &&
+    /yield\* ipc\.handle\(openConstructCompanion\)/.test(inserts) &&
+    /ConstructUpdates\.openConstructCompanion\(instanceName,/.test(inserts));
+  ok(`Companion (${channel}): installation status survives the update-state schema`,
+    /ConstructUpdateInfoSchema = Schema\.Struct\(\{\s*companionInstalled: Schema\.Boolean,/.test(inserts));
+  ok(`Companion (${channel}): activation keeps the shared CLI contract and detached argv launch`,
+    /\["--panel"\]/.test(companionDesktop) &&
+    /\["--settings", "--instance", instanceName\]/.test(companionDesktop) &&
+    /detached: true, stdio: "ignore", shell: false/.test(companionDesktop) &&
+    /child\.unref\(\)/.test(companionDesktop) &&
+    /"Programs", "ConstructCompanion", "ConstructCompanion\.exe"/.test(companionDesktop) &&
+    /"install\.json"/.test(companionDesktop));
+  ok(`Companion (${channel}): host and named Settings buttons consume the installation plan`,
+    /instanceName=\{null\}/.test(companionRow) &&
+    /instanceName=\{row\.instanceName\} state=\{row\.settingsButton\}/.test(companionRow) &&
+    /openConstructCompanion\(instanceName\)/.test(companionRow) &&
+    /disabled=\{state\.disabled\}/.test(companionRow) &&
+    /Install the Construct Companion \(Update Construct installs it\)/.test(companionLogic));
   ok(`auto-link (${channel}): the overlay files are listed and mounted at the root`,
     manifest.overlays.includes("apps/web/src/components/ConstructAutoLink.tsx") &&
     manifest.overlays.includes("apps/web/src/components/constructInstances.link.ts") &&

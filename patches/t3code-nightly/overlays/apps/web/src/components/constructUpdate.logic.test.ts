@@ -22,6 +22,7 @@ const INSTALLED = "dc44958114c7c43145c8f7830f6185235a1d752b";
 const PROVISIONED = "b262652aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 const current: ConstructUpdateInfo = {
+  companionInstalled: false,
   repo: "permissionBRICK/The-Construct",
   ref: "main",
   scriptsDir: "C:\\Users\\alice\\AppData\\Local\\The-Construct\\x\\The-Construct-main",
