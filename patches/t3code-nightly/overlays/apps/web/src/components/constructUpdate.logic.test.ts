@@ -31,7 +31,7 @@ const current: ConstructUpdateInfo = {
   instances: [],
   installedCommit: INSTALLED,
   provisionedCommit: INSTALLED,
-  behind: 0,
+  latestCommit: INSTALLED,
   constructUpdateAvailable: false,
   provisionStale: false,
   t3Version: "0.0.38",
@@ -75,15 +75,15 @@ describe("construct update presentation", () => {
     expect(getConstructUpdateNotificationKey(current)).toBeNull();
   });
 
-  it("offers the Construct update with its distance", () => {
+  it("offers the published Construct release", () => {
     const info: ConstructUpdateInfo = {
       ...current,
-      behind: 3,
+      latestCommit: "f".repeat(40),
       constructUpdateAvailable: true,
       action: "update-construct",
     };
     expect(getConstructUpdateHeadline(info)).toBe("Construct update available");
-    expect(getConstructUpdateDetail(info)).toContain("3 new commits");
+    expect(getConstructUpdateDetail(info)).toContain("A newer Construct release (fffffff) is published; this PC has dc44958.");
     expect(getConstructUpdateDetail(info)).toContain("reprovision the VM afterwards");
     expect(getConstructUpdateTooltip(info)).toBe(
       "Construct update available — click to update Construct on this PC.",
@@ -92,8 +92,12 @@ describe("construct update presentation", () => {
     expect(getConstructUpdateNotificationKey(info)).toBe(
       `construct:update-construct:${INSTALLED}:${INSTALLED}:-`,
     );
-    // A rewritten history (no distance) still reads as an update.
-    expect(getConstructUpdateDetail({ ...info, behind: null })).toContain("no longer on main");
+    expect(getConstructUpdateDetail({ ...info, installedCommit: null })).toContain(
+      "A newer Construct release (fffffff) is published; this PC has an unknown version.",
+    );
+    expect(getConstructUpdateNotificationKey({ ...info, latestCommit: "e".repeat(40) })).toBe(
+      getConstructUpdateNotificationKey(info),
+    );
   });
 
   it("explains a pending reprovision from both causes", () => {
@@ -155,10 +159,10 @@ describe("construct update presentation", () => {
     const state: DesktopUpdateState = {
       ...baseState,
       status: "available",
-      availableVersion: "Construct main (3 commits behind)",
+      availableVersion: "Construct main",
       construct: {
         ...current,
-        behind: 3,
+        latestCommit: "f".repeat(40),
         constructUpdateAvailable: true,
         action: "update-construct",
       },

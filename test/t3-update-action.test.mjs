@@ -12,7 +12,9 @@ for(const channel of ['release','nightly']) {
   }}]});
  const {startConstructUpdate}=await import('data:text/javascript;base64,'+Buffer.from(result.outputFiles[0].text).toString('base64'));
  let calls=0;
- const info={action:'reprovision',runningAction:null,vmName:'thread-vm'};
+ const info={action:'reprovision',runningAction:null,vmName:'thread-vm',
+  installedCommit:'d'.repeat(40),latestCommit:'f'.repeat(40),provisionedCommit:'d'.repeat(40),
+  constructUpdateAvailable:true,t3LatestVersion:null};
  let hostCalls=0;
  const targets=[];
  const resultFor=action=>({accepted:true,completed:false,state:{construct:{...info,runningAction:action}}});
@@ -29,5 +31,16 @@ for(const channel of ['release','nightly']) {
  assert.equal(await startConstructUpdate(bridge,{...info,action:'update-construct'}),true);
  assert.equal(hostCalls,1);
  assert.equal(calls,1);
- console.log(`PASS ${channel}: one click launches once; running action is guarded`);
+ const presentation=await build({entryPoints:[`patches/t3code-${channel}/overlays/apps/web/src/components/constructUpdate.logic.ts`],
+  bundle:true,write:false,platform:'node',format:'esm'});
+ const {getConstructUpdateDetail,getConstructUpdateNotificationKey}=await import(
+  'data:text/javascript;base64,'+Buffer.from(presentation.outputFiles[0].text).toString('base64'));
+ const hostInfo={...info,action:'update-construct'};
+ assert.equal(getConstructUpdateDetail(hostInfo),
+  'A newer Construct release (fffffff) is published; this PC has ddddddd. Updating refreshes the Construct scripts and the VS Code control panel here; reprovision the VM afterwards to apply it there.');
+ assert.equal(getConstructUpdateNotificationKey(hostInfo),
+  getConstructUpdateNotificationKey({...hostInfo,latestCommit:'e'.repeat(40)}));
+ assert.equal(await startConstructUpdate(bridge,{...info,action:null,constructUpdateAvailable:false,latestCommit:null}),false);
+ assert.equal(hostCalls,1,'no published offer must not launch a host update');
+ console.log(`PASS ${channel}: one click launches once; running/no-offer actions guarded; manifest detail and notification identity`);
 }

@@ -10,7 +10,9 @@ import {
   constructT3BaseVersion,
   constructReprovisionIdentityArgs,
   constructSupportsInstanceName,
-  constructUpdateFromCompare,
+  constructUpdateFromManifest,
+  constructManifestUrl,
+  fetchConstructJson,
   DEFAULT_CONSTRUCT_VM_TARGET,
   deriveConstructUpdateInfo,
   findConstructScriptsDir,
@@ -94,7 +96,26 @@ function fetcher(responses: Record<string, ConstructJsonResponse | null>) {
   return { fetchJson, calls };
 }
 
-const COMPARE_URL = `https://api.github.com/repos/permissionBRICK/The-Construct/compare/${INSTALLED}...main`;
+const MANIFEST_URL = "https://github.com/permissionBRICK/The-Construct/releases/latest/download/manifest.json";
+const LATEST = "f".repeat(40);
+const published = (commit = LATEST) => ({
+  schemaVersion: 1, repository: "permissionBRICK/The-Construct", ref: "refs/heads/main",
+  commit, releaseTag: `host-${commit}`, sourceAsset: `construct-source-${commit}.zip`,
+  sourceSha256: "a".repeat(64), sourceSizeBytes: 100,
+  payloadAsset: `construct-host-${commit.slice(0, 7)}-win-x64.zip`,
+  payloadSha256: "b".repeat(64), payloadSizeBytes: 200,
+});
+const invalidManifests = [
+  null, {}, { schemaVersion: 2 },
+  ...[
+    { schemaVersion: 2 }, { repository: "evil/repo" }, { ref: "refs/heads/dev" },
+    { commit: "bad" }, { commit: "F".repeat(40) }, { releaseTag: "moving" },
+    { sourceAsset: "../source.zip" }, { payloadAsset: "construct-host-fffffff-linux-x64.zip" },
+    { sourceSha256: "bad" }, { payloadSha256: "bad" },
+    ...["sourceSizeBytes", "payloadSizeBytes"].flatMap((field) =>
+      [0, -1, 1.5, "100", 1073741825].map((size) => ({ [field]: size }))),
+  ].map((change) => ({ ...published(), ...change })),
+];
 const NPM_LATEST_URL = "https://registry.npmjs.org/t3/latest";
 const NPM_NIGHTLY_URL = "https://registry.npmjs.org/t3/nightly";
 
@@ -190,23 +211,38 @@ describe("ConstructUpdates scripts dir discovery", () => {
 });
 
 describe("ConstructUpdates remote results", () => {
-  it("maps the GitHub compare response like the control panel", () => {
-    assert.deepEqual(constructUpdateFromCompare({ status: 200, json: { ahead_by: 3 } }), {
-      available: true,
-      behind: 3,
-    });
-    assert.deepEqual(constructUpdateFromCompare({ status: 200, json: { ahead_by: 0 } }), {
-      available: false,
-      behind: 0,
-    });
-    // The installed commit vanished upstream (history rewrite): offer the update.
-    assert.deepEqual(constructUpdateFromCompare({ status: 404, json: null }), {
-      available: true,
-      behind: null,
-    });
-    assert.isNull(constructUpdateFromCompare(null));
-    assert.isNull(constructUpdateFromCompare({ status: 403, json: null }));
-    assert.isNull(constructUpdateFromCompare({ status: 200, json: { ahead_by: "3" } }));
+  it("validates the published manifest like the control panel", () => {
+    const markers = readConstructMarkers({ installedCommit: INSTALLED });
+    assert.equal(constructManifestUrl(markers), MANIFEST_URL);
+    assert.deepEqual(constructUpdateFromManifest(published(), markers), { available: true, commit: LATEST });
+    for (const installedCommit of [INSTALLED, INSTALLED.slice(0, 7)]) {
+      assert.deepEqual(constructUpdateFromManifest(published(INSTALLED), { ...markers, installedCommit }),
+        { available: false, commit: INSTALLED });
+    }
+    for (const size of [1, 1073741824]) {
+      assert.isNotNull(constructUpdateFromManifest({ ...published(), sourceSizeBytes: size, payloadSizeBytes: size }, markers));
+    }
+    for (const invalid of invalidManifests) assert.isNull(constructUpdateFromManifest(invalid, markers));
+    for (const override of [{ installedCommit: null }, { installedCommit: "" }, { ref: "dev" }, { repo: "bad/repo/extra" }, { repo: "bad repo/name" }]) {
+      assert.isNull(constructManifestUrl({ ...markers, ...override }));
+      assert.isNull(constructUpdateFromManifest(published(), { ...markers, ...override }));
+    }
+  });
+
+  it("follows manifest redirects and sends a User-Agent", async () => {
+    const original = globalThis.fetch;
+    const calls: RequestInit[] = [];
+    globalThis.fetch = async (_url, init) => {
+      calls.push(init!);
+      return new Response(JSON.stringify(published()), { status: 200 });
+    };
+    try {
+      assert.deepEqual(await fetchConstructJson(MANIFEST_URL), { status: 200, json: published() });
+      assert.equal(calls[0]?.redirect, "follow");
+      assert.equal(new Headers(calls[0]?.headers).get("User-Agent"), "construct-t3code-desktop");
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 
   it("compares upstream T3 versions per channel", () => {
@@ -293,7 +329,7 @@ describe("ConstructUpdates action + state derivation", () => {
       instances: [],
       target: DEFAULT_CONSTRUCT_VM_TARGET,
       markers: readConstructMarkers({ installedCommit: INSTALLED, provisionedCommit: INSTALLED }),
-      compare: { available: true, behind: 3 },
+      manifest: { available: true, commit: LATEST },
       t3Version: "0.0.38",
       t3LatestVersion: "0.0.38",
       t3LatestByChannel: { latest: null, nightly: null },
@@ -303,11 +339,11 @@ describe("ConstructUpdates action + state derivation", () => {
       error: null,
     });
     assert.equal(info.action, "update-construct");
-    assert.equal(constructAvailableVersionLabel(info), "Construct main (3 commits behind)");
+    assert.equal(constructAvailableVersionLabel(info), "Construct main");
     const state = applyConstructInfoToState(baseState, info);
     assert.equal(state.status, "available");
     assert.isTrue(state.enabled);
-    assert.equal(state.availableVersion, "Construct main (3 commits behind)");
+    assert.equal(state.availableVersion, "Construct main");
     assert.isNull(state.message);
     assert.equal(state.construct, info);
   });
@@ -319,7 +355,7 @@ describe("ConstructUpdates action + state derivation", () => {
       instances: [],
       target: DEFAULT_CONSTRUCT_VM_TARGET,
       markers: readConstructMarkers({ installedCommit: INSTALLED, provisionedCommit: INSTALLED }),
-      compare: { available: false, behind: 0 },
+      manifest: { available: false, commit: INSTALLED },
       t3Version: "0.0.38",
       t3LatestVersion: "0.0.39",
       t3LatestByChannel: { latest: null, nightly: null },
@@ -344,7 +380,7 @@ describe("ConstructUpdates action + state derivation", () => {
       instances: [],
       target: DEFAULT_CONSTRUCT_VM_TARGET,
       markers: readConstructMarkers({ installedCommit: INSTALLED, provisionedCommit: PROVISIONED }),
-      compare: { available: false, behind: 0 },
+      manifest: { available: false, commit: INSTALLED },
       t3Version: "0.0.38",
       t3LatestVersion: "0.0.38",
       t3LatestByChannel: { latest: null, nightly: null },
@@ -372,7 +408,7 @@ describe("ConstructUpdates action + state derivation", () => {
           installedCommit: INSTALLED,
           provisionedCommit: PROVISIONED,
         }),
-        compare: null,
+        manifest: null,
         t3Version: "0.0.38",
         t3LatestVersion: null,
         t3LatestByChannel: { latest: null, nightly: null },
@@ -393,7 +429,7 @@ describe("ConstructUpdates action + state derivation", () => {
         instances: [],
         target: DEFAULT_CONSTRUCT_VM_TARGET,
         markers: readConstructMarkers({ installedCommit: INSTALLED, provisionedCommit: INSTALLED }),
-        compare: null,
+        manifest: null,
         t3Version: "0.0.38",
         t3LatestVersion: null,
         t3LatestByChannel: { latest: null, nightly: null },
@@ -415,7 +451,7 @@ describe("ConstructUpdates action + state derivation", () => {
         instances: [],
         target: DEFAULT_CONSTRUCT_VM_TARGET,
         markers: readConstructMarkers({ installedCommit: INSTALLED, provisionedCommit: INSTALLED }),
-        compare: { available: false, behind: 0 },
+        manifest: { available: false, commit: INSTALLED },
         t3Version: "0.0.38",
         t3LatestVersion: "0.0.38",
         t3LatestByChannel: { latest: null, nightly: null },
@@ -433,7 +469,7 @@ describe("ConstructUpdates action + state derivation", () => {
 describe("checkConstructUpdates", () => {
   it("reads the markers, asks GitHub + npm, and offers the Construct update first", async () => {
     const { fetchJson, calls } = fetcher({
-      [COMPARE_URL]: { status: 200, json: { ahead_by: 2 } },
+      [MANIFEST_URL]: { status: 200, json: published() },
       [NPM_LATEST_URL]: { status: 200, json: { version: "0.0.39" } },
     });
     const info = await checkConstructUpdates({
@@ -446,11 +482,11 @@ describe("checkConstructUpdates", () => {
       now: () => "2026-09-03T10:00:00.000Z",
       joinPath: join,
     });
-    assert.deepEqual(calls, [COMPARE_URL, NPM_LATEST_URL]);
+    assert.deepEqual(calls, [MANIFEST_URL, NPM_LATEST_URL]);
     assert.equal(info.scriptsDir, SCRIPTS_DIR);
     assert.equal(info.installedCommit, INSTALLED);
     assert.equal(info.provisionedCommit, PROVISIONED);
-    assert.equal(info.behind, 2);
+    assert.equal(info.latestCommit, LATEST);
     assert.isTrue(info.constructUpdateAvailable);
     assert.isTrue(info.provisionStale);
     assert.equal(info.t3Version, "0.0.38");
@@ -461,9 +497,62 @@ describe("checkConstructUpdates", () => {
     assert.equal(info.checkedAt, "2026-09-03T10:00:00.000Z");
   });
 
+  it("carries the published commit and offer through a local refresh", async () => {
+    const options = {
+      appVersion: "0.0.38", localAppData: LOCAL_APP_DATA,
+      fs: installedFs({ installedCommit: INSTALLED, provisionedCommit: INSTALLED }),
+      previous: null, runningAction: null, now: () => "now", joinPath: join,
+    };
+    const { fetchJson } = fetcher({ [MANIFEST_URL]: { status: 200, json: published() },
+      [NPM_LATEST_URL]: { status: 200, json: { version: "0.0.38" } } });
+    const previous = await checkConstructUpdates({ ...options, fetchJson });
+    const local = await checkConstructUpdates({ ...options, previous });
+    assert.equal(local.latestCommit, LATEST);
+    assert.isTrue(local.constructUpdateAvailable);
+    assert.equal(local.action, "update-construct");
+  });
+
+  it("never offers missing, failed or invalid manifests", async () => {
+    for (const response of [null, { status: 404, json: null }, { status: 500, json: published() },
+      ...invalidManifests.map((json) => ({ status: 200, json }))]) {
+      const { fetchJson } = fetcher({ [MANIFEST_URL]: response,
+        [NPM_LATEST_URL]: { status: 200, json: { version: "0.0.38" } } });
+      const info = await checkConstructUpdates({
+        appVersion: "0.0.38", localAppData: LOCAL_APP_DATA,
+        fs: installedFs({ installedCommit: INSTALLED, provisionedCommit: INSTALLED }),
+        fetchJson, previous: null, runningAction: null, now: () => "now", joinPath: join,
+      });
+      assert.isFalse(info.constructUpdateAvailable);
+      assert.isNull(info.latestCommit);
+      assert.isNull(info.action);
+      assert.equal(info.error, "Could not check GitHub for Construct updates.");
+    }
+  });
+
+  it("does not fetch or carry over a main release offer for a non-main ref", async () => {
+    const { fetchJson, calls } = fetcher({ [MANIFEST_URL]: { status: 200, json: published() },
+      [NPM_LATEST_URL]: { status: 200, json: { version: "0.0.38" } } });
+    const options = {
+      appVersion: "0.0.38", localAppData: LOCAL_APP_DATA,
+      fs: installedFs({ installedCommit: INSTALLED, provisionedCommit: INSTALLED, constructRef: "dev" }),
+      previous: null, runningAction: null, now: () => "now", joinPath: join,
+    };
+    const info = await checkConstructUpdates({ ...options, fetchJson });
+    assert.deepEqual(calls, [NPM_LATEST_URL]);
+    assert.isFalse(info.constructUpdateAvailable);
+    assert.isNull(info.action);
+    assert.isNull(info.error);
+    const local = await checkConstructUpdates({ ...options,
+      previous: { ...info, ref: "main", constructUpdateAvailable: true, latestCommit: LATEST, action: "update-construct" },
+    });
+    assert.isFalse(local.constructUpdateAvailable);
+    assert.isNull(local.latestCommit);
+    assert.isNull(local.action);
+  });
+
   it("uses the nightly registry tag for nightly builds", async () => {
     const { fetchJson, calls } = fetcher({
-      [COMPARE_URL]: { status: 200, json: { ahead_by: 0 } },
+      [MANIFEST_URL]: { status: 200, json: published(INSTALLED) },
       [NPM_NIGHTLY_URL]: { status: 200, json: { version: "0.0.39-nightly.20260902.1" } },
     });
     const info = await checkConstructUpdates({
@@ -476,7 +565,7 @@ describe("checkConstructUpdates", () => {
       now: () => "now",
       joinPath: join,
     });
-    assert.deepEqual(calls, [COMPARE_URL, NPM_NIGHTLY_URL]);
+    assert.deepEqual(calls, [MANIFEST_URL, NPM_NIGHTLY_URL]);
     assert.isTrue(info.t3UpdateAvailable);
     // The fact is published for the rows, and the default instance's offer stands.
     assert.equal(info.action, "reprovision");
@@ -534,7 +623,7 @@ describe("checkConstructUpdates", () => {
       instances: [],
       installedCommit: INSTALLED,
       provisionedCommit: PROVISIONED,
-      behind: 0,
+      latestCommit: INSTALLED,
       constructUpdateAvailable: false,
       provisionStale: true,
       t3Version: "0.0.38",
@@ -560,10 +649,10 @@ describe("checkConstructUpdates", () => {
     assert.isNull(info.action);
     assert.equal(info.runningAction, "reprovision");
     assert.equal(info.t3LatestVersion, "0.0.38");
-    assert.equal(info.behind, 0);
+    assert.equal(info.latestCommit, INSTALLED);
   });
 
-  it("drops carried-over compare results once the installed commit changed", async () => {
+  it("drops carried-over manifest results once the installed commit changed", async () => {
     const previous: ConstructUpdateInfo = {
       companionInstalled: false,
       repo: "permissionBRICK/The-Construct",
@@ -574,7 +663,7 @@ describe("checkConstructUpdates", () => {
       instances: [],
       installedCommit: PROVISIONED,
       provisionedCommit: PROVISIONED,
-      behind: 2,
+      latestCommit: LATEST,
       constructUpdateAvailable: true,
       provisionStale: false,
       t3Version: "0.0.38",
@@ -586,7 +675,7 @@ describe("checkConstructUpdates", () => {
       checkedAt: "earlier",
       error: null,
     };
-    // Update-Construct.ps1 finished: installedCommit moved on, so the old "2 behind" no
+    // Update-Construct.ps1 finished: installedCommit moved on, so the previous manifest result no
     // longer applies; the VM is now behind the installed Construct instead.
     const info = await checkConstructUpdates({
       appVersion: "0.0.38-construct.bb8cb346",
@@ -598,7 +687,7 @@ describe("checkConstructUpdates", () => {
       joinPath: join,
     });
     assert.isFalse(info.constructUpdateAvailable);
-    assert.isNull(info.behind);
+    assert.isNull(info.latestCommit);
     assert.isTrue(info.provisionStale);
     assert.equal(info.action, "reprovision");
   });
@@ -1210,8 +1299,7 @@ describe("ConstructUpdates target VM (instances.json)", () => {
       readTextFile: (path) => files[path] ?? base.readTextFile(path),
     };
     const { fetchJson } = fetcher({
-      [`https://api.github.com/repos/permissionBRICK/The-Construct/compare/${PROVISIONED}...main`]:
-        { status: 200, json: { ahead_by: 0 } },
+      [MANIFEST_URL]: { status: 200, json: published(PROVISIONED) },
       [NPM_LATEST_URL]: { status: 200, json: { version: "0.0.38" } },
     });
     const info = await checkConstructUpdates({
