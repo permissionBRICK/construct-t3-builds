@@ -5,7 +5,7 @@ import { isElectron } from "../env";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
 import { useEnvironments } from "../state/environments";
 import { useAtomCommand } from "../state/use-atom-command";
-import { constructLinkedRemotes, planConstructAutoLink } from "./constructInstances.logic";
+import { constructEnvironmentConnected, constructLinkedRemotes, planConstructAutoLink } from "./constructInstances.logic";
 import { linkConstructInstance } from "./constructInstances.link";
 import { getConstructUpdateInfo } from "./constructUpdate.logic";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -42,7 +42,7 @@ function ConstructAutoLinkContent() {
           label: environment.label,
           displayUrl: environment.displayUrl,
           targetKind: environment.entry.target._tag,
-          connected: environment.connection.phase === "connected",
+          connected: constructEnvironmentConnected(environment),
         })),
       ),
     [environments],

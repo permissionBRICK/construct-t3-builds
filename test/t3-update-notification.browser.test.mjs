@@ -9,6 +9,14 @@ if (!source) throw new Error('Set T3_TEST_SOURCE');
 const toolRequire = createRequire(resolve(process.env.T3_TEST_TOOLS || '.', 'package.json'));
 const sourceRequire = createRequire(resolve(source, 'apps/web/package.json'));
 const {build} = toolRequire('esbuild');
+// Vite-only import suffixes (`?worker`, `?url`, `?raw`, `?inline`) mean nothing to esbuild; the
+// upstream web app uses them for modules this test never exercises, so they become inert stubs.
+const viteSuffixStubs = {name:'vite-suffix-stubs',setup(b){
+  b.onResolve({filter:/\?(worker|url|raw|inline)$/},args=>({path:args.path,namespace:'vite-suffix'}));
+  b.onLoad({filter:/.*/,namespace:'vite-suffix'},args=>({contents:/\?worker$/.test(args.path)
+    ? 'export default class { postMessage(){} terminate(){} addEventListener(){} removeEventListener(){} }'
+    : 'export default "";'}));
+}};
 const {chromium} = toolRequire('playwright');
 const channel = process.env.T3_TEST_CHANNEL || 'release';
 const mocks = {
@@ -29,8 +37,9 @@ const result = await build({
     const root=createRoot(document.getElementById('root'));
     window.render=()=>root.render(<ConstructUpdateNotification />);`, loader:'tsx', resolveDir:process.cwd()},
   bundle:true,write:false,format:'iife',platform:'browser',jsx:'automatic',
-  define:{'process.env.NODE_ENV':'"development"'},
-  plugins:[{name:'fixtures',setup(b){
+  // Upstream reads import.meta.env at module load (cloud/publicConfig.ts); an iife bundle has none.
+  define:{'process.env.NODE_ENV':'"development"','import.meta.env':'{}'},
+  plugins:[viteSuffixStubs,{name:'fixtures',setup(b){
     b.onResolve({filter:/.*/}, args=>{
       if(mocks[args.path]) return {path:args.path,namespace:'fixture'};
       if(args.path==='../threadRoutes') return {path:resolve(source,'apps/web/src/threadRoutes.ts')};
@@ -48,10 +57,10 @@ try {
    const instance=(name,port)=>({name,vmHost:'host.example',publicHost:'host.example',hostAlias:name,
      isDefault:name==='offline-default',provisionedCommit:'old',channel:'latest',t3Port:port,t3Enabled:true,t3BaseUrl:null,t3Link:null});
    window.updateState={enabled:true,construct:{vmName:'offline-default',vmHost:'host.example',
-     instances:[instance('offline-default',2301),instance('thread-vm',2302),instance('other-vm',2303)],
+     instances:[instance('offline-default',2301),instance('thread-vm',2302),instance('other-vm',2303),instance('stopped-vm',2304)],
      installedCommit:'new',provisionedCommit:'old',action:'reprovision',runningAction:null,
      t3LatestByChannel:{latest:null,nightly:null},t3Version:'0.0.39',error:null}};
-   window.environments=[2,3].map(i=>({environmentId:`env${i}`,label:`env${i}`,displayUrl:`https://host.example:230${i}`,entry:{target:{_tag:'BearerConnectionTarget'}}}));
+   window.environments=[2,3,4].map(i=>({environmentId:`env${i}`,label:`env${i}`,displayUrl:`https://host.example:230${i}`,entry:{target:{_tag:'BearerConnectionTarget'}},connection:{phase:i===4?'offline':'connected',error:null,traceId:null}}));
    window.params={environmentId:'env2',threadId:'thread'};
    window.desktopBridge={
      downloadUpdate:async()=>{throw new Error('Unexpected default-VM launch');},
@@ -63,10 +72,16 @@ try {
  const offers = () => page.evaluate(()=>[...window.toasts.values()].filter(x=>x.actionProps).map(x=>({label:x.actionProps.children,detail:x.description})));
  await render();
  assert.deepEqual((await offers()).map(x=>x.label),['Reprovision thread-vm']);
- assert.match((await offers())[0].detail,/VM "thread-vm"/);
+ assert.match((await offers())[0].detail,/"thread-vm"/);
  await page.evaluate(()=>{window.oldClick=[...window.toasts.values()][0].actionProps.onClick;window.params={environmentId:'env3',threadId:'thread'};});
  await render();
  assert.deepEqual((await offers()).map(x=>x.label),['Reprovision other-vm']);
+ // A remote the app is not connected to (its VM is not running) gets no reprovision offer.
+ await page.evaluate(()=>{window.params={environmentId:'env4',threadId:'thread'};});
+ await render();
+ assert.deepEqual((await offers()).map(x=>x.label),[]);
+ await page.evaluate(()=>{window.params={environmentId:'env3',threadId:'thread'};});
+ await render();
  await page.evaluate(()=>window.oldClick());
  assert.deepEqual(await page.evaluate(()=>window.launches),[],'stale toast click cannot launch a different VM');
  await page.evaluate(()=>{window.params={environmentId:'env2',threadId:'thread'};});

@@ -10,7 +10,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { startConstructUpdate } from "../constructUpdate";
 import { linkConstructInstance } from "../constructInstances.link";
 import {
-  constructLinkedRemotes,
+  constructEnvironmentConnected, constructLinkedRemotes,
   getConstructRowDetail,
   planConstructProviderRows,
   planConstructSettingsButton,
@@ -69,7 +69,7 @@ function ConstructProviderSectionContent() {
             label: environment.label,
             displayUrl: environment.displayUrl,
             targetKind: environment.entry.target._tag,
-            connected: environment.connection.phase === "connected",
+            connected: constructEnvironmentConnected(environment),
           })),
         ),
         info,

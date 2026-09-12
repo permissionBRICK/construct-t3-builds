@@ -32,7 +32,7 @@ export interface ConstructLinkedRemote {
   /** Is the app currently connected to this remote (the VM runs)? Undefined means
    *  unknown and is treated as connected. A remote that is not connected is never
    *  nudged to reprovision: a stopped VM is judged when it comes online. */
-  readonly connected?: boolean;
+  readonly connected?: boolean | undefined;
 }
 
 /** One entry of the app's environment list, as much of it as this module needs.
@@ -41,7 +41,7 @@ export interface ConstructEnvironmentLike {
   readonly environmentId: string;
   readonly label: string;
   /** `environment.connection.phase === "connected"`; omitted when the caller does not know. */
-  readonly connected?: boolean;
+  readonly connected?: boolean | undefined;
   /** The address the connection was made at; null when the target carries none. */
   readonly displayUrl: string | null;
   readonly targetKind: string;
@@ -68,6 +68,16 @@ export const CONSTRUCT_LINKED_TARGET_KIND = "BearerConnectionTarget";
  * Pure, and separated from the React component so this mapping is unit-tested rather than
  * only the planner it feeds.
  */
+/** `environment.connection.phase === "connected"` when the environment carries T3's connection
+ *  presentation; undefined (unknown, treated as connected) when it does not, so a fixture or an
+ *  older shape never crashes the notification. */
+export function constructEnvironmentConnected(
+  environment: { readonly connection?: { readonly phase?: string } | null },
+): boolean | undefined {
+  const phase = environment.connection?.phase;
+  return typeof phase === "string" ? phase === "connected" : undefined;
+}
+
 export function constructLinkedRemotes(
   environments: ReadonlyArray<ConstructEnvironmentLike>,
 ): ReadonlyArray<ConstructLinkedRemote> {
