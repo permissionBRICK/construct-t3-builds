@@ -1,7 +1,8 @@
 // Run the actual inventory's voice callbacks and upstream replacement callback
 // with the real Lexical composer in Chromium. Audio/STT transport is mocked.
 // T3_TEST_SOURCE: matching upstream checkout; T3_TEST_TOOLS: package directory
-// providing esbuild + playwright. T3_TEST_CHANNEL defaults to release.
+// providing playwright. Uses the checkout's Vite for browser imports, including
+// ?worker and import.meta.env. T3_TEST_CHANNEL defaults to release.
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -12,7 +13,7 @@ const source = process.env.T3_TEST_SOURCE;
 if (!source) throw new Error('Set T3_TEST_SOURCE to the matching upstream checkout');
 const toolRequire = createRequire(path.resolve(process.env.T3_TEST_TOOLS || root, 'package.json'));
 const sourceRequire = createRequire(path.join(source, 'apps/web/package.json'));
-const {build} = toolRequire('esbuild');
+const {build} = sourceRequire('vite-plus');
 const {chromium} = toolRequire('playwright');
 const channel = process.env.T3_TEST_CHANNEL || 'release';
 const manifestPath = `patches/t3code-${channel}/source-transforms.json`;
@@ -95,7 +96,7 @@ function Harness() {
  window.staleRef = () => {promptRef.current=prompt};
  window.changeChatDraft = () => setPrompt('saved background draft');
  return React.createElement('form',{'data-chat-composer-form':'true'},
-   React.createElement(ComposerPromptEditor,{editorRef:composerEditorRef,value:pending?.customAnswer ?? prompt,cursor:composerCursor,terminalContexts:[],skills:[],disabled:${editorLock ? 'isVoiceRecording' : 'false'},placeholder:'Compose',onChange:(text,cursor)=>{${changeGuard}setComposerCursor(cursor);pending?setPending({...pending,customAnswer:text}):setPrompt(text)},onPaste:()=>{}}),
+   React.createElement(ComposerPromptEditor,{editorRef:composerEditorRef,value:pending?.customAnswer ?? prompt,cursor:composerCursor,contextRecords:new Map(),terminalContexts:[],skills:[],disabled:${editorLock ? 'isVoiceRecording' : 'false'},placeholder:'Compose',onChange:(text,cursor)=>{${changeGuard}setComposerCursor(cursor);pending?setPending({...pending,customAnswer:text}):setPrompt(text)},onPaste:()=>{}}),
    React.createElement('button',{type:'button',onPointerDown:e=>e.preventDefault(),onClick:toggleVoiceRecording,'data-recording':String(isVoiceRecording)},'Mic'),
    React.createElement('output',null,prompt), React.createElement('span',{'data-status':true},voiceStatus));
 }
@@ -104,16 +105,37 @@ createRoot(document.getElementById('root')).render(React.createElement(Harness))
 `;
 const browser = await chromium.launch({headless:true, ...(process.env.T3_TEST_CHROMIUM ? {executablePath:process.env.T3_TEST_CHROMIUM} : {})});
 try {
- const bundle = await build({stdin:{contents:entry,loader:'tsx',resolveDir:source},bundle:true,write:false,platform:'browser',alias:{'~':path.join(source,'apps/web/src')},loader:{'.svg':'text'},jsx:'automatic',define:{'process.env.NODE_ENV':'"development"'}});
+ const entryId = path.join(source, 'apps/web/voice-question-test.tsx');
+ const bundle = await build({
+   configFile:false, root:path.join(source,'apps/web'), envDir:false,
+   resolve:{alias:{'~':path.join(source,'apps/web/src')}},
+   define:{'process.env.NODE_ENV':'"development"'},
+   plugins:[{
+     name:'voice-question-entry',
+     resolveId(id){if(id===entryId) return entryId;},
+     load(id){if(id===entryId) return entry;},
+   }],
+   build:{write:false, minify:false, lib:{entry:entryId, name:'VoiceQuestionTest', formats:['iife']}},
+ });
+ const outputs = [bundle].flat().flatMap(result=>result.output);
+ const script = outputs.find(output=>output.type==='chunk' && output.isEntry);
+ assert.ok(script, 'Vite produced the browser test entry');
  const page = await browser.newPage();
- await page.route('http://voice.test/**', route=>route.fulfill({contentType:'text/html',body:'<div id="root"></div>'}));
+ await page.route('http://voice.test/**', route=>{
+   const fileName = new URL(route.request().url()).pathname.slice(1);
+   if(!fileName) return route.fulfill({contentType:'text/html',body:'<div id="root"></div>'});
+   const output = outputs.find(output=>output.fileName===fileName);
+   assert.ok(output, `Unexpected browser asset request: ${fileName}`);
+   return route.fulfill({contentType:fileName.endsWith('.js')?'text/javascript':'application/octet-stream',
+     body:output.type==='chunk'?output.code:Buffer.from(output.source)});
+ });
  page.setDefaultTimeout(2000);
- const errors=[];page.on('pageerror',e=>{errors.push(e.message); console.error('Browser:',e.message)});
+ const errors=[];page.on('pageerror',e=>{errors.push(e.message); console.error('Browser:',e.stack)});
  async function reset(client=false) {
    await page.goto('http://voice.test');
    await page.setContent('<div id="root"></div>');
    await page.evaluate(value=>{window.clientVoice=value},client);
-   await page.addScriptTag({content:bundle.outputFiles[0].text});
+   await page.addScriptTag({content:script.code});
    await page.locator('[contenteditable]').waitFor();
  }
  async function recording(value) { await page.waitForFunction(v=>document.querySelector('button')?.dataset.recording===String(v), value, {timeout:2000}); }
