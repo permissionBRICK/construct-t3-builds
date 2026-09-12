@@ -20,19 +20,12 @@ expected_node="$(field nodeVersion)"
 [[ "$(node -p process.versions.node)" == "$expected_node" ]] || { echo 'Build Node version differs from runtime pin' >&2; exit 1; }
 T3CODE_BUILD_MODE=server bash "$REPO_DIR/bin/build-t3code.sh"
 source_dir="$(dirname "$(dirname "$(dirname "$(dirname "$(readlink -f "$work/t3")")")")")"
-# Voice transport regressions run against the actual selected upstream and overlays.
+# The build verifies the patch application and runs the overlays' lightweight unit
+# suites against the selected upstream (owner, 2026-09-12). Browser-driven checks
+# (test/*.browser.test.mjs) are manual, per README: they need Chromium and a fresh
+# upstream can break their harness independently of the patch.
 (cd "$source_dir/apps/web" && "$source_dir/node_modules/.bin/vp" test run --project unit src/voice)
 (cd "$source_dir/apps/server" && "$source_dir/node_modules/.bin/vp" test run src/voiceInput.test.ts)
-npm install --prefix "$work/voice-test-tools" --no-audit --no-fund esbuild@0.25.0 playwright@1.58.2
-export T3_TEST_SOURCE="$source_dir" T3_TEST_TOOLS="$work/voice-test-tools" T3_TEST_CHANNEL="$T3CODE_INVENTORY"
-export T3_TEST_CHROMIUM="$(command -v google-chrome || command -v chromium || true)"
-if [[ -z "$T3_TEST_CHROMIUM" ]]; then
-  node "$work/voice-test-tools/node_modules/playwright/cli.js" install --with-deps chromium
-  unset T3_TEST_CHROMIUM
-fi
-node "$publisher/test/t3-voice-question.browser.test.mjs"
-node "$publisher/test/t3-voice-capture.browser.test.mjs"
-node "$publisher/test/t3-update-notification.browser.test.mjs"
 node "$publisher/scripts/package-linux.mjs" "$source_dir" "$work/linux-runtime" "$(command -v node)"
 # The distributed runtime uses the exact Node executable that built its native modules.
 curl -fsSL "https://raw.githubusercontent.com/nodejs/node/v${expected_node}/LICENSE" -o "$work/linux-runtime/NODE-LICENSE"
