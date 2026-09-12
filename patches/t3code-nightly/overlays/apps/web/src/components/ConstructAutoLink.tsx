@@ -42,6 +42,7 @@ function ConstructAutoLinkContent() {
           label: environment.label,
           displayUrl: environment.displayUrl,
           targetKind: environment.entry.target._tag,
+          connected: environment.connection.phase === "connected",
         })),
       ),
     [environments],

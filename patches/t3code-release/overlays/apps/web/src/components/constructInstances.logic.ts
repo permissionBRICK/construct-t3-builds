@@ -29,6 +29,10 @@ export interface ConstructLinkedRemote {
   readonly baseUrl: string;
   /** What the app calls it, when it has a name of its own. */
   readonly label?: string;
+  /** Is the app currently connected to this remote (the VM runs)? Undefined means
+   *  unknown and is treated as connected. A remote that is not connected is never
+   *  nudged to reprovision: a stopped VM is judged when it comes online. */
+  readonly connected?: boolean;
 }
 
 /** One entry of the app's environment list, as much of it as this module needs.
@@ -36,6 +40,8 @@ export interface ConstructLinkedRemote {
 export interface ConstructEnvironmentLike {
   readonly environmentId: string;
   readonly label: string;
+  /** `environment.connection.phase === "connected"`; omitted when the caller does not know. */
+  readonly connected?: boolean;
   /** The address the connection was made at; null when the target carries none. */
   readonly displayUrl: string | null;
   readonly targetKind: string;
@@ -74,6 +80,7 @@ export function constructLinkedRemotes(
       id: String(environment.environmentId),
       baseUrl: environment.displayUrl,
       label: environment.label,
+      ...(environment.connected === undefined ? {} : { connected: environment.connected }),
     });
   }
   return out;
@@ -385,7 +392,9 @@ export function planConstructProviderRows(input: {
     const own = instance.provisionedCommit;
     // Plain commit-string inequality (plan §4.12 "Stale detection"), never a history
     // lookup: it has to keep working when the compare API cannot resolve the base.
-    const stale = installedCommit !== null && own !== null && installedCommit !== own;
+    // Only a CONNECTED remote (a running VM) is nudged; a stopped VM is judged when it comes online.
+    const stale =
+      remote.connected !== false && installedCommit !== null && own !== null && installedCommit !== own;
     // The upstream release on THIS instance's channel. An instance whose channel this PC
     // does not know reports no upstream version rather than the app's own.
     const latest =

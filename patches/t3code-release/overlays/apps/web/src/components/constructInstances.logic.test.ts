@@ -337,6 +337,29 @@ describe("planConstructProviderRows", () => {
   });
 });
 
+describe("stale nudges only a connected remote", () => {
+  const env = (connected?: boolean) => ({
+    environmentId: "work",
+    label: "work-vm",
+    displayUrl: "https://work-vm.mshome.net:5178",
+    targetKind: "BearerConnectionTarget",
+    ...(connected === undefined ? {} : { connected }),
+  });
+  it("a linked remote the app is not connected to is never reprovision-stale", () => {
+    const remotes = constructLinkedRemotes([env(false)]);
+    assert.equal(remotes[0]!.connected, false);
+    const row = planConstructProviderRows({ remotes, info: info() }).find((candidate) => candidate.linked);
+    assert.ok(row);
+    assert.equal(row!.provisionStale, false);
+  });
+  it("a connected remote keeps the verdict, and an unknown state is treated as connected", () => {
+    const connectedRow = planConstructProviderRows({ remotes: constructLinkedRemotes([env(true)]), info: info() }).find((candidate) => candidate.linked);
+    const unknownRow = planConstructProviderRows({ remotes: constructLinkedRemotes([env()]), info: info() }).find((candidate) => candidate.linked);
+    assert.equal(connectedRow!.provisionStale, unknownRow!.provisionStale);
+    assert.equal(constructLinkedRemotes([env()])[0]!.connected, undefined);
+  });
+});
+
 describe("constructLinkedRemotes", () => {
   const envs = [
     // The app's OWN bundled server. Not a remote whatever address it is reached at —
