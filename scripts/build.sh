@@ -32,6 +32,7 @@ if [[ -z "$T3_TEST_CHROMIUM" ]]; then
 fi
 node "$publisher/test/t3-voice-question.browser.test.mjs"
 node "$publisher/test/t3-voice-capture.browser.test.mjs"
+node "$publisher/test/t3-update-notification.browser.test.mjs"
 node "$publisher/scripts/package-linux.mjs" "$source_dir" "$work/linux-runtime" "$(command -v node)"
 # The distributed runtime uses the exact Node executable that built its native modules.
 curl -fsSL "https://raw.githubusercontent.com/nodejs/node/v${expected_node}/LICENSE" -o "$work/linux-runtime/NODE-LICENSE"

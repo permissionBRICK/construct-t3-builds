@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useEnvironments } from "../state/environments";
 import { resolveActiveThreadRouteRef, resolveThreadRouteTarget } from "../threadRoutes";
-import { constructLinkedRemotes } from "./constructInstances.logic";
+import { constructEnvironmentConnected, constructLinkedRemotes } from "./constructInstances.logic";
 import { isElectron } from "../env";
 import { useDismissedProviderUpdateNotificationKeys } from "../providerUpdateDismissal";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
@@ -54,7 +54,7 @@ function ConstructUpdateNotificationContent() {
         label: environment.label,
         displayUrl: environment.displayUrl,
         targetKind: environment.entry.target._tag,
-        connected: environment.connection.phase === "connected",
+        connected: constructEnvironmentConnected(environment),
       })),
     ).find((candidate) => candidate.id === threadRef?.environmentId) ?? null;
   const info = getConstructThreadUpdateInfo(getConstructUpdateInfo(state), remote);
