@@ -24,6 +24,19 @@ class Decisions(unittest.TestCase):
         self.assertFalse(second['build'])
         self.assertEqual(first['tag'], second['tag'])
 
+    def test_verification_builds_even_a_published_pair_and_never_publishes(self):
+        first = self.choose()
+        published = lambda tag: tag == first['tag']
+        self.assertFalse(self.choose(existing=published)['build'])
+        verified = self.choose(existing=p.reuse_policy(True, published))
+        self.assertTrue(verified['build'])
+        self.assertEqual(verified['tag'], first['tag'])
+        self.assertFalse(p.reuse_policy(False, published)('other'))
+        with tempfile.TemporaryDirectory() as work:
+            (Path(work) / 'plan.json').write_text(json.dumps(dict(build=True, verify=True)))
+            with self.assertRaises(ValueError):
+                p.publish(Path(work))
+
     def test_new_version_or_selected_patch_changes_identity(self):
         first = self.choose()['tag']
         self.assertNotEqual(first, self.choose(version='1.0.1')['tag'])

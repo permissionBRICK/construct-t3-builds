@@ -2,6 +2,10 @@ name: Publish T3 pairs
 on:
   push:
     branches: [main]
+  # A pull request runs the same plan, build and tests as a verification (it builds even an
+  # already published pair and never publishes), so repair PRs are checked before they merge.
+  pull_request:
+    branches: [main]
   schedule:
     - cron: '17,47 * * * *'
   workflow_dispatch:
@@ -9,8 +13,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: t3-publisher
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('t3-verify-{0}', github.event.pull_request.number) || 't3-publisher' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   publish:
@@ -44,7 +48,12 @@ jobs:
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/publisher.py plan --repository "$GITHUB_REPOSITORY" --channel "${{ matrix.channel }}"
+        run: python3 scripts/publisher.py plan --repository "$GITHUB_REPOSITORY" --channel "${{ matrix.channel }}" ${{ github.event_name == 'pull_request' && '--verify' || '' }}
+      - name: A pull request must build its pair
+        if: github.event_name == 'pull_request' && steps.plan.outputs.build != 'true'
+        run: |
+          python3 -c 'import json; print(json.load(open("work/plan.json")).get("reason", "the plan did not build"))'
+          exit 1
       - name: Restore reusable compiler and download caches
         if: steps.plan.outputs.build == 'true'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -75,7 +84,7 @@ jobs:
             if [ -d "$directory" ]; then sudo chown -R "$(id -u):$(id -g)" "$directory"; fi
           done
       - name: Upload, verify, then publish the release
-        if: steps.plan.outputs.build == 'true'
+        if: github.event_name != 'pull_request' && steps.plan.outputs.build == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/publisher.py publish
@@ -83,7 +92,7 @@ jobs:
       # activity. A monthly metadata commit keeps this artifacts-only repo active.
       # It is deliberately outside the binary recipe hash.
       - name: Keep the polling schedule active
-        if: ${{ !cancelled() && matrix.channel == 'stable' }}
+        if: ${{ !cancelled() && matrix.channel == 'stable' && github.event_name != 'pull_request' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/keep-alive.py
