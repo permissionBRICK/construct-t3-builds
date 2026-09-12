@@ -54,6 +54,7 @@ function ConstructUpdateNotificationContent() {
         label: environment.label,
         displayUrl: environment.displayUrl,
         targetKind: environment.entry.target._tag,
+        connected: environment.connection.phase === "connected",
       })),
     ).find((candidate) => candidate.id === threadRef?.environmentId) ?? null;
   const info = getConstructThreadUpdateInfo(getConstructUpdateInfo(state), remote);
