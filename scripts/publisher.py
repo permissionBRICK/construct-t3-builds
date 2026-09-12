@@ -76,7 +76,12 @@ def choose(version, hashes, recipe, existing, compatible, channel="stable"):
     return dict(build=False, reason=f'The {channel} patch inventory does not apply to its upstream source.')
 
 
-def plan(work, repository, construct, channel="stable"):
+def reuse_policy(verify, existing):
+    """A verification plan (pull request) always builds a compatible inventory, even one already published."""
+    return (lambda tag: False) if verify else existing
+
+
+def plan(work, repository, construct, channel="stable", verify=False):
     npm_tag = 'nightly' if channel == 'nightly' else 'latest'
     version = api(f'https://registry.npmjs.org/t3/{npm_tag}')['version']
     pattern = r'\d+\.\d+\.\d+-nightly\.\d+\.\d+' if channel == 'nightly' else r'\d+\.\d+\.\d+'
@@ -102,9 +107,9 @@ def plan(work, repository, construct, channel="stable"):
         return status['compatible']
 
     result = choose(version, hashes, recipe_hash(),
-                    lambda tag: complete_release(api(f'https://api.github.com/repos/{repository}/releases/tags/{tag}'), channel),
+                    reuse_policy(verify, lambda tag: complete_release(api(f'https://api.github.com/repos/{repository}/releases/tags/{tag}'), channel)),
                     compatible, channel)
-    result.update(version=version, channel=channel, buildRepositoryCommit=run('git', '-C', construct, 'rev-parse', 'HEAD'),
+    result.update(version=version, channel=channel, verify=verify, buildRepositoryCommit=run('git', '-C', construct, 'rev-parse', 'HEAD'),
                   sourceDirectory=str(construct), publisherRecipeHash=recipe_hash(), repository=repository,
                   publisherCommit=run('git', '-C', ROOT, 'rev-parse', 'HEAD'), **CONFIG)
     if result['build']:
@@ -113,7 +118,7 @@ def plan(work, repository, construct, channel="stable"):
     if os.getenv('GITHUB_OUTPUT'):
         with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
             f.write(f'build={str(result["build"]).lower()}\n')
-    summary = result.get('reason') or f'{"Build" if result["build"] else "Reuse"} {result["tag"]} ({result["inventory"]} inventory)'
+    summary = result.get('reason') or f'{"Verify" if verify else "Build" if result["build"] else "Reuse"} {result["tag"]} ({result["inventory"]} inventory)'
     print(summary)
     if os.getenv('GITHUB_STEP_SUMMARY'):
         with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
@@ -143,6 +148,8 @@ def finalize(work):
 
 def publish(work):
     plan = json.loads((work / 'plan.json').read_text())
+    if plan.get('verify'):
+        raise ValueError('A verification plan (pull request) never publishes')
     if not plan['build']:
         return
     repository, tag = plan['repository'], plan['tag']
@@ -190,11 +197,12 @@ if __name__ == '__main__':
     parser.add_argument('--repository', default='permissionBRICK/construct-t3-builds')
     parser.add_argument('--construct', type=Path, default=ROOT)
     parser.add_argument('--channel', choices=['stable', 'nightly'], default='stable')
+    parser.add_argument('--verify', action='store_true', help='pull-request verification: build even an already published pair, never publish')
     args = parser.parse_args()
     args.work = args.work.resolve()
     args.work.mkdir(parents=True, exist_ok=True)
     if args.command == 'plan':
-        plan(args.work, args.repository, args.construct, args.channel)
+        plan(args.work, args.repository, args.construct, args.channel, args.verify)
     elif args.command == 'finalize':
         finalize(args.work)
     else:
