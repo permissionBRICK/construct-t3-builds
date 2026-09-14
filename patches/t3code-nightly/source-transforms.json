@@ -400,7 +400,7 @@
     },
     {
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
-      "after": "import { createPortal } from \"react-dom\";",
+      "after": "import { useAtomCommand } from \"../../state/use-atom-command\";",
       "insert": "import { AsyncResult } from \"effect/unstable/reactivity\";\n"
     },
     {
