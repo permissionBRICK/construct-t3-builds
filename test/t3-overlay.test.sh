@@ -32,22 +32,21 @@ finish() {
 echo ""
 echo "=== T3 overlay + transform inventory ==="
 
-# The inventories target different upstream tags. Their file sets must agree;
-# their contents can differ to match each channel's current APIs.
-release_files="$(cd "${repo}/patches/t3code-release/overlays" && find . -type f | sort)"
-nightly_files="$(cd "${repo}/patches/t3code-nightly/overlays" && find . -type f | sort)"
-ok "the release and nightly inventories carry the same overlay paths" "$([[ "${release_files}" == "${nightly_files}" ]] && echo 0 || echo 1)"
-if [[ "${release_files}" != "${nightly_files}" ]]; then
-  comm -3 <(printf '%s\n' "${release_files}") <(printf '%s\n' "${nightly_files}")
-fi
-
-# ── Every overlay file is listed in BOTH inventories ──────────────────────────
+# Each inventory targets its own upstream APIs. Check its exact file inventory,
+# including missing files, stale manifest entries and duplicate entries.
 for channel in release nightly; do
-  missing="$(cd "${repo}/patches/t3code-${channel}/overlays" && find . -type f | sed 's|^\./||' | while read -r rel; do
-    grep -q "\"${rel}\"" "${repo}/patches/t3code-${channel}/source-transforms.json" || echo "${rel}"
-  done)"
-  ok "${channel}: every overlay file is listed in the inventory" "$([[ -z "${missing}" ]] && echo 0 || echo 1)"
-  [[ -n "${missing}" ]] && echo "${missing}"
+  node - "${repo}/patches/t3code-${channel}" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const root = process.argv[2];
+const manifest = JSON.parse(fs.readFileSync(path.join(root, 'source-transforms.json')));
+const files = fs.readdirSync(path.join(root, 'overlays'), { recursive: true, withFileTypes: true })
+  .filter(entry => entry.isFile())
+  .map(entry => path.relative(path.join(root, 'overlays'), path.join(entry.parentPath, entry.name)))
+  .sort();
+require('node:assert/strict').deepEqual([...manifest.overlays].sort(), files);
+NODE
+  ok "${channel}: overlay files exactly match the manifest" "$?"
 done
 
 src="${T3_SOURCE_DIR:-}"
@@ -144,8 +143,8 @@ run_in() {
 
 # The TRANSFORMED runtime: contracts, the IPC method + handler + preload, the desktop
 # service and the Providers UI all have to typecheck together, not just the pure files.
-run_in "typecheck (transformed runtime)" desktop "${work}/node_modules/.bin/tsgo" --noEmit
-run_in "typecheck (transformed runtime)" web "${work}/node_modules/.bin/tsgo" --noEmit
+run_in "typecheck (transformed runtime)" desktop node --run typecheck
+run_in "typecheck (transformed runtime)" web node --run typecheck
 run_in "overlay vitest" desktop "${work}/node_modules/.bin/vitest" run src/updates/ConstructUpdates.test.ts
 run_in "overlay vitest" web "${work}/node_modules/.bin/vitest" run \
   src/components/constructInstances.logic.test.ts src/components/constructUpdate.logic.test.ts

@@ -1,5 +1,4 @@
 import { EventEmitter } from "node:events";
-import type { spawn as nodeSpawn } from "node:child_process";
 import { assert, describe, it } from "@effect/vitest";
 import type { ConstructUpdateInfo, DesktopUpdateState } from "@t3tools/contracts";
 
@@ -46,6 +45,7 @@ import {
 } from "./ConstructUpdates.ts";
 
 const join = (...parts: string[]) => parts.join("\\");
+type CompanionSpawn = NonNullable<Parameters<typeof openConstructCompanion>[1]["spawn"]>;
 
 const INSTALLED = "dc44958114c7c43145c8f7830f6185235a1d752b";
 const PROVISIONED = "b262652aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -2055,7 +2055,7 @@ describe("Construct Companion", () => {
     const spawn = ((...args: unknown[]) => {
       calls.push(args);
       return child;
-    }) as unknown as typeof nodeSpawn;
+    }) as unknown as CompanionSpawn;
     return {
       calls,
       errors,
@@ -2149,7 +2149,7 @@ describe("Construct Companion", () => {
         ...fixture.options,
         spawn: (() => {
           throw error;
-        }) as unknown as typeof nodeSpawn,
+        }) as unknown as CompanionSpawn,
       }),
     );
     assert.deepEqual(fixture.errors, [error, error]);

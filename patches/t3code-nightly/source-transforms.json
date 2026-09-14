@@ -46,7 +46,10 @@
     "packages/contracts/src/voiceInput.test.ts",
     "packages/contracts/src/voiceInput.ts",
     "apps/web/src/voice/voiceSessionRecovery.ts",
-    "apps/web/src/voice/voiceSessionRecovery.test.ts"
+    "apps/web/src/voice/voiceSessionRecovery.test.ts",
+    "scripts/constructWslRuntime.ts",
+    "scripts/constructWindowsProbe.ts",
+    "scripts/constructWindowsProbe.test.ts"
   ],
   "transforms": [
     {
@@ -865,6 +868,67 @@
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
       "after": "}).pipe(Effect.withSpan(\"desktop.updates.download\")),",
       "insert": "    openConstructCompanion: (instanceName: string | null) => Effect.sync(() => {\n      if (!constructManaged) return false;\n      return ConstructUpdates.openConstructCompanion(instanceName, {\n        localAppData: constructLocalAppData,\n        temp: process.env.TEMP,\n        platform: environment.platform,\n        fs: ConstructUpdates.nodeConstructFileSystem,\n        onError: (error) => runConstructEffect(\n          logUpdaterWarning(\"could not open Construct Companion\", { error: error.message }),\n        ),\n      });\n    }),\n"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "after": "import { Command, Flag } from \"effect/unstable/cli\";",
+      "insert": "import { constructWslRuntime } from \"./constructWslRuntime.ts\";\n"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "after": "const buildDesktopArtifactCli = Command.make(\"build-desktop-artifact\", {",
+      "insert": "  constructWslPrebuild: Flag.string(\"wsl-prebuild\"),\n"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "find": "Command.withHandler((input) => Effect.flatMap(resolveBuildOptions(input), buildDesktopArtifact)),",
+      "replace": "Command.withHandler((input) => Effect.gen(function* () {\n    const options = yield* resolveBuildOptions(input);\n    const wslRuntime = yield* constructWslRuntime(\n      input.constructWslPrebuild, options.version ?? serverPackageJson.version,\n    );\n    yield* buildDesktopArtifact({ ...options, wslRuntime });\n  })),"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "after": "import { Command, Flag } from \"effect/unstable/cli\";",
+      "insert": "import { constructWindowsProbe } from \"./constructWindowsProbe.ts\";\n"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "scope": "const verifyPackagedBundleIsSelfContained =",
+      "find": "function* (input: { readonly asarPath: string; readonly verbose: boolean }) {",
+      "replace": "function* (input: { readonly asarPath: string; readonly verbose: boolean; readonly executablePath: string }) {"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "after": "yield* verifyPackagedBundleIsSelfContained({",
+      "insert": "    executablePath: path.join(packagedAppDir, input.appExecutableName),\n"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "scope": "const verifyPackagedBundleIsSelfContained =",
+      "after": "const entryPoint = path.join(probeApp, \"apps/server/dist/bin.mjs\");",
+      "insert": "    const probe = constructWindowsProbe(input.executablePath, entryPoint, yield* HostProcessPlatform);\n"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "scope": "const verifyPackagedBundleIsSelfContained =",
+      "find": "process.execPath,",
+      "replace": "probe.command,"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "scope": "const verifyPackagedBundleIsSelfContained =",
+      "find": "[\"--no-global-search-paths\", entryPoint, \"--version\"],",
+      "replace": "probe.args,"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "scope": "const verifyPackagedBundleIsSelfContained =",
+      "find": "env: { ...process.env, NODE_PATH: \"\" },",
+      "replace": "env: probe.env,"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.test.ts",
+      "optional": true,
+      "after": "import * as NodeServices from \"@effect/platform-node/NodeServices\";",
+      "insert": "import { vi } from \"vite-plus/test\";\n// These fixtures contain plain JS and a fake Electron file. Exercise their real\n// isolated Node resolution; Wine command selection has its own tests.\nvi.mock(\"./constructWindowsProbe.ts\", () => ({\n  constructWindowsProbe: (_executable: string, entry: string) => ({\n    command: process.execPath,\n    args: [\"--no-global-search-paths\", entry, \"--version\"],\n    env: { ...process.env, NODE_PATH: \"\", NODE_OPTIONS: \"\" },\n  }),\n}));\n"
     }
   ]
 }
