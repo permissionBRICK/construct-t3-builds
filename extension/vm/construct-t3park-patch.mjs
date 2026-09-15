@@ -62,6 +62,13 @@ const ANCHOR_RATELIMIT = '\t\tif (message.type === "rate_limit_event") {\n';
 const PATCH_RATELIMIT = ANCHOR_RATELIMIT +
   "\t\t\tglobalThis.__t3park && globalThis.__t3park.noteRateLimit(context, message);\n";
 
+// The `t3` npm package entry is a launcher: it resolves the platform package
+// and spawns its self-contained executable, carrying no server code itself.
+// It is stock by construction, never a changed anchor set — report it as the
+// launcher instead of an upstream adapter conflict.
+const ANCHOR_LAUNCHER =
+  'require.resolve("@t3code/t3-" + process.platform + "-" + process.arch + "/package.json")';
+
 // Hook the consumers of the computed result, independent of how the upstream
 // adapter derives it. This exact block is shared by the current stable/nightly.
 const ANCHOR_RESULT =
@@ -518,6 +525,7 @@ if (mode === "mint-token") { ensureToken(); process.exit(existsSync(TOKEN_FILE) 
 if (!existsSync(bundle)) fail("bundle not found: " + bundle + (mode === "revert" ? " (nothing to revert)" : ""), mode === "revert" ? 0 : 1);
 let src = readFileSync(bundle, "utf8");
 const version = currentVersion(src);
+const launcher = version === null && countOccurrences(src, ANCHOR_LAUNCHER) === 1;
 
 if (mode === "status") {
   const compatible = version === VERSION || (
@@ -525,7 +533,12 @@ if (mode === "status") {
     countOccurrences(src, ANCHOR_RATELIMIT) === 1 &&
     countOccurrences(src, ANCHOR_RESULT) === 1
   );
-  console.log(JSON.stringify({ patched: version !== null, compatible, version, bundle, backup: existsSync(backup) }));
+  const status = { patched: version !== null, compatible, version, bundle, backup: existsSync(backup) };
+  if (launcher) {
+    status.launcher = true;
+    status.detail = "this is the t3 npm package launcher; it spawns the platform executable and carries no server code — the patch target is the source-built apps/server/dist/bin.mjs";
+  }
+  console.log(JSON.stringify(status));
   process.exit(0);
 }
 
@@ -554,6 +567,8 @@ if (version !== null) {
   src = orig;
   srcIsStockBundle = false;
 }
+
+if (launcher) fail("this bundle is the t3 npm package launcher (dist/bin.mjs of the npm package): it spawns the platform executable and carries no server code. Apply this patcher to the source-built apps/server/dist/bin.mjs (bin/t3code-build-recipe.sh does), or install Construct's prebuilt pair.", 2);
 
 for (const [name, anchor] of [["rate_limit_event branch", ANCHOR_RATELIMIT], ["result errorMessage line", ANCHOR_RESULT]]) {
   const n = countOccurrences(src, anchor);
