@@ -78,6 +78,25 @@ for (const [name, invalid] of [
     assert.equal(existsSync(bundle + ".t3park-orig"), false);
   });
 }
+const launcher = `import { spawn } from "node:child_process";
+import { constants } from "node:os";
+import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const executableName = process.platform === "win32" ? "t3.exe" : "t3";
+const executable = join(dirname(require.resolve("@t3code/t3-" + process.platform + "-" + process.arch + "/package.json")), executableName);
+spawn(executable, process.argv.slice(2), { stdio: "inherit" });
+`;
+ok("guard: names the npm launcher instead of an anchor conflict", () => {
+  writeFileSync(bundle, launcher);
+  const status = JSON.parse(runPatcher("status"));
+  assert.equal(status.compatible, false);
+  assert.equal(status.launcher, true);
+  assert.match(status.detail, /launcher/);
+  assert.throws(() => runPatcher("apply"), (error) => error.status === 2);
+  assert.equal(readFileSync(bundle, "utf8"), launcher);
+  assert.equal(existsSync(bundle + ".t3park-orig"), false);
+});
 writeFileSync(bundle, original);
 
 const dispatches = [];
