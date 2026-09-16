@@ -332,7 +332,7 @@
     {
       "path": "apps/server/src/environment/ServerEnvironment.ts",
       "after": "threadTitleRegeneration: true,",
-      "insert": "      voiceInput: process.env.CONSTRUCT_T3_VOICE_INPUT === \"true\",\n      voiceInputClientAudio: true,\n"
+      "insert": "      voiceInput:\n        process.env.CONSTRUCT_T3_VOICE_INPUT === \"true\" ||\n        (serverConfig.mode === \"desktop\" && process.env.CONSTRUCT_T3_VOICE_INPUT !== \"false\"),\n      voiceInputClientAudio: true,\n"
     },
     {
       "path": "apps/server/src/environment/ServerEnvironment.ts",
@@ -938,6 +938,12 @@
       "path": "apps/server/src/workspace/WorkspaceSearchIndex.ts",
       "find": "FileFinder.create({",
       "replace": "getFileFinder().create({"
+    },
+    {
+      "path": "apps/server/src/environment/ServerEnvironment.test.ts",
+      "before": "it.effect(\"persists the environment id across service restarts\", () =>",
+      "insert": "  it.effect(\"enables local Desktop voice without VM configuration and preserves the remote flag\", () =>\n    Effect.gen(function* () {\n      const fileSystem = yield* FileSystem.FileSystem;\n      const baseDir = yield* fileSystem.makeTempDirectoryScoped({\n        prefix: \"t3-local-voice-test-\",\n      });\n      const serverConfig = yield* makeServerConfig(baseDir);\n      yield* fileSystem.makeDirectory(serverConfig.stateDir, { recursive: true });\n      const saved = process.env.CONSTRUCT_T3_VOICE_INPUT;\n      try {\n        for (const mode of [\"desktop\", \"web\"] as const) {\n          for (const flag of [undefined, \"true\", \"false\"]) {\n            if (flag === undefined) delete process.env.CONSTRUCT_T3_VOICE_INPUT;\n            else process.env.CONSTRUCT_T3_VOICE_INPUT = flag;\n            const descriptor = yield* Effect.gen(function* () {\n              const environment = yield* ServerEnvironment.ServerEnvironment;\n              return yield* environment.getDescriptor;\n            }).pipe(\n              Effect.provide(\n                ServerEnvironment.layer.pipe(\n                  Layer.provide(ServerSecretStore.layer),\n                  Layer.provide(ServerConfig.layer({ ...serverConfig, mode })),\n                ),\n              ),\n            );\n            const expected = mode === \"desktop\" ? flag !== \"false\" : flag === \"true\";\n            expect(descriptor.capabilities.voiceInput, `${mode}, flag=${flag}`).toBe(expected);\n            expect(descriptor.capabilities.voiceInputClientAudio).toBe(true);\n          }\n        }\n      } finally {\n        if (saved === undefined) delete process.env.CONSTRUCT_T3_VOICE_INPUT;\n        else process.env.CONSTRUCT_T3_VOICE_INPUT = saved;\n      }\n    }),\n  );\n\n",
+      "optional": true
     }
   ]
 }
