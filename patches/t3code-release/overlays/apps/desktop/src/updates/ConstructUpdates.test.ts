@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - The process mock uses the native spawn signature.
 import { EventEmitter } from "node:events";
 import type { spawn as nodeSpawn } from "node:child_process";
 import { assert, describe, it } from "@effect/vitest";
