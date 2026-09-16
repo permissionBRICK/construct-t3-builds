@@ -83,6 +83,25 @@ class Decisions(unittest.TestCase):
             self.assertNotEqual(before, p.recipe_hash(root))
 
 class Publication(unittest.TestCase):
+    def test_incompatible_plan_fails_job_but_cached_release_succeeds(self):
+        for incompatible in (True, False):
+            with self.subTest(incompatible=incompatible), tempfile.TemporaryDirectory() as directory:
+                work = Path(directory)
+                result = dict(build=False, reason='stable inventory conflict') if incompatible else dict(
+                    build=False, tag='existing', inventory='release')
+                with patch.object(p, 'api', return_value={'version': '0.0.42'}), \
+                     patch.object(p, 'patch_hash', return_value='hash'), \
+                     patch.object(p, 'choose', return_value=result), \
+                     patch.object(p, 'run', return_value='commit'):
+                    if incompatible:
+                        with self.assertRaisesRegex(RuntimeError, 'stable inventory conflict'):
+                            p.plan(work, 'owner/builds', p.ROOT)
+                    else:
+                        p.plan(work, 'owner/builds', p.ROOT)
+                saved = json.loads((work / 'plan.json').read_text())
+                self.assertFalse(saved['build'])
+                self.assertEqual(saved['version'], '0.0.42')
+
     def test_failed_upload_or_verification_never_promotes_draft(self):
         for failure in ('upload', 'verification'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:

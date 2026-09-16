@@ -123,6 +123,8 @@ def plan(work, repository, construct, channel="stable", verify=False):
     if os.getenv('GITHUB_STEP_SUMMARY'):
         with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
             f.write(summary + '\n')
+    if result.get('reason'):
+        raise RuntimeError(summary)
 
 
 def finalize(work):
