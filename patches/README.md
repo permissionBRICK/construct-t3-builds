@@ -73,6 +73,10 @@ through re-indentation) and the list of `conflicts`.
 ## What the inventories add to T3 Code
 
 - **Voice input** (`voiceInput.*` RPCs, composer mic button, client or host capture).
+  Desktop-managed backends enable it by default, using the desktop microphone
+  and the Claude Code login in that backend's environment. Remote servers keep
+  the `CONSTRUCT_T3_VOICE_INPUT=true` opt-in; an explicit `false` disables voice
+  on either backend. Local Desktop use does not require a Construct VM.
   Client recordings retain up to 30 seconds of unacknowledged PCM and reattach the
   same server session after connection loss. Ordered byte offsets make retries
   idempotent; Stop flushes capture and drains uploads before closing transcription.
