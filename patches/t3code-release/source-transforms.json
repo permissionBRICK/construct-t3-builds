@@ -877,6 +877,67 @@
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
       "after": "}).pipe(Effect.withSpan(\"desktop.updates.download\")),",
       "insert": "    openConstructCompanion: (instanceName: string | null) => Effect.sync(() => {\n      if (!constructManaged) return false;\n      return ConstructUpdates.openConstructCompanion(instanceName, {\n        localAppData: constructLocalAppData,\n        temp: process.env.TEMP,\n        platform: environment.platform,\n        fs: ConstructUpdates.nodeConstructFileSystem,\n        onError: (error) => runConstructEffect(\n          logUpdaterWarning(\"could not open Construct Companion\", { error: error.message }),\n        ),\n      });\n    }),\n"
+    },
+    {
+      "path": "scripts/build-cli-archive.ts",
+      "find": "const stageRuntimeExternals = Effect.fn(\"stageRuntimeExternals\")",
+      "replace": "export const stageRuntimeExternals = Effect.fn(\"stageRuntimeExternals\")"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "after": "import { applyWebBrandAssets } from \"./apply-web-brand-assets.ts\";",
+      "insert": "import { stageRuntimeExternals } from \"./build-cli-archive.ts\";\n"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "before": "export const stageWslRuntimeArchive = Effect.fn(\"stageWslRuntimeArchive\")(function* (input: {",
+      "insert": "class ConstructWslRuntimeError extends Schema.TaggedError<ConstructWslRuntimeError>()(\n  \"ConstructWslRuntimeError\", { message: Schema.String },\n) {}\n\n// Package the already-patched server with the Node ABI used for its native addons.\nexport const createConstructWslRuntimeArchive = Effect.fn(\"createConstructWslRuntimeArchive\")(function* (input: {\n  readonly repoRoot: string;\n  readonly serverDistDir: string;\n  readonly prebuildPath: string;\n  readonly version: string;\n  readonly arch: typeof BuildArch.Type;\n}) {\n  if (process.platform !== \"linux\" || input.arch === \"universal\" || input.arch !== process.arch) {\n    return yield* Effect.fail(new ConstructWslRuntimeError({ message: \"Construct WSL packaging requires a matching Linux build host.\" }));\n  }\n  const fs = yield* FileSystem.FileSystem;\n  const path = yield* Path.Path;\n  const stage = yield* fs.makeTempDirectoryScoped({ prefix: \"construct-wsl-\" });\n  const stem = wslRuntimeArchiveStem(input.version, input.arch);\n  const root = path.join(stage, stem);\n  yield* fs.makeDirectory(root);\n  yield* stageRuntimeExternals({\n    repoRoot: input.repoRoot, stageDir: root, platform: \"linux\", arch: input.arch, version: input.version,\n  });\n  yield* fs.copy(input.serverDistDir, path.join(root, \"apps/server/dist\"));\n  yield* fs.copyFile(process.execPath, path.join(root, \"node\"));\n  yield* fs.chmod(path.join(root, \"node\"), 0o755);\n  const pty = path.join(root, \"node_modules/node-pty/build/Release/pty.node\");\n  yield* fs.makeDirectory(path.dirname(pty), { recursive: true });\n  yield* fs.copyFile(input.prebuildPath, pty);\n  yield* fs.writeFileString(path.join(root, \"t3\"), [\n    \"#!/bin/sh\", \"set -eu\",\n    'runtime=\"$(CDPATH= cd -- \"$(dirname -- \"$(readlink -f -- \"$0\")\")\" && pwd)\"',\n    'exec \"$runtime/node\" \"$runtime/apps/server/dist/bin.mjs\" \"$@\"', \"\",\n  ].join(\"\\n\"));\n  yield* fs.chmod(path.join(root, \"t3\"), 0o755);\n  const archivePath = path.join(stage, `${stem}.tar.gz`);\n  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;\n  const child = yield* spawner.spawn(ChildProcess.make(\"tar\", [\"-czf\", archivePath, \"-C\", stage, stem]));\n  const exitCode = yield* child.exitCode;\n  if (exitCode !== 0) return yield* Effect.fail(new ConstructWslRuntimeError({ message: `Construct WSL archive tar exited ${exitCode}.` }));\n  return archivePath;\n});\n\n"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "find": "wslRuntime: Flag.string(\"wsl-runtime\")",
+      "replace": "wslRuntime: Flag.string(\"wsl-prebuild\")"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "find": "Path to the Linux CLI release archive (t3-<version>-linux-x64.tar.gz) to embed as the WSL runtime of a Windows build (env: T3CODE_DESKTOP_WSL_RUNTIME).",
+      "replace": "Path to the Linux node-pty prebuild matching the current Node executable; packages the Construct server as the WSL runtime (env: T3CODE_DESKTOP_WSL_RUNTIME)."
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "find": "sourceArchivePath: options.wslRuntime,",
+      "replace": "sourceArchivePath: yield* createConstructWslRuntimeArchive({\n        repoRoot, serverDistDir: distDirs.serverDist, prebuildPath: options.wslRuntime,\n        version: appVersion, arch: options.arch,\n      }),"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "find": "`${stem}/client`,",
+      "replace": "`${stem}/node`,\n      `${stem}/apps/server/dist/bin.mjs`,\n      `${stem}/apps/server/dist/client`,"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.ts",
+      "find": "    // The CLI archive runs the single-executable, never a loose server bundle.\n    const bundleEntry = members.find((member) => member.endsWith(\"/bin.mjs\"));\n    if (bundleEntry !== undefined) {\n      return yield* invalidWslRuntime(\n        new Error(`WSL runtime archive contains a server bundle entry ${bundleEntry}`),\n      );\n    }\n",
+      "replace": "    // Construct ships its patched server bundle and matching Node executable.\n"
+    },
+    {
+      "path": "apps/desktop/src/wsl/DesktopWslEnvironment.ts",
+      "find": "sha256sum \"$1/t3\" 2>/dev/null | cut -d ' ' -f 1",
+      "replace": "(cd \"$1\" && sha256sum t3 node apps/server/dist/bin.mjs) 2>/dev/null | sha256sum | cut -d ' ' -f 1"
+    },
+    {
+      "path": "scripts/build-desktop-artifact.test.ts",
+      "find": "`${input.stem}/client/index.html`,",
+      "replace": "`${input.stem}/node`,\n    `${input.stem}/apps/server/dist/bin.mjs`,\n    `${input.stem}/apps/server/dist/client/index.html`,",
+      "optional": true
+    },
+    {
+      "path": "apps/server/src/workspace/WorkspaceSearchIndex.ts",
+      "find": "const { FileFinder } = requireForFff(\"@ff-labs/fff-node\") as typeof import(\"@ff-labs/fff-node\");",
+      "replace": "// Version/help probes do not need a host-compatible native search library.\nconst getFileFinder = () => (requireForFff(\"@ff-labs/fff-node\") as typeof import(\"@ff-labs/fff-node\")).FileFinder;"
+    },
+    {
+      "path": "apps/server/src/workspace/WorkspaceSearchIndex.ts",
+      "find": "FileFinder.create({",
+      "replace": "getFileFinder().create({"
     }
   ]
 }
