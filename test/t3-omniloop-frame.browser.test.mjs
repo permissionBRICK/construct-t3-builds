@@ -31,7 +31,6 @@ async function functionFrom(text,start,end) {
  return import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
 }
 const {makeDesktopContentSecurityPolicy:makePolicy}=await functionFrom(patched,'export function makeDesktopContentSecurityPolicy','function withContentSecurityPolicy');
-const {makeDesktopContentSecurityPolicy:oldPolicy}=await functionFrom(original,'export function makeDesktopContentSecurityPolicy','function withContentSecurityPolicy');
 const proxy=fs.readFileSync(path.join(root,`patches/t3code-${channel}/overlays/apps/server/src/constructOmniloopProxy.ts`),'utf8');
 const {rewriteOmniloopAsset}=await functionFrom(proxy,'export function rewriteOmniloopAsset','export function rewriteOmniloopLocation');
 const panel=fs.readFileSync(path.join(root,`patches/t3code-${channel}/overlays/apps/web/src/components/omniloop/OmniloopPanel.tsx`),'utf8');
@@ -68,9 +67,8 @@ const remote=http.createServer(dashboard);
 const secure=https.createServer({key:fs.readFileSync(path.join(tmp,'key.pem')),cert:fs.readFileSync(path.join(tmp,'cert.pem'))},dashboard);
 const parent=http.createServer((req,res)=>{
  res.setHeader('Content-Type','text/html');
- const url=new URL(req.url,'http://parent');
  const input={scheme:'t3code',targetOrigin:new URL('http://localhost/'),backendOrigin:new URL('http://localhost/'),clerkFrontendApiHostname:undefined};
- res.setHeader('Content-Security-Policy',(url.searchParams.has('old')?oldPolicy:makePolicy)(input));
+ res.setHeader('Content-Security-Policy',makePolicy(input));
  res.end('<!doctype html><body><div id="panel"></div></body>');
 });
 const servers=[remote,secure,parent];
@@ -80,8 +78,8 @@ const page=await browser.newPage({ignoreHTTPSErrors:true});
 const errors=[];page.on('pageerror',e=>{errors.push(e.message);console.log('PAGE ERROR',e.message)});
 if(process.env.T3_TEST_DEBUG)page.on('console',m=>{if(m.type()==='error')console.log(m.text())});
 const parentUrl=`http://127.0.0.1:${parent.address().port}`;
-const open=async(src,old=false)=>{
- await page.goto(parentUrl+(old?'/?old':''));
+const open=async(src)=>{
+ await page.goto(parentUrl);
  await page.evaluate(src=>{
   window.violations=[];
   document.addEventListener('securitypolicyviolation',e=>window.violations.push(e.effectiveDirective));
@@ -92,10 +90,6 @@ try {
  const base=`http://127.0.0.1:${remote.address().port}/`;
  const good=frameSrc(base,{guiPath},null);
  assert.equal(new URL(good).pathname,ticket+'/gui/index.html');
- await open(good,true);
- await page.waitForFunction(()=>window.violations.includes('frame-src'));
- assert.equal(requests.length,0,'old desktop CSP blocks the dashboard before a request');
- console.log('PASS reproduced blank frame: original CSP blocks the remote VM');
  const bad=base+guiPath;
  await open(bad);
  await page.waitForFunction(()=>window.violations.includes('frame-src'));

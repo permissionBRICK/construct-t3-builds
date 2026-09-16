@@ -1,4 +1,4 @@
-// Run against the built, patched nightly with T3_TEST_SOURCE=/path/to/upstream.
+// Run against the built, patched channel with T3_TEST_SOURCE=/path/to/upstream.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-assert.ok(process.env.T3_TEST_SOURCE, 'T3_TEST_SOURCE must name a built nightly checkout');
+assert.ok(process.env.T3_TEST_SOURCE, 'T3_TEST_SOURCE must name a built patched checkout');
 const source = resolve(process.env.T3_TEST_SOURCE);
 const require = createRequire(join(source, 'scripts/package.json'));
 const Effect = await import(require.resolve('effect/Effect'));

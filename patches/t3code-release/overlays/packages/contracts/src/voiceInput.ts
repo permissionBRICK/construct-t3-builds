@@ -64,7 +64,7 @@ export const VoiceInputStreamEvent = Schema.Union([
 ]);
 export type VoiceInputStreamEvent = typeof VoiceInputStreamEvent.Type;
 
-export class VoiceInputError extends Schema.TaggedErrorClass<VoiceInputError>()("VoiceInputError", {
+export class VoiceInputError extends Schema.TaggedError<VoiceInputError>()("VoiceInputError", {
   message: Schema.String,
   fatal: Schema.optional(Schema.Boolean),
 }) {}
