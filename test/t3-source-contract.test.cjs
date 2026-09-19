@@ -83,7 +83,7 @@ for (const channel of ["release", "nightly"]) {
     /ConstructUpdates\.runConstructPairingLink\(planned\.plan\)/.test(inserts) &&
     /ConstructUpdates\.recordConstructInstanceT3Link\(/.test(inserts));
   ok(`auto-link (${channel}): \`t3 auth pairing create --scopes administrative\` exists in the patched build`,
-    /Flag\.string\("scopes"\)/.test(inserts) && /AuthAdministrativeScopes\n\s*: AuthStandardClientScopes/.test(inserts));
+    /Flag\.[sS]tring\("scopes"\)/.test(inserts) && /AuthAdministrativeScopes\n\s*: AuthStandardClientScopes/.test(inserts));
 }
 const autoLink = fs.readFileSync(path.join(repoRoot, "patches", "t3code-release", "overlays", "apps", "web", "src", "components", "ConstructAutoLink.tsx"), "utf8");
 ok("auto-link: the renderer links off the planner and never twice per session",
