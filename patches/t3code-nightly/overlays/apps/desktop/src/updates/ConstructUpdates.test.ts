@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off - the fakes cast an EventEmitter child to the
+// spawn type the updater launches host scripts with; the tests never spawn real processes.
 import { EventEmitter } from "node:events";
 import type { spawn as nodeSpawn } from "node:child_process";
 import { assert, describe, it } from "@effect/vitest";
