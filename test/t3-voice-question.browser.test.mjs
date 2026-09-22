@@ -1,4 +1,4 @@
-// Run the patched voice controls, real question panel, answer callbacks and Lexical
+// Run the patched voice controls, real question panel, answer callbacks and composer
 // editor in Chromium. Only audio/STT transport and the surrounding store are mocked.
 // T3_TEST_SOURCE: matching upstream checkout; T3_TEST_TOOLS: package directory
 // providing playwright. Uses the checkout's Vite for browser imports, including
@@ -27,6 +27,12 @@ const readSource = file => process.env.T3_TEST_BASELINE
   ? execFileSync('git', ['show', 'HEAD:'+file], {cwd:source, encoding:'utf8'})
   : fs.readFileSync(path.join(source, file), 'utf8');
 const upstream = readSource('apps/web/src/components/chat/ChatComposer.tsx');
+let submit = upstream.slice(upstream.indexOf('  const submitComposer = useCallback('), upstream.indexOf('  const submitCitationAndSend = useCallback('));
+if (process.env.T3_TEST_BASELINE) {
+  const guard = manifest.transforms.find(t => t.scope === 'const submitComposer = useCallback(' && t.before === 'if (noProviderAvailable || isSendDisabled) {');
+  submit = submit.replace('      if (noProviderAvailable || isSendDisabled) {', guard.insert+'      if (noProviderAvailable || isSendDisabled) {');
+}
+const commandKey = upstream.slice(upstream.indexOf('  const onComposerCommandKey = ('), upstream.indexOf('  // Prompt stash ('));
 const replacement = upstream.slice(upstream.indexOf('  const applyPromptReplacement = useCallback('), upstream.indexOf('  const readComposerSnapshot = useCallback('));
 const chatView = readSource('apps/web/src/components/ChatView.tsx');
 const answerChange = chatView.slice(chatView.indexOf('  const onChangeActivePendingUserInputCustomAnswer = useCallback('), chatView.indexOf('  const onAdvanceActivePendingUserInput = useCallback('));
@@ -43,6 +49,8 @@ import {derivePendingUserInputProgress, buildPendingUserInputAnswers, setPending
 import {Tooltip, TooltipTrigger, TooltipPopup} from ${JSON.stringify(path.join(source,'apps/web/src/components/ui/tooltip.tsx'))};
 import {MicIcon, SquareIcon} from 'lucide-react';
 import {cn} from ${JSON.stringify(path.join(source,'apps/web/src/lib/utils.ts'))};
+import {submitComposerDraft} from ${JSON.stringify(path.join(source,'apps/web/src/components/chat/composerSubmission.ts'))};
+import {composerSubmissionIntentForEnter} from ${JSON.stringify(path.join(source,'apps/web/src/composer-logic.ts'))};
 type VoiceInsertionState${types}
 const voiceSourceHint = 'test microphone'; const isConnecting = false;
 const environmentId = 'env'; const environmentUnavailable = null; const supportsVoiceInput = true;
@@ -89,6 +97,7 @@ function Harness() {
  const [isVoiceRecording,setIsVoiceRecording] = useState(false);
  const [voiceLevel,setVoiceLevel] = useState(0);
  const [voiceStatus,setVoiceStatus] = useState("Recording");
+ const [voiceSubmission,setVoiceSubmission] = useState(null);
  const voiceInsertionRef = useRef(null); const voiceShortcutRef = useRef(null);
  const runStartVoiceInput = ({onEvent,resume}) => {
    window.starts.push(resume);
@@ -111,6 +120,27 @@ function Harness() {
  };
  ${replacement}
  ${voice}
+ const activeThreadId = 'thread'; const attachmentTargetKey = 'thread';
+ const pendingImageCompressionsRef = useRef(new Map()); const pendingDraftWork = new Set();
+ const providerInputRejectedRef = useRef(false);
+ const [noProviderAvailable,setNoProviderAvailable] = useState(false);
+ const isSendDisabled = !(activePendingProgress?.customAnswer ?? prompt).trim();
+ const setComposerSubmissionError = () => {};
+ const shouldBlurMobileComposerOnSubmit = () => false; const blurMobileComposerAfterSend = () => {};
+ const onSend = (event,intent) => {
+   event?.preventDefault();
+   window.sends.push({text:pending?.customAnswer ?? prompt, snapshot:composerEditorRef.current.readSnapshot().value,
+     answers:pending ? buildPendingUserInputAnswers(questions,answers) : null, intent});
+ };
+ ${submit}
+ const planModeUiEnabled = false; const isMobileViewport = layout === 'mobile';
+ const phase = 'idle'; const settings = {sendShortcut:'enter'};
+ const listContinuationForEnter = () => null; const listIndentForTab = () => null;
+ const routeKind = 'draft'; const composerMenuOpenRef = useRef(false);
+ const resolveActiveComposerTrigger = () => ({trigger:null});
+ const navigatePromptHistory = () => false;
+ ${commandKey}
+ window.setNoProviderAvailable=setNoProviderAvailable;
  window.editorSnapshot=()=>composerEditorRef.current.readSnapshot();
  window.focusEnd=()=>composerEditorRef.current.focusAtEnd();
  window.focusAt=cursor=>composerEditorRef.current.focusAt(cursor);
@@ -126,7 +156,7 @@ function Harness() {
  window.leaveQuestion = () => setPending(null);
  window.staleRef = () => {promptRef.current=prompt};
  window.changeChatDraft = () => setPrompt('saved background draft');
- return <form data-chat-composer-form="true" onSubmit={event=>event.preventDefault()}>
+ return <form data-chat-composer-form="true" onSubmit={submitComposer}>
    <ComposerPendingUserInputPanel pendingUserInputs={pending?[activePendingUserInput]:[]}
      respondingRequestIds={activePendingIsResponding?[pending.requestId]:[]} answers={answers} questionIndex={0}
      onToggleOption={(id,value)=>setPending(p=>({...p,...togglePendingUserInputOptionSelection(questions[0],answers[id],value)}))}
@@ -134,7 +164,7 @@ function Harness() {
    <div style={{display:layout==='collapsed'?'none':undefined}}>
      <ComposerPromptEditor editorRef={composerEditorRef} value={pending?.customAnswer ?? prompt} cursor={composerCursor}
        contextRecords={new Map()} terminalContexts={[]} skills={[]} disabled={isChoiceOnlyPendingQuestion || activePendingIsResponding}
-       placeholder="Compose" onChange={(text,cursor)=>{${changeGuard}setComposerCursor(cursor);pending?setPending(p=>({...p,customAnswer:text})):setPrompt(text)}} onPaste={()=>{}} />
+       placeholder="Compose" onCommandKeyDown={onComposerCommandKey} onChange={(text,cursor)=>{${changeGuard}setComposerCursor(cursor);pending?setPending(p=>({...p,customAnswer:text})):setPrompt(text)}} onPaste={()=>{}} />
    </div>
    ${questionControl}
    <div data-chat-composer-footer="true" style={{display:layout==='desktop'?'flex':'none'}}>
@@ -143,7 +173,7 @@ function Harness() {
    <output>{prompt}</output><span data-status>{voiceStatus}</span>
  </form>;
 }
-window.holdFinal=false;window.toasts=[];window.stops=0;window.starts=[];window.offline=false;window.received=0;window.captured=0;
+window.holdFinal=false;window.toasts=[];window.stops=0;window.starts=[];window.sends=[];window.offline=false;window.received=0;window.captured=0;
 createRoot(document.getElementById('root')).render(React.createElement(Harness));
 `;
 const browser = await chromium.launch({headless:true, ...(process.env.T3_TEST_CHROMIUM ? {executablePath:process.env.T3_TEST_CHROMIUM} : {})});
@@ -174,6 +204,7 @@ try {
  });
  page.setDefaultTimeout(2000);
  const errors=[];page.on('pageerror',e=>{errors.push(e.message); console.error('Browser:',e.stack)});
+ page.on('console',message=>{if(message.type()==='error') console.error('Browser console:',message.text())});
  async function reset(client=false) {
    await page.goto('http://voice.test');
    await page.setContent('<div id="root"></div>');
@@ -189,6 +220,61 @@ try {
  async function editable(enabled) {await page.waitForFunction(expected=>document.querySelector('[contenteditable]').getAttribute('contenteditable')===String(expected),enabled);}
  async function start() {await page.evaluate(()=>window.focusEnd());await mic.click();await recording(true);}
  async function stop() {await mic.click();await recording(false);await editable(true);}
+
+ // One Enter finishes dictation and sends the committed final text exactly once.
+ for (const client of [false,true]) {
+   for (const question of [false,true]) {
+     await reset(client);
+     if (!question) await page.evaluate(()=>window.leaveQuestion());
+     await editor.fill('');await start();
+     await page.evaluate(()=>{window.holdFinal=true});
+     await page.keyboard.press('Enter');
+     await page.waitForFunction(()=>window.stops===1);
+     if (client) assert.equal(await page.evaluate(()=>window.capturing),false,'Enter releases the client microphone');
+     assert.deepEqual(await page.evaluate(()=>window.sends),[],'wait for the final words, even with an initially empty draft');
+     await page.keyboard.press('Enter');
+     assert.equal(await page.evaluate(()=>window.stops),1,'repeated Enter does not stop twice');
+     await page.evaluate(()=>{
+       window.transcript('final spoken words');
+       window.voiceEvent({type:'stopped',reason:'user-stop'});window.endStream({failure:false});
+     });
+     await recording(false);
+     await page.waitForFunction(()=>window.sends.length===1);
+     assert.deepEqual(await page.evaluate(()=>window.sends),[{
+       text:'final spoken words',snapshot:'final spoken words',intent:'foreground',
+       answers:question?{'question-1':'final spoken words'}:null,
+     }]);
+     await page.evaluate(()=>window.voiceEvent({type:'stopped',reason:'user-stop'}));
+     assert.equal(await page.evaluate(()=>window.sends.length),1,'late stop events do not send twice');
+   }
+ }
+ // The usual Enter modifiers and explicit Stop keep their existing behavior.
+ await reset();await start();
+ await editor.dispatchEvent('keydown',{key:'Enter',code:'Enter',isComposing:true});
+ assert.equal(await page.evaluate(()=>window.stops),0,'IME composition does not submit');
+ await page.keyboard.press('Shift+Enter');await recording(true);
+ assert.equal(await page.evaluate(()=>window.stops),0);await stop();
+ assert.deepEqual(await page.evaluate(()=>window.sends),[],'manual Stop does not send');
+ await reset();await page.evaluate(()=>window.leaveQuestion());await start();
+ await page.keyboard.press('Control+Enter');await recording(false);
+ await page.waitForFunction(()=>window.sends.length===1);
+ assert.equal(await page.evaluate(()=>window.sends[0].intent),'background');
+
+ // A queued send belongs to this recording and target, and still runs send checks.
+ for (const cancel of ['question','thread','failure','limit','provider']) {
+   await reset();await start();await page.evaluate(()=>{window.holdFinal=true});
+   await page.keyboard.press('Enter');await page.waitForFunction(()=>window.stops===1);
+   if (cancel==='question') await page.evaluate(()=>window.changeQuestion());
+   if (cancel==='thread') await page.evaluate(()=>window.leaveQuestion());
+   if (cancel==='failure') await page.evaluate(()=>window.endStream({failure:false}));
+   if (cancel==='provider') await page.evaluate(()=>window.setNoProviderAvailable(true));
+   await page.evaluate(reason=>{
+     window.voiceEvent({type:'stopped',reason});window.endStream({failure:false});
+   },cancel==='limit'?'recording-limit':'user-stop');
+   await recording(false);
+   assert.deepEqual(await page.evaluate(()=>window.sends),[],cancel+' must not dispatch the queued send');
+ }
+ console.log('PASS: '+channel+' Enter stops and sends final text once, preserves modifiers, and cancels on target changes or failure');
 
  // Recording must preserve focus so Ctrl+T can stop it before the first transcript.
  await reset();await page.evaluate(()=>window.focusEnd());
