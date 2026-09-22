@@ -74,8 +74,8 @@ python3 scripts/publisher.py plan --channel nightly --work work-nightly
 ```
 
 The browser-driven checks (`test/*.browser.test.mjs`: the update popup, the
-composer's voice callbacks with mocked audio and transcription, the microphone
-capture shim) are manual and not part of the build. Run one for an inventory with
+question panels and answer callbacks with mocked audio and transcription, the
+microphone capture shim) are manual and not part of the build. Run one for an inventory with
 `T3_TEST_SOURCE` pointing at its patched upstream checkout with installed
 dependencies, `T3_TEST_TOOLS` at a package directory providing esbuild and
 Playwright, and `T3_TEST_CHANNEL=release|nightly`, for example

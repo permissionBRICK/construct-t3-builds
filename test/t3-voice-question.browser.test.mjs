@@ -1,5 +1,5 @@
-// Run the actual inventory's voice callbacks and upstream replacement callback
-// with the real Lexical composer in Chromium. Audio/STT transport is mocked.
+// Run the patched voice controls, real question panel, answer callbacks and Lexical
+// editor in Chromium. Only audio/STT transport and the surrounding store are mocked.
 // T3_TEST_SOURCE: matching upstream checkout; T3_TEST_TOOLS: package directory
 // providing playwright. Uses the checkout's Vite for browser imports, including
 // ?worker and import.meta.env. T3_TEST_CHANNEL defaults to release.
@@ -23,15 +23,28 @@ const manifest = JSON.parse(process.env.T3_TEST_BASELINE
 const inserts = manifest.transforms.filter(t => t.path.endsWith('/ChatComposer.tsx')).map(t => t.insert || '');
 const types = inserts.find(s => s.includes('type VoiceInsertionState')).split('type VoiceInsertionState')[1];
 const voice = inserts.find(s => s.includes('const stopVoiceRecording = useCallback'));
-const upstream = fs.readFileSync(path.join(source, 'apps/web/src/components/chat/ChatComposer.tsx'), 'utf8');
+const readSource = file => process.env.T3_TEST_BASELINE
+  ? execFileSync('git', ['show', 'HEAD:'+file], {cwd:source, encoding:'utf8'})
+  : fs.readFileSync(path.join(source, file), 'utf8');
+const upstream = readSource('apps/web/src/components/chat/ChatComposer.tsx');
 const replacement = upstream.slice(upstream.indexOf('  const applyPromptReplacement = useCallback('), upstream.indexOf('  const readComposerSnapshot = useCallback('));
-const editorLock = manifest.transforms.some(t => (t.replace?.startsWith('disabled={isVoiceRecording ||')) || (t.scope === '<ComposerPromptEditor' && t.insert?.includes('isVoiceRecording ||')));
+const chatView = readSource('apps/web/src/components/ChatView.tsx');
+const answerChange = chatView.slice(chatView.indexOf('  const onChangeActivePendingUserInputCustomAnswer = useCallback('), chatView.indexOf('  const onAdvanceActivePendingUserInput = useCallback('));
+assert.ok(answerChange.includes('composerRef.current?.focusAt'), 'exercise the real parent answer callback');
 const changeGuard = inserts.find(s => s.includes('Voice owns the draft')) ?? '';
+const footerControl = manifest.transforms.find(t => t.path.endsWith('/ChatComposer.tsx') && t.before === '<ComposerFooterPrimaryActions').insert;
+const questionControl = inserts.find(s => s.includes('data-question-voice-input')) ?? '';
 const entry = `
 import React, {useState, useRef, useCallback, useEffect} from ${JSON.stringify(sourceRequire.resolve('react'))};
 import {createRoot} from ${JSON.stringify(sourceRequire.resolve('react-dom/client'))};
 import {ComposerPromptEditor} from ${JSON.stringify(path.join(source,"apps/web/src/components/ComposerPromptEditor.tsx"))};
+import {ComposerPendingUserInputPanel} from ${JSON.stringify(path.join(source,'apps/web/src/components/chat/ComposerPendingUserInputPanel.tsx'))};
+import {derivePendingUserInputProgress, buildPendingUserInputAnswers, setPendingUserInputCustomAnswer, togglePendingUserInputOptionSelection} from ${JSON.stringify(path.join(source,'apps/web/src/pendingUserInput.ts'))};
+import {Tooltip, TooltipTrigger, TooltipPopup} from ${JSON.stringify(path.join(source,'apps/web/src/components/ui/tooltip.tsx'))};
+import {MicIcon, SquareIcon} from 'lucide-react';
+import {cn} from ${JSON.stringify(path.join(source,'apps/web/src/lib/utils.ts'))};
 type VoiceInsertionState${types}
+const voiceSourceHint = 'test microphone'; const isConnecting = false;
 const environmentId = 'env'; const environmentUnavailable = null; const supportsVoiceInput = true;
 const voiceInputSource = {source:window.clientVoice ? 'client' : 'host'}; const composerDraftTarget = 'thread';
 let nextSession = 0; const composerTargetKey = x => x; const randomUUID = () => String(++nextSession);
@@ -50,18 +63,28 @@ const startClientAudioCapture = ({onChunk}) => {
 const MAX_PENDING_VOICE_CHUNKS = 8; const describeVoiceInputFailure = () => 'failure';
 function Harness() {
  const [prompt,setPrompt] = useState('chat draft stays here');
- const [pending,setPending] = useState({requestId:'request',id:'question-1',customAnswer:'answer prefix'});
- const activePendingProgress = pending && {...pending, activeQuestion:{id:pending.id}};
- const activePendingUserInput = pending;
+ const [pending,setPending] = useState({requestId:'request',id:'question-1',customAnswer:'answer prefix',options:[],allowCustomAnswer:true});
+ const [activePendingIsResponding,setResponding] = useState(false);
+ const [isComposerApprovalState,setApproval] = useState(false);
+ const [layout,setLayout] = useState('desktop');
+ const questions = pending ? [{...pending,header:'Question',question:'How should we proceed?'}] : [];
+ const answers = pending ? {[pending.id]:{customAnswer:pending.customAnswer,selectedOptionValues:pending.selectedOptionValues}} : {};
+ const activePendingUserInput = pending && {...pending,questions};
+ const activePendingProgress = pending && derivePendingUserInputProgress(questions,answers,0);
+ const isChoiceOnlyPendingQuestion = activePendingProgress?.activeQuestion?.allowCustomAnswer === false;
  const promptRef = useRef(prompt);
  const [composerCursor,setComposerCursor] = useState(0);
  const setComposerTrigger = () => {};
  const composerEditorRef = useRef(null);
- const readComposerSnapshot = useCallback(() => composerEditorRef.current.readSnapshot(), []);
- const onChangeActivePendingUserInputCustomAnswer = (id,text) => {
-   window.writes.push(id);
-   setPending(previous => ({...previous, customAnswer:text}));
- };
+ const readComposerSnapshot = useCallback(() => window.snapshotOverride ?? composerEditorRef.current.readSnapshot(), []);
+ const activePendingRequestKey = pending?.requestId ?? 'request';
+ const composerRef = composerEditorRef;
+ const setPendingUserInputAnswersByRequestId = update => setPending(previous => {
+   const next = update({[previous.requestId]:{[previous.id]:{customAnswer:previous.customAnswer,selectedOptionValues:previous.selectedOptionValues}}});
+   return {...previous,...next[previous.requestId][previous.id],selectedOptionValues:next[previous.requestId][previous.id].selectedOptionValues};
+ });
+ ${answerChange}
+
  useEffect(() => {promptRef.current = activePendingProgress?.customAnswer ?? prompt}, [pending,prompt]);
  const [isVoiceRecording,setIsVoiceRecording] = useState(false);
  const [voiceLevel,setVoiceLevel] = useState(0);
@@ -90,17 +113,37 @@ function Harness() {
  ${voice}
  window.editorSnapshot=()=>composerEditorRef.current.readSnapshot();
  window.focusEnd=()=>composerEditorRef.current.focusAtEnd();
+ window.focusAt=cursor=>composerEditorRef.current.focusAt(cursor);
+ window.configureQuestion=config=>setPending(p=>({...p,...config}));
+ window.setLayout=setLayout;
+ window.setResponding=setResponding;
+ window.setApproval=setApproval;
+ window.answer=()=>buildPendingUserInputAnswers(questions,answers);
+ window.pendingText=()=>pending?.customAnswer;
+ window.recording=()=>isVoiceRecording;
  window.longDraft=()=>{setPending(null);setPrompt('A long existing draft. '.repeat(1000))};
  window.changeQuestion = () => setPending(p => ({...p, id:'question-2'}));
  window.leaveQuestion = () => setPending(null);
  window.staleRef = () => {promptRef.current=prompt};
  window.changeChatDraft = () => setPrompt('saved background draft');
- return React.createElement('form',{'data-chat-composer-form':'true'},
-   React.createElement(ComposerPromptEditor,{editorRef:composerEditorRef,value:pending?.customAnswer ?? prompt,cursor:composerCursor,contextRecords:new Map(),terminalContexts:[],skills:[],disabled:${editorLock ? 'isVoiceRecording' : 'false'},placeholder:'Compose',onChange:(text,cursor)=>{${changeGuard}setComposerCursor(cursor);pending?setPending({...pending,customAnswer:text}):setPrompt(text)},onPaste:()=>{}}),
-   React.createElement('button',{type:'button',onPointerDown:e=>e.preventDefault(),onClick:toggleVoiceRecording,'data-recording':String(isVoiceRecording)},'Mic'),
-   React.createElement('output',null,prompt), React.createElement('span',{'data-status':true},voiceStatus));
+ return <form data-chat-composer-form="true" onSubmit={event=>event.preventDefault()}>
+   <ComposerPendingUserInputPanel pendingUserInputs={pending?[activePendingUserInput]:[]}
+     respondingRequestIds={activePendingIsResponding?[pending.requestId]:[]} answers={answers} questionIndex={0}
+     onToggleOption={(id,value)=>setPending(p=>({...p,...togglePendingUserInputOptionSelection(questions[0],answers[id],value)}))}
+     onAdvance={()=>{window.submitted=buildPendingUserInputAnswers(questions,answers)}} onDismiss={()=>setPending(null)} />
+   <div style={{display:layout==='collapsed'?'none':undefined}}>
+     <ComposerPromptEditor editorRef={composerEditorRef} value={pending?.customAnswer ?? prompt} cursor={composerCursor}
+       contextRecords={new Map()} terminalContexts={[]} skills={[]} disabled={isChoiceOnlyPendingQuestion || activePendingIsResponding}
+       placeholder="Compose" onChange={(text,cursor)=>{${changeGuard}setComposerCursor(cursor);pending?setPending(p=>({...p,customAnswer:text})):setPrompt(text)}} onPaste={()=>{}} />
+   </div>
+   ${questionControl}
+   <div data-chat-composer-footer="true" style={{display:layout==='desktop'?'flex':'none'}}>
+     ${footerControl}
+   </div>
+   <output>{prompt}</output><span data-status>{voiceStatus}</span>
+ </form>;
 }
-window.holdFinal=false;window.toasts=[];window.stops=0;window.writes=[];window.starts=[];window.offline=false;window.received=0;window.captured=0;
+window.holdFinal=false;window.toasts=[];window.stops=0;window.starts=[];window.offline=false;window.received=0;window.captured=0;
 createRoot(document.getElementById('root')).render(React.createElement(Harness));
 `;
 const browser = await chromium.launch({headless:true, ...(process.env.T3_TEST_CHROMIUM ? {executablePath:process.env.T3_TEST_CHROMIUM} : {})});
@@ -138,13 +181,14 @@ try {
    await page.addScriptTag({content:script.code});
    await page.locator('[contenteditable]').waitFor();
  }
- async function recording(value) { await page.waitForFunction(v=>document.querySelector('button')?.dataset.recording===String(v), value, {timeout:2000}); }
+ async function recording(value) { await page.waitForFunction(v=>window.recording()===v, value, {timeout:2000}); }
+ const mic = page.getByRole('button',{name:/^(Start|Stop) voice input$/});
  const editor = page.locator('[contenteditable]');
  const value = () => page.evaluate(()=>window.editorSnapshot().value);
- async function textIs(text) {try {await page.waitForFunction(expected=>window.editorSnapshot().value===expected,text);} catch(error) {console.error('Editor state:',await page.evaluate(()=>({value:window.editorSnapshot().value,stops:window.stops,recording:document.querySelector('button').dataset.recording})));throw error;}}
+ async function textIs(text) {try {await page.waitForFunction(expected=>window.editorSnapshot().value===expected,text,{timeout:2000});} catch(error) {console.error('Editor state:',await page.evaluate(()=>({value:window.editorSnapshot().value,stops:window.stops,recording:window.recording()})));throw error;}}
  async function editable(enabled) {await page.waitForFunction(expected=>document.querySelector('[contenteditable]').getAttribute('contenteditable')===String(expected),enabled);}
- async function start() {await page.evaluate(()=>window.focusEnd());await page.getByText('Mic',{exact:true}).click();await recording(true);}
- async function stop() {await page.getByText('Mic',{exact:true}).click();await recording(false);await editable(true);}
+ async function start() {await page.evaluate(()=>window.focusEnd());await mic.click();await recording(true);}
+ async function stop() {await mic.click();await recording(false);await editable(true);}
 
  // Recording must preserve focus so Ctrl+T can stop it before the first transcript.
  await reset();await page.evaluate(()=>window.focusEnd());
@@ -162,6 +206,16 @@ try {
  await page.waitForTimeout(450);await page.keyboard.up('t');await page.keyboard.up('Control');
  await recording(false);assert.equal(await page.evaluate(()=>window.stops),3);
 
+ // Real parent callback must not echo stale editor text when dictating before a suffix.
+ await reset();await page.evaluate(()=>window.focusAt(6));await mic.click();await recording(true);
+ await page.evaluate(()=>window.transcript('spoken'));
+ await textIs('answer spoken prefix');
+ assert.equal(await page.evaluate(()=>window.pendingText()),'answer spoken prefix');
+ await page.evaluate(()=>{window.transcript('spoken words');window.transcript('spoken words here')});
+ await textIs('answer spoken words here prefix');await stop();
+ assert.deepEqual(await page.evaluate(()=>window.answer()),{'question-1':'answer spoken words here prefix'});
+ assert.equal(await page.locator('output').textContent(),'chat draft stays here');
+
  // Reproduces the old false manual-edit cancellation before React/Lexical commits.
  await reset(); await start();
  await page.evaluate(()=>{window.transcript('first');window.transcript('first second');window.transcript('first second third')});
@@ -178,7 +232,7 @@ try {
  await page.evaluate(()=>window.transcript('spoken answer'));
  await textIs('answer prefix spoken answer');await recording(true);
  assert.equal(await page.locator('output').textContent(),'saved background draft');
- assert.deepEqual(await page.evaluate(()=>window.writes),['question-1','question-1']);
+ assert.equal(await value(),'answer prefix spoken answer');
  // Editing remains available and does not stop recording. Subsequent speech may overwrite it.
  await editor.fill('manual edit during recording');
  await textIs('manual edit during recording');await recording(true);
@@ -187,7 +241,7 @@ try {
  await textIs('answer prefix spoken answer continues');await recording(true);
  // Editing and the Stop button remain available while the provider finishes.
  await page.evaluate(()=>{window.holdFinal=true});
- await page.getByText('Mic',{exact:true}).click();
+ await mic.click();
  await page.waitForFunction(()=>window.stops===1);await editable(true);
  await page.evaluate(()=>window.transcript('spoken answer finalized'));
  await textIs('answer prefix spoken answer finalized');
@@ -202,7 +256,6 @@ try {
  await page.evaluate(()=>window.changeQuestion());await recording(false);await editable(true);
  await page.evaluate(()=>window.transcript('wrong question'));
  assert.equal(await value(),'answer prefix');
- assert.deepEqual(await page.evaluate(()=>window.writes),[]);
  await start();await page.evaluate(()=>window.leaveQuestion());await recording(false);
  await page.evaluate(()=>window.transcript('wrong target'));
  await textIs('chat draft stays here');
@@ -244,7 +297,7 @@ try {
  for(let i=0;i<40;i++) {await page.evaluate(()=>window.audio());await page.waitForTimeout(100);}
  await recording(true);await editable(true);
  assert.equal(await page.evaluate(()=>window.capturing),true);
- await page.getByText('Mic',{exact:true}).click();
+ await mic.click();
  await page.waitForFunction(()=>!window.capturing);await editable(true);
  assert.equal(await page.evaluate(()=>window.stops),0,'Stop waits for queued audio');
  await page.evaluate(()=>{window.offline=false});
@@ -253,6 +306,50 @@ try {
  assert.equal(await value(),'answer prefix first words');
  assert.equal(await page.evaluate(()=>window.starts.slice(1).every(Boolean)),true);
  assert.deepEqual(await page.evaluate(()=>window.toasts),[]);
+ // Hidden/unmounted editors must not seed a question recording with the chat draft.
+ await reset();await page.evaluate(()=>{
+   window.configureQuestion({customAnswer:''});
+   window.snapshotOverride={value:'chat draft stays here',expandedCursor:20};
+ });
+ await mic.click();await recording(true);await page.evaluate(()=>window.transcript('question only'));
+ await textIs('question only');await stop();
+ assert.equal(await page.locator('output').textContent(),'chat draft stays here');
+
+ // All editable question shapes use the same control, even without the normal footer.
+ for (const shape of [
+   {name:'free text',options:[]},
+   {name:'single choice',options:[{label:'One'},{label:'Two'}],selectedOptionValues:['One']},
+   {name:'multiple choice',options:[{label:'One'},{label:'Two'}],multiSelect:true,selectedOptionValues:['One','Two']},
+   {name:'async question',options:[],dismissible:true},
+ ]) {
+   for (const layout of ['desktop','mobile','collapsed']) {
+     await reset();await page.evaluate(({shape,layout})=>{window.configureQuestion({...shape,customAnswer:''});window.setLayout(layout)},{shape,layout});
+     await mic.waitFor({state:'visible'});assert.equal(await mic.count(),1,shape.name+' '+layout);
+     await mic.click();await recording(true);
+     await page.evaluate(()=>{window.transcript('spoken');window.transcript('spoken answer')});
+     await textIs('spoken answer');await mic.click();await recording(false);
+     assert.deepEqual(await page.evaluate(()=>window.answer()),{'question-1':'spoken answer'},shape.name+' '+layout);
+     assert.equal(await page.locator('output').textContent(),'chat draft stays here');
+     // Ctrl+T works from question controls even when the editor is hidden.
+     await page.locator('[data-pending-user-input-toggle]').focus();
+     await page.keyboard.press('Control+t');await recording(true);
+     await page.evaluate(()=>window.transcript('more'));await textIs('spoken answer more');
+     assert.equal(await page.evaluate(()=>Boolean(document.activeElement?.closest('[data-chat-composer-form]'))),true,'dictation must keep the stop shortcut reachable');
+     await page.keyboard.press('Control+t');await recording(false);
+   }
+ }
+ // Provider-enforced choices and approval controls have no writable answer target.
+ await reset();await page.evaluate(()=>window.configureQuestion({allowCustomAnswer:false,options:[{label:'Yes'}]}));
+ assert.equal(await mic.count(),0);await page.locator('[data-pending-user-input-toggle]').focus();
+ await page.keyboard.press('Control+t');await recording(false);assert.deepEqual(await page.evaluate(()=>window.starts),[]);
+ await reset();await page.evaluate(()=>window.setApproval(true));assert.equal(await mic.count(),0);
+ await reset();await page.evaluate(()=>window.setResponding(true));assert.equal(await mic.isDisabled(),true);
+ // A replaced request can reuse the same question id; late speech must still be rejected.
+ await reset();await start();await page.evaluate(()=>window.configureQuestion({requestId:'next-request',customAnswer:'new answer'}));
+ await recording(false);await page.evaluate(()=>window.transcript('late old request'));await textIs('new answer');
+ // Submitting elsewhere stops dictation instead of accepting further partials.
+ await reset();await start();await page.evaluate(()=>window.setResponding(true));await recording(false);
+ await page.evaluate(()=>window.transcript('late submission'));await textIs('answer prefix');
  assert.deepEqual(errors,[]);
- console.log('PASS: '+channel+' real editor: focus and stop shortcuts, editable capture/finalization, batched partials, repeated long drafts, target changes, late results and offline Stop');
+ console.log('PASS: '+channel+' real question panel and parent callbacks: editable question shapes, compact controls, mid-answer insertion, focus and stop shortcuts, editable capture/finalization, batched partials, repeated long drafts, target changes, late results and offline Stop');
 } finally {await browser.close();}
