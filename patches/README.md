@@ -93,7 +93,10 @@ through re-indentation) and the list of `conflicts`.
   input. Transcript updates use the session's latest requested text rather than
   the editor's delayed rendered snapshot and may overwrite manual edits made
   during recording. Switching the target thread or question still cancels.
-  Submitting still waits until recording finishes.
+  Enter or Send stops recording and submits automatically after the final
+  transcript reaches the draft. Repeated submits while finishing send only once;
+  a failed recording or a changed thread or question cancels the pending send.
+  Shift+Enter and the microphone's Stop control keep their normal behavior.
   Regression coverage includes delayed/lost uploads, scope cancellation and
   reattachment, final-result replay, offline Stop, and real browser AudioWorklet
   capture/flush. The publisher runs the voice unit and browser tests for each pair.
