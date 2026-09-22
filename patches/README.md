@@ -84,7 +84,10 @@ through re-indentation) and the list of `conflicts`.
   Microphone inactivity (35 seconds) is separate from transcription latency;
   the existing two-minute recording limit has an explicit stop reason. Browser
   microphone interruptions and unexpected provider socket closure report errors.
-  Reconnection to the transcription provider itself is not attempted.
+  An initial voice handshake rejected with HTTP 401 initializes Claude without a
+  user message to refresh its login, then retries once with the saved token.
+  Concurrent failures share the refresh, which times out after 15 seconds.
+  Reconnection after transcription has begun is not attempted.
   The composer stays editable while recording and finishing transcription, so
   focus and Ctrl+T retain their normal behavior. Text edits do not cancel voice
   input. Transcript updates use the session's latest requested text rather than

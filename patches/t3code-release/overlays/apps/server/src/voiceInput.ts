@@ -15,6 +15,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type * as NodeStream from "node:stream";
 import WebSocket from "ws";
+import { query as claudeQuery, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 
 const VOICE_STREAM_URL = "wss://api.anthropic.com/api/ws/speech_to_text/voice_stream";
 const KEEP_ALIVE_MS = 8_000;
@@ -199,6 +200,64 @@ function readClaudeAccessToken(): string {
   return token;
 }
 
+// Let Claude own OAuth refresh and credential persistence, including its refresh lock.
+// Several voice sessions can encounter the same expired token at once.
+let claudeAuthRefresh: Promise<void> | null = null;
+function refreshClaudeAuth(): Promise<void> {
+  if (claudeAuthRefresh) return claudeAuthRefresh;
+  claudeAuthRefresh = (async () => {
+    const abort = new AbortController();
+    let q: ReturnType<typeof claudeQuery> | undefined;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      q = claudeQuery({
+        // Initialization only: never submit a user message or run a model turn.
+        // oxlint-disable-next-line require-yield
+        prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
+          await new Promise<void>((resolve) => {
+            if (abort.signal.aborted) resolve();
+            else abort.signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        })(),
+        options: {
+          pathToClaudeCodeExecutable: "claude",
+          abortController: abort,
+          persistSession: false,
+          settingSources: [],
+          settings: { disableAllHooks: true },
+          allowedTools: [],
+          mcpServers: {},
+          strictMcpConfig: true,
+          env: {
+            ...process.env,
+            ENABLE_CLAUDEAI_MCP_SERVERS: "false",
+            FORCE_CODE_TERMINAL: undefined,
+            CLAUDE_CODE_AUTO_CONNECT_IDE: "0",
+            CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: "1",
+          },
+          stderr: () => {},
+        },
+      });
+      await Promise.race([
+        q.initializationResult(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Claude authentication refresh timed out.")),
+            15_000,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      abort.abort();
+      q?.close();
+    }
+  })().finally(() => {
+    claudeAuthRefresh = null;
+  });
+  return claudeAuthRefresh;
+}
+
 function voiceStreamUrl(): string {
   const query = new URLSearchParams({
     encoding: "linear16",
@@ -277,8 +336,13 @@ export class VoiceSession {
   }
 
   start(): void {
+    this.connect(false);
+  }
+
+  private connect(authRetried: boolean): void {
     const token = readClaudeAccessToken();
     const socket = new WebSocket(voiceStreamUrl(), {
+      handshakeTimeout: 15_000,
       headers: {
         Authorization: `Bearer ${token}`,
         "x-app": "vscode",
@@ -289,6 +353,7 @@ export class VoiceSession {
     this.socket = socket;
 
     socket.on("open", () => {
+      if (this.socket !== socket || this.ended) return;
       if (this.stopping) {
         socket.send(JSON.stringify({ type: "CloseStream" }));
         return;
@@ -340,10 +405,39 @@ export class VoiceSession {
         this.fail(message.message || "Claude voice transcription failed.", true);
       }
     });
+    socket.on("unexpected-response", (_request, response) => {
+      if (this.socket !== socket || this.stopping || this.ended) return;
+      response.resume();
+      if (response.statusCode !== 401 || authRetried) {
+        this.fail(
+          `Claude voice WebSocket error: Unexpected server response: ${response.statusCode}`,
+          true,
+        );
+        return;
+      }
+      // Ignore the rejected socket's subsequent error/close while auth refreshes.
+      this.socket = null;
+      socket.terminate();
+      void (async () => {
+        try {
+          // Another Claude session may already have replaced the rejected token.
+          if (readClaudeAccessToken() === token) await refreshClaudeAuth();
+          if (!this.stopping && !this.ended) this.connect(true);
+        } catch {
+          if (!this.stopping && !this.ended)
+            this.fail(
+              "Could not refresh Claude voice authentication. Sign in with claude and try again.",
+              true,
+            );
+        }
+      })();
+    });
     socket.on("error", (error) => {
+      if (this.socket !== socket) return;
       if (!this.stopping) this.fail(`Claude voice WebSocket error: ${error.message}`, true);
     });
     socket.on("close", (code) => {
+      if (this.socket !== socket) return;
       if (!this.stopping)
         this.fail(`Transcription connection closed unexpectedly (code ${code}).`, true);
       else this.finish();
