@@ -157,6 +157,19 @@ describe("routeVoiceAudio", () => {
   });
 });
 
+const auth = vi.hoisted(() => ({
+  initialize: vi.fn(),
+  close: vi.fn(),
+  query: vi.fn(),
+  token: "test-token",
+}));
+vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
+  query: (input: unknown) => {
+    auth.query(input);
+    return { initializationResult: auth.initialize, close: auth.close };
+  },
+}));
+
 const sockets = vi.hoisted(() => [] as any[]);
 vi.mock("ws", async () => {
   const { EventEmitter } = await import("node:events");
@@ -166,7 +179,10 @@ vi.mock("ws", async () => {
       static CLOSED = 3;
       readyState = 1;
       sent: unknown[] = [];
-      constructor() {
+      constructor(
+        readonly url: string,
+        readonly options: any,
+      ) {
         super();
         sockets.push(this);
       }
@@ -181,7 +197,7 @@ vi.mock("ws", async () => {
 });
 vi.mock("node:fs", async (original) => ({
   ...(await original<typeof import("node:fs")>()),
-  readFileSync: () => JSON.stringify({ claudeAiOauth: { accessToken: "test-token" } }),
+  readFileSync: () => JSON.stringify({ claudeAiOauth: { accessToken: auth.token } }),
 }));
 
 function sessionFixture() {
@@ -324,4 +340,135 @@ it("retains the session when the RPC stream scope is cancelled and reattaches wi
   expect(finalEvents).toContainEqual({ type: "stopped", reason: "user-stop" });
   expect(sockets.length).toBe(count);
   vi.useRealTimers();
+});
+
+describe("voice authentication recovery", () => {
+  function pendingSession() {
+    const session = new VoiceSession("auth-test", createVoiceAudioSource("client"));
+    const callbacks = { event: vi.fn(), error: vi.fn(), complete: vi.fn() };
+    session.attach(callbacks);
+    session.start();
+    return { session, callbacks, socket: sockets.at(-1)! };
+  }
+  function reject(socket: any, statusCode = 401) {
+    socket.emit("unexpected-response", {}, { statusCode, resume: vi.fn() });
+    socket.emit("error", new Error("handshake rejected"));
+    socket.emit("close", 1006);
+  }
+  async function settle() {
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+  }
+  it("shares initialization, rereads the token, and retries each handshake only once", async () => {
+    let done!: () => void;
+    auth.initialize.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          done = resolve;
+        }),
+    );
+    auth.query.mockClear();
+    const a = pendingSession();
+    const b = pendingSession();
+    try {
+      reject(a.socket);
+      reject(b.socket);
+      expect(auth.query).toHaveBeenCalledTimes(1);
+      expect(a.callbacks.error).not.toHaveBeenCalled();
+      expect(b.callbacks.error).not.toHaveBeenCalled();
+      const input = auth.query.mock.calls[0]![0];
+      expect(input.options.persistSession).toBe(false);
+      expect(input.options.settings.disableAllHooks).toBe(true);
+      const prompt = input.prompt.next();
+      auth.token = "refreshed-token";
+      done();
+      await settle();
+      expect(await prompt).toEqual({ done: true, value: undefined });
+      const retries = sockets.slice(-2);
+      for (const socket of retries) {
+        expect(socket.options.headers.Authorization).toBe("Bearer refreshed-token");
+        reject(socket);
+      }
+      expect(a.callbacks.error).toHaveBeenCalledTimes(1);
+      expect(b.callbacks.error).toHaveBeenCalledTimes(1);
+      expect(auth.query).toHaveBeenCalledTimes(1);
+    } finally {
+      a.session.abort();
+      b.session.abort();
+      auth.token = "test-token";
+    }
+  });
+  it("uses credentials already refreshed by another Claude session", async () => {
+    auth.query.mockClear();
+    const { session, callbacks, socket } = pendingSession();
+    try {
+      auth.token = "other-session-token";
+      reject(socket);
+      await settle();
+      expect(auth.query).not.toHaveBeenCalled();
+      expect(sockets.at(-1)!.options.headers.Authorization).toBe("Bearer other-session-token");
+      sockets.at(-1)!.emit("open");
+      expect(callbacks.event).toHaveBeenCalledWith({ type: "listening" });
+    } finally {
+      session.abort();
+      auth.token = "test-token";
+    }
+  });
+  it("does not reconnect after the user stops during refresh", async () => {
+    let done!: () => void;
+    auth.initialize.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          done = resolve;
+        }),
+    );
+    const { session, socket } = pendingSession();
+    reject(socket);
+    const count = sockets.length;
+    session.stop();
+    done();
+    await settle();
+    expect(sockets).toHaveLength(count);
+    session.abort();
+  });
+  it("reports refresh failures without exposing SDK error details", async () => {
+    auth.initialize.mockRejectedValueOnce(new Error("sensitive provider detail"));
+    const { session, callbacks, socket } = pendingSession();
+    try {
+      reject(socket);
+      await settle();
+      expect(callbacks.error).toHaveBeenCalledTimes(1);
+      expect(callbacks.error.mock.calls[0]![0].message).toBe(
+        "Could not refresh Claude voice authentication. Sign in with claude and try again.",
+      );
+    } finally {
+      session.abort();
+    }
+  });
+  it("bounds refresh time and closes the initialization process", async () => {
+    vi.useFakeTimers();
+    auth.initialize.mockImplementationOnce(() => new Promise(() => {}));
+    auth.close.mockClear();
+    const { session, callbacks, socket } = pendingSession();
+    try {
+      reject(socket);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(callbacks.error).toHaveBeenCalledTimes(1);
+      expect(auth.close).toHaveBeenCalledTimes(1);
+    } finally {
+      session.abort();
+      vi.useRealTimers();
+    }
+  });
+  it("does not refresh for other HTTP failures", async () => {
+    auth.query.mockClear();
+    const { session, callbacks, socket } = pendingSession();
+    try {
+      reject(socket, 503);
+      await settle();
+      expect(auth.query).not.toHaveBeenCalled();
+      expect(callbacks.error).toHaveBeenCalledTimes(1);
+    } finally {
+      session.abort();
+    }
+  });
 });
