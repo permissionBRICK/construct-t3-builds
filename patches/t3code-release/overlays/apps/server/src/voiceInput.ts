@@ -23,6 +23,14 @@ export const VOICE_RECONNECT_GRACE_MS = 30_000;
 const AUDIO_TIMEOUT_MS = 35_000;
 const MAX_RECORDING_MS = 120_000;
 const CLOSE_GRACE_MS = 3_000;
+const STOP_GRACE_MS = 10_000;
+const PCM_BYTES_PER_MS = 32;
+/** Continuous quiet audio after speech that closes the stream so the service finalizes it. */
+export const VOICE_PAUSE_MS = 2_000;
+/** Already sent audio replayed at the start of the next stream. */
+export const VOICE_PREROLL_MS = 500;
+const SILENCE_RMS_MIN = 0.01;
+const SILENCE_NOISE_FACTOR = 3;
 const LEVEL_INTERVAL_MS = 75;
 export const FIRST_CLIENT_CHUNK_TIMEOUT_MS = 35_000;
 export const NO_CLIENT_AUDIO_MESSAGE = "No microphone audio arrived from the client.";
@@ -272,6 +280,49 @@ function voiceStreamUrl(): string {
   return `${VOICE_STREAM_URL}?${query.toString()}`;
 }
 
+/**
+ * One transcription WebSocket. The service only revises its transcript when a
+ * stream is closed, so a session rotates to a fresh stream at every pause.
+ */
+type TranscriptStream = {
+  socket: WebSocket | null;
+  /** Audio waiting for the socket to open, oldest first. */
+  pending: Buffer[];
+  /** Audio routed to this stream, excluding the pre-roll it was seeded with. */
+  audioBytes: number;
+  closing: boolean;
+  closeSent: boolean;
+  done: boolean;
+  closeTimer: NodeJS.Timeout | null;
+  committed: string[];
+  interim: string;
+};
+
+function newTranscriptStream(pending: Buffer[] = []): TranscriptStream {
+  return {
+    socket: null,
+    pending,
+    audioBytes: 0,
+    closing: false,
+    closeSent: false,
+    done: false,
+    closeTimer: null,
+    committed: [],
+    interim: "",
+  };
+}
+
+function audioRms(chunk: Buffer): number {
+  let sumSquares = 0;
+  let sampleCount = 0;
+  for (let offset = 0; offset + 1 < chunk.length; offset += 2) {
+    const sample = chunk.readInt16LE(offset) / 32_768;
+    sumSquares += sample * sample;
+    sampleCount += 1;
+  }
+  return sampleCount > 0 ? Math.sqrt(sumSquares / sampleCount) : 0;
+}
+
 export class VoiceSession {
   readonly id: string;
   private callbacks: VoiceSessionCallbacks | null = null;
@@ -282,13 +333,17 @@ export class VoiceSession {
   private listening = false;
   private stopReason = "user-stop";
   private readonly source: VoiceAudioSource;
-  private socket: WebSocket | null = null;
+  /** In recording order; the last one receives live audio. */
+  private streams: TranscriptStream[] = [];
   private keepAlive: NodeJS.Timeout | null = null;
   private audioTimer: NodeJS.Timeout | null = null;
   private maximumTimer: NodeJS.Timeout | null = null;
   private closeTimer: NodeJS.Timeout | null = null;
-  private committed: string[] = [];
-  private interim = "";
+  /** The most recent audio, replayed into the next stream when rotating. */
+  private preroll: Buffer[] = [];
+  private prerollBytes = 0;
+  private quietBytes = 0;
+  private noiseFloor = 0;
   private lastLevelAt = 0;
   private stopping = false;
   private ended = false;
@@ -327,7 +382,8 @@ export class VoiceSession {
     if (!this.stopping && !this.ended && this.source.kind === "client") {
       if (sequence < this.nextSequence && sequence + chunk.byteLength <= this.nextSequence)
         accepted = true;
-      else if (sequence === this.nextSequence && this.socket?.readyState === WebSocket.OPEN) {
+      // Once listening, audio is accepted even while a rotated stream connects.
+      else if (sequence === this.nextSequence && this.listening) {
         accepted = this.source.push(chunk);
         if (accepted) this.nextSequence += chunk.byteLength;
       }
@@ -336,10 +392,12 @@ export class VoiceSession {
   }
 
   start(): void {
-    this.connect(false);
+    const stream = newTranscriptStream();
+    this.streams.push(stream);
+    this.connect(stream, false);
   }
 
-  private connect(authRetried: boolean): void {
+  private connect(stream: TranscriptStream, authRetried: boolean): void {
     const token = readClaudeAccessToken();
     const socket = new WebSocket(voiceStreamUrl(), {
       handshakeTimeout: 15_000,
@@ -350,35 +408,32 @@ export class VoiceSession {
         "x-config-keyterms": KEYTERMS,
       },
     });
-    this.socket = socket;
+    stream.socket = socket;
 
     socket.on("open", () => {
-      if (this.socket !== socket || this.ended) return;
-      if (this.stopping) {
-        socket.send(JSON.stringify({ type: "CloseStream" }));
-        return;
-      }
+      if (stream.socket !== socket || stream.done || this.ended) return;
+      socket.send(JSON.stringify({ type: "KeepAlive" }));
+      for (const chunk of stream.pending.splice(0)) socket.send(chunk);
+      if (stream.closing) this.sendClose(stream);
+      if (this.listening) return;
       this.listening = true;
       this.callbacks?.event({ type: "listening" });
-      socket.send(JSON.stringify({ type: "KeepAlive" }));
       this.source.start({
-        audio: (chunk) => {
-          if (this.stopping) return;
-          this.resetAudioTimer();
-          if (this.source.emitsLevels) this.emitAudioLevel(chunk);
-          if (socket.readyState === WebSocket.OPEN) socket.send(chunk);
-        },
+        audio: (chunk) => this.routeAudio(chunk),
         fail: (message) => this.fail(message, true),
       });
       this.keepAlive = setInterval(() => {
-        if (socket.readyState === WebSocket.OPEN)
-          socket.send(JSON.stringify({ type: "KeepAlive" }));
+        for (const active of this.streams) {
+          if (!active.closeSent && active.socket?.readyState === WebSocket.OPEN)
+            active.socket.send(JSON.stringify({ type: "KeepAlive" }));
+        }
       }, KEEP_ALIVE_MS);
       this.maximumTimer = setTimeout(() => this.stop("recording-limit"), MAX_RECORDING_MS);
       this.resetAudioTimer();
     });
 
     socket.on("message", (raw) => {
+      if (stream.socket !== socket || stream.done) return;
       let message: { type?: string; data?: string; description?: string; message?: string };
       try {
         message = JSON.parse(raw.toString()) as typeof message;
@@ -387,15 +442,15 @@ export class VoiceSession {
       }
       if (message.type === "TranscriptInterim" || message.type === "TranscriptText") {
         if (message.data) {
-          this.interim = message.data;
+          stream.interim = message.data;
           this.callbacks?.event({ type: "transcript", text: this.fullTranscript(), final: false });
         }
         return;
       }
       if (message.type === "TranscriptEndpoint") {
-        const segment = this.interim.trim();
-        if (segment) this.committed.push(segment);
-        this.interim = "";
+        const segment = stream.interim.trim();
+        if (segment) stream.committed.push(segment);
+        stream.interim = "";
         this.callbacks?.event({ type: "transcript", text: this.fullTranscript(), final: true });
         return;
       }
@@ -406,7 +461,7 @@ export class VoiceSession {
       }
     });
     socket.on("unexpected-response", (_request, response) => {
-      if (this.socket !== socket || this.stopping || this.ended) return;
+      if (stream.socket !== socket || stream.done || this.ended) return;
       response.resume();
       if (response.statusCode !== 401 || authRetried) {
         this.fail(
@@ -416,15 +471,15 @@ export class VoiceSession {
         return;
       }
       // Ignore the rejected socket's subsequent error/close while auth refreshes.
-      this.socket = null;
+      stream.socket = null;
       socket.terminate();
       void (async () => {
         try {
           // Another Claude session may already have replaced the rejected token.
           if (readClaudeAccessToken() === token) await refreshClaudeAuth();
-          if (!this.stopping && !this.ended) this.connect(true);
+          if (!stream.done && !this.ended) this.connect(stream, true);
         } catch {
-          if (!this.stopping && !this.ended)
+          if (!stream.done && !this.ended)
             this.fail(
               "Could not refresh Claude voice authentication. Sign in with claude and try again.",
               true,
@@ -433,14 +488,14 @@ export class VoiceSession {
       })();
     });
     socket.on("error", (error) => {
-      if (this.socket !== socket) return;
-      if (!this.stopping) this.fail(`Claude voice WebSocket error: ${error.message}`, true);
+      if (stream.socket !== socket || stream.done) return;
+      if (stream.closeSent) this.streamDone(stream);
+      else this.fail(`Claude voice WebSocket error: ${error.message}`, true);
     });
     socket.on("close", (code) => {
-      if (this.socket !== socket) return;
-      if (!this.stopping)
-        this.fail(`Transcription connection closed unexpectedly (code ${code}).`, true);
-      else this.finish();
+      if (stream.socket !== socket || stream.done) return;
+      if (stream.closeSent) this.streamDone(stream);
+      else this.fail(`Transcription connection closed unexpectedly (code ${code}).`, true);
     });
   }
 
@@ -449,12 +504,15 @@ export class VoiceSession {
     this.stopping = true;
     this.stopReason = reason;
     this.source.stop();
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify({ type: "CloseStream" }));
-      this.closeTimer = setTimeout(() => this.finish(), CLOSE_GRACE_MS);
-    } else {
-      this.finish();
+    for (const stream of this.streams) {
+      if (stream.closing || stream.done) continue;
+      // A stream that never opened and never received audio has nothing to finalize.
+      if (stream.socket?.readyState !== WebSocket.OPEN && stream.audioBytes === 0)
+        this.streamDone(stream);
+      else this.requestClose(stream);
     }
+    // Bounds a rotated stream that is still connecting when recording stops.
+    if (!this.ended) this.closeTimer = setTimeout(() => this.finish(), STOP_GRACE_MS);
   }
 
   failToStart(message: string): void {
@@ -467,21 +525,107 @@ export class VoiceSession {
   }
 
   private fullTranscript(): string {
-    return [...this.committed, this.interim.trim()].filter(Boolean).join(" ");
+    return this.streams
+      .flatMap((stream) => [...stream.committed, stream.interim.trim()])
+      .filter(Boolean)
+      .join(" ");
   }
 
-  private emitAudioLevel(chunk: Buffer): void {
+  private routeAudio(chunk: Buffer): void {
+    if (this.stopping || this.ended) return;
+    this.resetAudioTimer();
+    const rms = audioRms(chunk);
+    if (this.source.emitsLevels) this.emitAudioLevel(rms);
+    const stream = this.streams.at(-1)!;
+    this.sendAudio(stream, chunk);
+    this.rememberAudio(chunk);
+    this.trackPause(stream, chunk.length, rms);
+  }
+
+  private sendAudio(stream: TranscriptStream, chunk: Buffer): void {
+    stream.audioBytes += chunk.length;
+    if (stream.pending.length === 0 && stream.socket?.readyState === WebSocket.OPEN)
+      stream.socket.send(chunk);
+    else stream.pending.push(chunk);
+  }
+
+  private rememberAudio(chunk: Buffer): void {
+    // Client chunks are views into an RPC buffer; keep a private copy.
+    this.preroll.push(Buffer.from(chunk));
+    this.prerollBytes += chunk.length;
+    while (this.prerollBytes - this.preroll[0]!.length >= VOICE_PREROLL_MS * PCM_BYTES_PER_MS)
+      this.prerollBytes -= this.preroll.shift()!.length;
+  }
+
+  /**
+   * Silence is measured in audio time, not wall time, so a burst of buffered
+   * client audio after a reconnect is judged by what was actually recorded.
+   */
+  private trackPause(stream: TranscriptStream, bytes: number, rms: number): void {
+    const quiet = rms < Math.max(SILENCE_RMS_MIN, this.noiseFloor * SILENCE_NOISE_FACTOR);
+    // The floor drops to any quieter chunk at once and creeps up over about five seconds.
+    this.noiseFloor =
+      rms < this.noiseFloor
+        ? rms
+        : this.noiseFloor + (rms - this.noiseFloor) * Math.min(1, bytes / PCM_BYTES_PER_MS / 5_000);
+    if (!quiet) {
+      this.quietBytes = 0;
+      return;
+    }
+    this.quietBytes += bytes;
+    const hasText = stream.committed.length > 0 || stream.interim.trim() !== "";
+    if (this.quietBytes >= VOICE_PAUSE_MS * PCM_BYTES_PER_MS && hasText) this.rotate();
+  }
+
+  /**
+   * Closes the live stream so the service finalizes it, and continues on a new
+   * one. Every chunk after the cut is queued for the new stream while it
+   * connects, and the new stream starts with the last pre-roll of already sent
+   * (quiet) audio, so speech beginning right at the cut reaches it in full.
+   */
+  private rotate(): void {
+    const previous = this.streams.at(-1)!;
+    const next = newTranscriptStream([...this.preroll]);
+    this.quietBytes = 0;
+    this.streams.push(next);
+    this.requestClose(previous);
+    try {
+      this.connect(next, false);
+    } catch (error) {
+      this.fail(error instanceof Error ? error.message : String(error), true);
+    }
+  }
+
+  private requestClose(stream: TranscriptStream): void {
+    stream.closing = true;
+    // A connecting stream sends CloseStream after flushing its queued audio.
+    if (stream.socket?.readyState === WebSocket.OPEN && stream.pending.length === 0)
+      this.sendClose(stream);
+  }
+
+  private sendClose(stream: TranscriptStream): void {
+    if (stream.closeSent || !stream.socket) return;
+    stream.closeSent = true;
+    stream.socket.send(JSON.stringify({ type: "CloseStream" }));
+    stream.closeTimer = setTimeout(() => this.streamDone(stream), CLOSE_GRACE_MS);
+  }
+
+  /** Keeps the stream's last text; the session ends once stopping and all streams are done. */
+  private streamDone(stream: TranscriptStream): void {
+    if (stream.done) return;
+    stream.done = true;
+    if (stream.closeTimer) clearTimeout(stream.closeTimer);
+    stream.closeTimer = null;
+    stream.pending = [];
+    if (stream.socket && stream.socket.readyState !== WebSocket.CLOSED) stream.socket.terminate();
+    stream.socket = null;
+    if (this.stopping && this.streams.every((active) => active.done)) this.finish();
+  }
+
+  private emitAudioLevel(rms: number): void {
     const now = Date.now();
     if (now - this.lastLevelAt < LEVEL_INTERVAL_MS) return;
     this.lastLevelAt = now;
-    let sumSquares = 0;
-    let sampleCount = 0;
-    for (let offset = 0; offset + 1 < chunk.length; offset += 2) {
-      const sample = chunk.readInt16LE(offset) / 32_768;
-      sumSquares += sample * sample;
-      sampleCount += 1;
-    }
-    const rms = sampleCount > 0 ? Math.sqrt(sumSquares / sampleCount) : 0;
     const value = Math.min(1, Math.max(0, (rms - 0.006) * 10));
     this.callbacks?.event({ type: "level", value });
   }
@@ -508,8 +652,15 @@ export class VoiceSession {
     if (this.ended) return;
     this.ended = true;
     this.source.stop();
-    if (this.socket && this.socket.readyState !== WebSocket.CLOSED) this.socket.terminate();
-    this.socket = null;
+    for (const stream of this.streams) {
+      stream.done = true;
+      stream.pending = [];
+      if (stream.closeTimer) clearTimeout(stream.closeTimer);
+      stream.closeTimer = null;
+      if (stream.socket && stream.socket.readyState !== WebSocket.CLOSED) stream.socket.terminate();
+      stream.socket = null;
+    }
+    this.preroll = [];
     for (const timer of [
       this.keepAlive,
       this.audioTimer,
