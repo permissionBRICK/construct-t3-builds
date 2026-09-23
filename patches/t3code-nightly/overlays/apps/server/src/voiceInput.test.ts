@@ -11,6 +11,8 @@ import {
   VoiceSession,
   startVoiceInput,
   stopVoiceInput,
+  VOICE_PAUSE_MS,
+  VOICE_PREROLL_MS,
   VOICE_RECONNECT_GRACE_MS,
   type VoiceAudioSourceHandlers,
 } from "./voiceInput.ts";
@@ -175,9 +177,10 @@ vi.mock("ws", async () => {
   const { EventEmitter } = await import("node:events");
   return {
     default: class extends EventEmitter {
+      static CONNECTING = 0;
       static OPEN = 1;
       static CLOSED = 3;
-      readyState = 1;
+      readyState = 0;
       sent: unknown[] = [];
       constructor(
         readonly url: string,
@@ -185,6 +188,11 @@ vi.mock("ws", async () => {
       ) {
         super();
         sockets.push(this);
+      }
+      override emit(event: string, ...args: unknown[]) {
+        if (event === "open") this.readyState = 1;
+        if (event === "close") this.readyState = 3;
+        return super.emit(event, ...args);
       }
       send(value: unknown) {
         this.sent.push(value);
@@ -287,6 +295,166 @@ describe("voice sessions across client disconnects", () => {
         expect.objectContaining({ message: expect.stringContaining("1006") }),
       );
       expect(callbacks.complete).not.toHaveBeenCalled();
+    } finally {
+      session.abort();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("voice stream rotation at pauses", () => {
+  const CHUNK_MS = 100;
+  const pcm = (value: number, id = 0) => {
+    const chunk = Buffer.alloc(CHUNK_MS * 32);
+    for (let offset = 0; offset < chunk.length; offset += 2) chunk.writeInt16LE(value, offset);
+    // Mark the first sample so each chunk is identifiable in socket output.
+    chunk.writeInt16LE(value === 0 ? id % 16 : value + id, 0);
+    return chunk;
+  };
+  const speech = (id: number) => pcm(8_000, id);
+  const silence = (id: number) => pcm(0, id);
+  const audioSent = (socket: any) =>
+    Buffer.concat(socket.sent.filter((item: unknown) => Buffer.isBuffer(item)));
+  const control = (socket: any) =>
+    socket.sent
+      .filter((item: unknown) => typeof item === "string")
+      .map((item: string) => JSON.parse(item).type);
+
+  function recorder() {
+    const { session, callbacks, socket } = sessionFixture();
+    let sequence = 0;
+    const pushed: Buffer[] = [];
+    const push = (chunk: Buffer) => {
+      pushed.push(chunk);
+      const result = session.pushAudio(new Uint8Array(chunk), sequence);
+      expect(result.accepted).toBe(true);
+      sequence = result.nextSequence;
+    };
+    return { session, callbacks, socket, push, pushed };
+  }
+
+  it("finalizes the stream after a pause and continues on a new one without losing audio", () => {
+    const { session, callbacks, socket, push, pushed } = recorder();
+    try {
+      const count = sockets.length;
+      for (let i = 0; i < 10; i++) push(speech(i));
+      socket.emit("message", JSON.stringify({ type: "TranscriptInterim", data: "hello wold" }));
+      for (let i = 0; i < VOICE_PAUSE_MS / CHUNK_MS - 1; i++) push(silence(i));
+      expect(sockets).toHaveLength(count);
+      push(silence(99));
+      expect(sockets).toHaveLength(count + 1);
+      expect(control(socket)).toContain("CloseStream");
+      const next = sockets.at(-1)!;
+
+      // Speech that starts right at the cut is queued while the new stream connects.
+      for (let i = 0; i < 5; i++) push(speech(20 + i));
+      expect(audioSent(next).length).toBe(0);
+      next.emit("open");
+
+      const before = audioSent(socket);
+      expect(Buffer.concat(pushed).subarray(0, before.length).equals(before)).toBe(true);
+      const preroll = VOICE_PREROLL_MS * 32;
+      const after = audioSent(next);
+      expect(after.subarray(0, preroll).equals(before.subarray(before.length - preroll))).toBe(true);
+      expect(after.subarray(preroll).equals(Buffer.concat(pushed).subarray(before.length))).toBe(true);
+
+      next.emit("message", JSON.stringify({ type: "TranscriptInterim", data: "second part" }));
+      expect(callbacks.event).toHaveBeenLastCalledWith({
+        type: "transcript",
+        text: "hello wold second part",
+        final: false,
+      });
+      socket.emit("message", JSON.stringify({ type: "TranscriptText", data: "Hello world." }));
+      socket.emit("message", JSON.stringify({ type: "TranscriptEndpoint" }));
+      socket.emit("close", 1000);
+      expect(callbacks.event).toHaveBeenLastCalledWith({
+        type: "transcript",
+        text: "Hello world. second part",
+        final: true,
+      });
+      expect(callbacks.error).not.toHaveBeenCalled();
+      expect(callbacks.complete).not.toHaveBeenCalled();
+      const listening = callbacks.event.mock.calls.filter(([e]) => e.type === "listening");
+      expect(listening).toHaveLength(1);
+    } finally {
+      session.abort();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not rotate on silence before any words or while speech continues", () => {
+    const { session, socket, push } = recorder();
+    try {
+      const count = sockets.length;
+      for (let i = 0; i < 40; i++) push(silence(i));
+      socket.emit("message", JSON.stringify({ type: "TranscriptInterim", data: "words" }));
+      for (let i = 0; i < 60; i++) push(i % 10 === 0 ? speech(i) : silence(i));
+      expect(sockets).toHaveLength(count);
+      expect(control(socket)).not.toContain("CloseStream");
+    } finally {
+      session.abort();
+      vi.useRealTimers();
+    }
+  });
+
+  it("treats steady background noise as quiet", () => {
+    const { session, socket, push } = recorder();
+    try {
+      const count = sockets.length;
+      for (let i = 0; i < 30; i++) push(pcm(1_000, i));
+      push(speech(1));
+      socket.emit("message", JSON.stringify({ type: "TranscriptInterim", data: "words" }));
+      for (let i = 0; i < VOICE_PAUSE_MS / CHUNK_MS; i++) push(pcm(1_000, i));
+      expect(sockets).toHaveLength(count + 1);
+    } finally {
+      session.abort();
+      vi.useRealTimers();
+    }
+  });
+
+  it("finishes queued audio of a connecting stream when stopped", () => {
+    const { session, callbacks, socket, push } = recorder();
+    try {
+      push(speech(0));
+      socket.emit("message", JSON.stringify({ type: "TranscriptInterim", data: "one" }));
+      for (let i = 0; i < VOICE_PAUSE_MS / CHUNK_MS; i++) push(silence(i));
+      const next = sockets.at(-1)!;
+      push(speech(1));
+      session.stop();
+      socket.emit("message", JSON.stringify({ type: "TranscriptText", data: "One." }));
+      socket.emit("close", 1000);
+      expect(callbacks.complete).not.toHaveBeenCalled();
+      next.emit("open");
+      expect(control(next).at(-1)).toBe("CloseStream");
+      expect(audioSent(next).length).toBe(VOICE_PREROLL_MS * 32 + CHUNK_MS * 32);
+      next.emit("message", JSON.stringify({ type: "TranscriptText", data: "Two." }));
+      next.emit("close", 1000);
+      expect(callbacks.event).toHaveBeenCalledWith({ type: "transcript", text: "One. Two.", final: false });
+      expect(callbacks.event).toHaveBeenLastCalledWith({ type: "stopped", reason: "user-stop" });
+      expect(callbacks.complete).toHaveBeenCalledTimes(1);
+    } finally {
+      session.abort();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the last text of a finalizing stream that does not answer in time", () => {
+    const { session, callbacks, socket, push } = recorder();
+    try {
+      push(speech(0));
+      socket.emit("message", JSON.stringify({ type: "TranscriptInterim", data: "kept" }));
+      for (let i = 0; i < VOICE_PAUSE_MS / CHUNK_MS; i++) push(silence(i));
+      const next = sockets.at(-1)!;
+      next.emit("open");
+      vi.advanceTimersByTime(3_000);
+      expect(socket.readyState).toBe(3);
+      next.emit("message", JSON.stringify({ type: "TranscriptInterim", data: "more" }));
+      expect(callbacks.event).toHaveBeenLastCalledWith({
+        type: "transcript",
+        text: "kept more",
+        final: false,
+      });
+      expect(callbacks.error).not.toHaveBeenCalled();
     } finally {
       session.abort();
       vi.useRealTimers();

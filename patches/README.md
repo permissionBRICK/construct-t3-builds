@@ -88,6 +88,15 @@ through re-indentation) and the list of `conflicts`.
   user message to refresh its login, then retries once with the saved token.
   Concurrent failures share the refresh, which times out after 15 seconds.
   Reconnection after transcription has begun is not attempted.
+  The Claude voice service revises its transcript only when a stream closes, so
+  after 2 seconds of quiet audio (measured in recorded audio; the threshold
+  adapts to background noise) following transcribed speech, the session closes
+  the stream for finalization and continues on a new one. Recording continues
+  without interruption in the UI. Audio after the cut is queued for the new
+  stream while it connects, and the new stream first receives the last 500 ms
+  already sent, so speech starting at the cut is never split or dropped. The
+  text of each stream is joined in order; a stream that does not finalize within
+  3 seconds keeps its last text.
   The composer stays editable while recording and finishing transcription, so
   focus and Ctrl+T retain their normal behavior. Text edits do not cancel voice
   input. Transcript updates use the session's latest requested text rather than
