@@ -82,7 +82,7 @@ through re-indentation) and the list of `conflicts`.
   idempotent; Stop flushes capture and drains uploads before closing transcription.
   The server retains detached sessions and completed results for 30 seconds.
   Microphone inactivity (35 seconds) is separate from transcription latency;
-  the existing two-minute recording limit has an explicit stop reason. Browser
+  the existing five-minute recording limit has an explicit stop reason. Browser
   microphone interruptions and unexpected provider socket closure report errors.
   An initial voice handshake rejected with HTTP 401 initializes Claude without a
   user message to refresh its login, then retries once with the saved token.
