@@ -410,7 +410,7 @@
     },
     {
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
-      "after": "const activeTaskSteps = props.threadSyncPhase === null ? props.activeTaskSteps : null;",
+      "after": "const primaryEnvironmentId = usePrimaryEnvironmentId();",
       "insert": "  const serverConfigs = useServerConfigs();\n  const supportsVoiceInput =\n    serverConfigs.get(environmentId)?.environment.capabilities.voiceInput === true;\n  const supportsClientVoiceAudio =\n    serverConfigs.get(environmentId)?.environment.capabilities.voiceInputClientAudio === true;\n  const voiceInputSourcePreference = useClientSettings((settings) => settings.voiceInputSource);\n  const voiceInputSource = resolveVoiceInputSource({\n    preference: voiceInputSourcePreference,\n    canCaptureHere: canCaptureClientAudio(),\n    serverAcceptsClientAudio: supportsClientVoiceAudio,\n    secureContext: isSecureContext(),\n  });\n  const voiceSourceHint =\n    voiceInputSource.source === \"client\"\n      ? \"records with this device's microphone\"\n      : voiceInputSource.source === \"host\"\n        ? \"records through the Construct host bridge\"\n        : voiceInputSource.reason;\n  const runStartVoiceInput = useAtomCommand(startVoiceInputCommand, { reportFailure: false });\n  const runStopVoiceInput = useAtomCommand(stopVoiceInputCommand, { reportFailure: false });\n  const runSendVoiceAudio = useAtomCommand(sendVoiceAudioCommand, { reportFailure: false });\n"
     },
     {
