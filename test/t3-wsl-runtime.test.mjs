@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 assert.ok(process.env.T3_TEST_SOURCE, 'T3_TEST_SOURCE must name a built patched checkout');
@@ -15,8 +15,9 @@ const Effect = await import(require.resolve('effect/Effect'));
 const NodeServices = await import(require.resolve('@effect/platform-node/NodeServices'));
 const { createConstructWslRuntimeArchive } = await import(pathToFileURL(join(source, 'scripts/build-desktop-artifact.ts')));
 const { buildWslRuntimeInstallScript } = await import(pathToFileURL(join(source, 'apps/desktop/src/wsl/DesktopWslEnvironment.ts')));
-const serverRequire = createRequire(join(source, 'apps/server/package.json'));
-const prebuildPath = join(dirname(serverRequire.resolve('node-pty/package.json')), 'build/Release/pty.node');
+const recipe = resolve(import.meta.dirname, '../bin/t3code-build-recipe.sh');
+const prebuildPath = execFileSync('bash', ['-c', 'source "$1"; t3_recipe_pty_prebuild "$2"',
+  'pty-prebuild', recipe, source], { encoding: 'utf8' }).trim();
 const temporary = mkdtempSync(join(tmpdir(), 'construct-wsl-test-'));
 const home = join(temporary, 'home with spaces');
 mkdirSync(home);

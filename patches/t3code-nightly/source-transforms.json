@@ -274,7 +274,7 @@
     },
     {
       "path": "apps/server/package.json",
-      "after": "\"node-pty\": \"^1.1.0\",",
+      "after": "\"dependencies\": {",
       "insert": "    \"ws\": \"^8.18.3\",\n"
     },
     {

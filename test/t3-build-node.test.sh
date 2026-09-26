@@ -38,6 +38,17 @@ void Init(v8::Local<v8::Object> exports) {
 NODE_MODULE(NODE_GYP_MODULE_NAME, Init)
 CPP
 g++ -shared -fPIC -std=c++20 -I"$TMP/profile/include/node" "$TMP/addon.cc" -o "$TMP/package/probe.node"
+# Packaging must select the binary the package loads, not a presumed build path.
+pty_package="$TMP/pty-source/apps/server/node_modules/node-pty"
+mkdir -p "$pty_package/prebuilds/linux-x64" "$pty_package/build/Release"
+cp "$TMP/package/probe.node" "$pty_package/prebuilds/linux-x64/pty.node"
+printf 'stale binary\n' > "$pty_package/build/Release/pty.node"
+printf "module.exports = require('./prebuilds/linux-x64/pty.node');\n" > "$pty_package/index.js"
+[[ "$(t3_recipe_pty_prebuild "$TMP/pty-source")" == "$pty_package/prebuilds/linux-x64/pty.node" ]]
+if PATH="$RUNTIME/bin:$PATH" t3_recipe_pty_prebuild "$TMP/pty-source" >"$TMP/pty-abi.log" 2>&1; then
+  echo 'Expected packaging to reject a node-pty binary built for a different Node ABI' >&2; exit 1
+fi
+grep -q NODE_MODULE_VERSION "$TMP/pty-abi.log"
 cat > "$TMP/package/package.json" <<'JSON'
 {"name":"construct-native-probe","version":"1.0.0","bin":{"construct-native-probe":"probe.cjs"}}
 JSON
