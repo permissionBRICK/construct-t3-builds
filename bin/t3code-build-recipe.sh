@@ -74,6 +74,20 @@ fs.writeFileSync(bundle, '#!' + interpreter + source.slice(source.indexOf('\n'))
 NODE
 }
 
+# Use the native binary node-pty actually loads, whether installed from a
+# prebuild or compiled locally. Loading it also verifies the build Node ABI.
+t3_recipe_pty_prebuild() {
+  node - "$1" <<'NODE'
+const { createRequire } = require('node:module');
+const { resolve, basename } = require('node:path');
+const serverRequire = createRequire(resolve(process.argv[2], 'apps/server/package.json'));
+serverRequire('node-pty');
+const binaries = Object.keys(serverRequire.cache).filter(file => basename(file) === 'pty.node');
+if (binaries.length !== 1) throw new Error(`Expected one loaded node-pty binary, found ${binaries.length}`);
+console.log(binaries[0]);
+NODE
+}
+
 t3_recipe_package() {
   local desktop_version="$1" output_dir="$2"
   export DEBIAN_FRONTEND=noninteractive
@@ -93,10 +107,8 @@ t3_recipe_package() {
   mkdir -p native/resource-monitor/target/x86_64-pc-windows-msvc/release
   cp "${COMPILER_CACHE}/resource-monitor/x86_64-pc-windows-gnu/release/t3-resource-monitor.exe" \
     native/resource-monitor/target/x86_64-pc-windows-msvc/release/t3-resource-monitor.exe
-  local pty_manifest pty_dir pty_prebuild
-  pty_manifest="$(node -e 'console.log(require.resolve("node-pty/package.json",{paths:[process.argv[1]]}))' "${SOURCE_DIR}/apps/server")"
-  pty_dir="$(dirname "${pty_manifest}")"
-  pty_prebuild="${pty_dir}/build/Release/pty.node"
+  local pty_prebuild
+  pty_prebuild="$(t3_recipe_pty_prebuild "${SOURCE_DIR}")" || fail "Could not load the Linux node-pty binary"
   [[ -s "${pty_prebuild}" ]] || fail "Linux node-pty prebuild was not produced: ${pty_prebuild}"
   # Wine's tool setup is reusable across recipe/version changes, too.
   note "Packaging unsigned Windows x64 installer..."
