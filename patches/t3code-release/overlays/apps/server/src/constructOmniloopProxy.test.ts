@@ -82,7 +82,7 @@ describe("constructOmniloopProxyRouteLayer", () => {
         // The route (like the real server) forwards with the fetch-based client, so the
         // test also addresses the router by its real port instead of the test-bound client.
         const address = (yield* HttpServer.HttpServer).address;
-        const origin = address._tag === "TcpAddress" ? `http://127.0.0.1:${address.port}` : "";
+        const origin = address._tag !== "UnixPathAddress" ? `http://127.0.0.1:${address.port}` : "";
         const httpClient = yield* HttpClient.HttpClient;
         const { ticket } = omniloopTicketStore.mint();
         const base = `${origin}${CONSTRUCT_OMNILOOP_PROXY_PREFIX}/${ticket}`;

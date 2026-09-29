@@ -182,11 +182,12 @@ vi.mock("ws", async () => {
       static CLOSED = 3;
       readyState = 0;
       sent: unknown[] = [];
-      constructor(
-        readonly url: string,
-        readonly options: any,
-      ) {
+      readonly url: string;
+      readonly options: any;
+      constructor(url: string, options: any) {
         super();
+        this.url = url;
+        this.options = options;
         sockets.push(this);
       }
       override emit(event: string, ...args: unknown[]) {
