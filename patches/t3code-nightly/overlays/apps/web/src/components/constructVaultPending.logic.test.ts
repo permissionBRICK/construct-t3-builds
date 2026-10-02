@@ -13,16 +13,22 @@ import {
   isVaultApproveArmed,
   isVaultBannerHiddenByUser,
   rememberVaultApprovals,
+  rememberVaultNotesSeen,
   settleVaultDecided,
   VAULT_APPROVE_ARM_MS,
   VAULT_COMPANION_HINT,
+  VAULT_HOLD_POLL_INTERVAL_MS,
   VAULT_MATCH_GRACE_MS,
+  VAULT_NOTE_HOLD_MS,
+  VAULT_POLL_INTERVAL_MS,
   VAULT_RESULT_VISIBLE_MS,
   vaultApproveUrlRequest,
+  vaultCompanionPollDelay,
   vaultDecisionResultText,
   vaultDecisionSettles,
   vaultDisplayedReport,
   vaultNoteMatchesApproval,
+  vaultNotesHeldUntil,
 } from "./constructVaultPending.logic";
 
 const SERVER_NOW = 1_800_000_000_000;
@@ -227,6 +233,8 @@ const companion = (
   shownSince: new Map(approvals.map((item) => [item.id, CLIENT_NOW - VAULT_APPROVE_ARM_MS])),
   busy: false,
   result: null,
+  available: true,
+  notesFirstSeen: new Map(),
   ...over,
 });
 const approvalItems = (banner: ReturnType<typeof buildConstructVaultBanner>) =>
@@ -630,5 +638,156 @@ describe("reporting what the banner shows to the Companion", () => {
     // Once the closed requests are gone, the visible page reports again.
     expect(isVaultBannerHiddenByUser([], CLIENT_NOW, hidden, companion([]))).toBe(false);
     expect(report("visible", [], hidden, companion([]))).toEqual([]);
+  });
+});
+
+describe("holding VM notes back for the Companion (Desktop app)", () => {
+  // A hosted VM's note links the host's approval; the Companion lists that approval only
+  // after its next host poll.
+  const hosted = note("n1", { approveUrl: "https://host.example:7462/vault/#request=h-1" });
+  const hostedApproval = approval("c1", { kind: "host", host: "host", hostRequestId: "h-1" });
+  const noteKey = constructVaultPendingKey("agent-vm", "n1");
+  const seenAt = (at: number) => new Map([[noteKey, at]]);
+  const kinds = (banner: ReturnType<typeof buildConstructVaultBanner>) =>
+    banner?.items.map((item) => item.kind) ?? [];
+
+  it("holds an unmatched note back for 10 s after it was first seen", () => {
+    const view = companion([], { notesFirstSeen: seenAt(CLIENT_NOW) });
+    const readings = [reading([hosted])];
+    expect(buildConstructVaultBanner(readings, CLIENT_NOW, none, view)).toBeNull();
+    expect(
+      buildConstructVaultBanner(readings, CLIENT_NOW + VAULT_NOTE_HOLD_MS - 1, none, view),
+    ).toBeNull();
+    expect(vaultNotesHeldUntil(readings, CLIENT_NOW, view)).toBe(CLIENT_NOW + VAULT_NOTE_HOLD_MS);
+    // Neither shown nor counted next to another request.
+    const other = companion([approval("c9", { names: ["npm-token"] })], {
+      notesFirstSeen: seenAt(CLIENT_NOW),
+    });
+    const banner = buildConstructVaultBanner(readings, CLIENT_NOW + 3_000, none, other);
+    expect(banner?.title).toBe("Key vault: npm-token waiting for your approval");
+    expect(banner?.keys).toEqual([constructVaultApprovalKey("c9")]);
+    expect(vaultDisplayedReport("visible", banner, false)).toEqual(["c9"]);
+  });
+
+  it("shows only the inline item when the approval arrives within the hold", () => {
+    const readings = [reading([hosted])];
+    const firstSeen = rememberVaultNotesSeen(new Map(), readings, CLIENT_NOW).firstSeen;
+    let recent = rememberVaultApprovals(new Map(), [], CLIENT_NOW);
+    // The Companion lists nothing for 3 s, asked every second, then the host's approval.
+    for (const at of [0, 1_000, 2_000]) {
+      const view = companion([], { recent, notesFirstSeen: firstSeen });
+      expect(buildConstructVaultBanner(readings, CLIENT_NOW + at, none, view)).toBeNull();
+      recent = rememberVaultApprovals(recent, [], CLIENT_NOW + at);
+    }
+    for (const at of [3_000, 6_000, VAULT_NOTE_HOLD_MS, 2 * VAULT_NOTE_HOLD_MS]) {
+      recent = rememberVaultApprovals(recent, [hostedApproval], CLIENT_NOW + at);
+      const view = companion([hostedApproval], { recent, notesFirstSeen: firstSeen });
+      const banner = buildConstructVaultBanner(readings, CLIENT_NOW + at, none, view);
+      expect(kinds(banner)).toEqual(["approval"]);
+      expect(banner?.keys).toEqual([constructVaultApprovalKey("c1")]);
+      expect(vaultNotesHeldUntil(readings, CLIENT_NOW + at, view)).toBeNull();
+    }
+  });
+
+  it("shows the unmatched note with its fallback once the hold ends", () => {
+    const view = companion([], { notesFirstSeen: seenAt(CLIENT_NOW) });
+    const after = CLIENT_NOW + VAULT_NOTE_HOLD_MS;
+    const banner = buildConstructVaultBanner([reading([hosted])], after, none, view);
+    expect(banner?.items).toEqual([
+      expect.objectContaining({
+        kind: "note",
+        key: noteKey,
+        approveUrl: "https://host.example:7462/vault/#request=h-1",
+      }),
+    ]);
+    expect(vaultNotesHeldUntil([reading([hosted])], after, view)).toBeNull();
+    // Without a link, the Companion hint.
+    const local = buildConstructVaultBanner(
+      [reading([note("n1", { approveUrl: null })])],
+      after,
+      none,
+      view,
+    );
+    expect(local?.companionHint).toBe(VAULT_COMPANION_HINT);
+  });
+
+  it("shows notes at once when the Companion is unavailable or there is no bridge", () => {
+    const readings = [reading([hosted])];
+    const unavailable = companion([], { available: false, notesFirstSeen: seenAt(CLIENT_NOW) });
+    expect(kinds(buildConstructVaultBanner(readings, CLIENT_NOW, none, unavailable))).toEqual([
+      "note",
+    ]);
+    expect(vaultNotesHeldUntil(readings, CLIENT_NOW, unavailable)).toBeNull();
+    expect(kinds(buildConstructVaultBanner(readings, CLIENT_NOW, none, null))).toEqual(["note"]);
+    expect(vaultNotesHeldUntil(readings, CLIENT_NOW, null)).toBeNull();
+  });
+
+  it("asks the Companion every second while a note is held, every 3 s otherwise", () => {
+    const readings = [reading([hosted])];
+    const view = companion([], { notesFirstSeen: seenAt(CLIENT_NOW) });
+    const delay = (at: number, over: Partial<ConstructVaultCompanionView> = {}) =>
+      vaultCompanionPollDelay(vaultNotesHeldUntil(readings, at, { ...view, ...over }));
+    expect(VAULT_HOLD_POLL_INTERVAL_MS).toBeLessThan(VAULT_POLL_INTERVAL_MS);
+    expect(delay(CLIENT_NOW)).toBe(VAULT_HOLD_POLL_INTERVAL_MS);
+    expect(delay(CLIENT_NOW + VAULT_NOTE_HOLD_MS - 1)).toBe(VAULT_HOLD_POLL_INTERVAL_MS);
+    expect(delay(CLIENT_NOW + VAULT_NOTE_HOLD_MS)).toBe(VAULT_POLL_INTERVAL_MS);
+    expect(delay(CLIENT_NOW, { available: false })).toBe(VAULT_POLL_INTERVAL_MS);
+    expect(
+      delay(CLIENT_NOW, {
+        approvals: [hostedApproval],
+        recent: companion([hostedApproval]).recent,
+      }),
+    ).toBe(VAULT_POLL_INTERVAL_MS);
+    expect(vaultCompanionPollDelay(vaultNotesHeldUntil([], CLIENT_NOW, view))).toBe(
+      VAULT_POLL_INTERVAL_MS,
+    );
+  });
+
+  it("keeps each note's first-seen time across polls and renders", () => {
+    const first = rememberVaultNotesSeen(new Map(), [reading([hosted])], CLIENT_NOW);
+    expect(first.added).toBe(true);
+    expect([...first.firstSeen]).toEqual([[noteKey, CLIENT_NOW]]);
+    // Polled again and again (and reported by a second connection): the time stays.
+    let firstSeen: ReadonlyMap<string, number> = first.firstSeen;
+    for (const at of [3_000, 6_000, 9_000]) {
+      const next = rememberVaultNotesSeen(
+        firstSeen,
+        [reading([hosted]), reading([hosted])],
+        CLIENT_NOW + at,
+      );
+      expect(next.added).toBe(false);
+      firstSeen = next.firstSeen;
+    }
+    expect([...firstSeen]).toEqual([[noteKey, CLIENT_NOW]]);
+    // So the hold ends 10 s after the first sighting, however often it rendered since.
+    const view = companion([], { notesFirstSeen: firstSeen });
+    expect(vaultNotesHeldUntil([reading([hosted])], CLIENT_NOW + 9_000, view)).toBe(
+      CLIENT_NOW + VAULT_NOTE_HOLD_MS,
+    );
+    // A new note is new; a note that is gone is forgotten.
+    const later = rememberVaultNotesSeen(firstSeen, [reading([note("n2")])], CLIENT_NOW + 12_000);
+    expect(later.added).toBe(true);
+    expect([...later.firstSeen]).toEqual([
+      [constructVaultPendingKey("agent-vm", "n2"), CLIENT_NOW + 12_000],
+    ]);
+  });
+
+  it("does not hold a note without a first-seen time, nor a closed banner's requests back", () => {
+    // Untracked: shown at once.
+    expect(
+      kinds(buildConstructVaultBanner([reading([hosted])], CLIENT_NOW, none, companion([]))),
+    ).toEqual(["note"]);
+    // The user closed the banner on c9; a held note does not bring it back, and nothing
+    // is reported meanwhile.
+    const view = companion([approval("c9")], { notesFirstSeen: seenAt(CLIENT_NOW) });
+    const hidden = new Set([constructVaultApprovalKey("c9")]);
+    expect(buildConstructVaultBanner([reading([hosted])], CLIENT_NOW, hidden, view)).toBeNull();
+    expect(isVaultBannerHiddenByUser([reading([hosted])], CLIENT_NOW, hidden, view)).toBe(true);
+    // Once the hold ends, the note is a request the user has not closed: the banner is back.
+    const after = CLIENT_NOW + VAULT_NOTE_HOLD_MS;
+    expect(buildConstructVaultBanner([reading([hosted])], after, hidden, view)?.keys).toEqual([
+      constructVaultApprovalKey("c9"),
+      noteKey,
+    ]);
   });
 });
