@@ -1,6 +1,9 @@
 {
   "version": 2,
   "overlays": [
+    "apps/desktop/src/construct/ConstructVaultApprovals.test.ts",
+    "apps/desktop/src/construct/ConstructVaultApprovals.ts",
+    "apps/desktop/src/ipc/methods/constructVault.ts",
     "apps/desktop/src/updates/ConstructUpdates.test.ts",
     "apps/desktop/src/updates/ConstructUpdates.ts",
     "apps/server/src/constructDiskSpace.test.ts",
@@ -1053,6 +1056,51 @@
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
       "before": "const submitCitationAndSend = useCallback(() => {",
       "insert": "  // Wait for the final transcript to reach the controlled draft and parent send callback.\n  useEffect(() => {\n    if (!voiceSubmission) return;\n    setVoiceSubmission(null);\n    if (voiceSubmission.targetKey !== voiceTargetKey || voiceInsertionRef.current) return;\n    submitComposer(undefined, voiceSubmission.intent);\n  }, [submitComposer, voiceSubmission, voiceTargetKey]);\n\n"
+    },
+    {
+      "path": "apps/desktop/src/ipc/channels.ts",
+      "after": "export const UPDATE_CHECK_CHANNEL = \"desktop:update-check\";",
+      "insert": "// Construct builds: key vault approvals through the Construct Companion on this PC.\nexport const CONSTRUCT_VAULT_APPROVALS_CHANNEL = \"desktop:construct-vault-approvals\";\nexport const CONSTRUCT_VAULT_DECIDE_CHANNEL = \"desktop:construct-vault-decide\";\n"
+    },
+    {
+      "path": "apps/desktop/src/ipc/DesktopIpcHandlers.ts",
+      "after": "import * as DesktopIpc from \"./DesktopIpc.ts\";",
+      "insert": "import { constructVaultApprovals, constructVaultDecide } from \"./methods/constructVault.ts\";\n"
+    },
+    {
+      "path": "apps/desktop/src/ipc/DesktopIpcHandlers.ts",
+      "after": "yield* ipc.handle(checkForUpdate);",
+      "insert": "  yield* ipc.handle(constructVaultApprovals);\n"
+    },
+    {
+      "path": "apps/desktop/src/ipc/DesktopIpcHandlers.ts",
+      "after": "yield* ipc.handle(checkForUpdate);",
+      "insert": "  yield* ipc.handle(constructVaultDecide);\n"
+    },
+    {
+      "path": "apps/desktop/src/preload.ts",
+      "after": "downloadUpdate: () => ipcRenderer.invoke(IpcChannels.UPDATE_DOWNLOAD_CHANNEL),",
+      "insert": "  constructVaultApprovals: () => ipcRenderer.invoke(IpcChannels.CONSTRUCT_VAULT_APPROVALS_CHANNEL),\n"
+    },
+    {
+      "path": "apps/desktop/src/preload.ts",
+      "after": "downloadUpdate: () => ipcRenderer.invoke(IpcChannels.UPDATE_DOWNLOAD_CHANNEL),",
+      "insert": "  constructVaultDecide: (id, decision) =>\n    ipcRenderer.invoke(IpcChannels.CONSTRUCT_VAULT_DECIDE_CHANNEL, { id, decision }),\n"
+    },
+    {
+      "path": "packages/contracts/src/ipc.ts",
+      "after": "import type { EditorId } from \"./editor.ts\";",
+      "insert": "import type {\n  ConstructVaultApprovalsResult,\n  ConstructVaultDecideResult,\n  ConstructVaultDecision,\n} from \"./constructVaultPending.ts\";\n"
+    },
+    {
+      "path": "packages/contracts/src/ipc.ts",
+      "after": "downloadUpdate: () => Promise<DesktopUpdateActionResult>;",
+      "insert": "  /** Construct builds: the key vault approvals the Construct Companion on this PC waits on\n   *  (`available: false` without a running Companion). The Companion's token stays in\n   *  the main process. */\n  constructVaultApprovals: () => Promise<ConstructVaultApprovalsResult>;\n"
+    },
+    {
+      "path": "packages/contracts/src/ipc.ts",
+      "after": "downloadUpdate: () => Promise<DesktopUpdateActionResult>;",
+      "insert": "  /** Construct builds: approve or deny one Companion key vault approval by its id. */\n  constructVaultDecide: (\n    id: string,\n    decision: ConstructVaultDecision,\n  ) => Promise<ConstructVaultDecideResult>;\n"
     }
   ]
 }
