@@ -11,6 +11,7 @@ import {
   formatVaultNames,
   formatVaultTimeLeft,
   isVaultApproveArmed,
+  isVaultBannerHiddenByUser,
   rememberVaultApprovals,
   settleVaultDecided,
   VAULT_APPROVE_ARM_MS,
@@ -20,6 +21,7 @@ import {
   vaultApproveUrlRequest,
   vaultDecisionResultText,
   vaultDecisionSettles,
+  vaultDisplayedReport,
   vaultNoteMatchesApproval,
 } from "./constructVaultPending.logic";
 
@@ -544,5 +546,89 @@ describe("decisions", () => {
     );
     expect([...later.keys()]).toEqual(["c2"]);
     expect(later.get("c2")?.lastSeen).toBe(CLIENT_NOW + VAULT_MATCH_GRACE_MS);
+  });
+});
+
+describe("reporting what the banner shows to the Companion", () => {
+  /** The report after an answer, computed the way the banner computes it. */
+  const report = (
+    visibility: DocumentVisibilityState,
+    readings: ConstructVaultPendingReading[],
+    hidden: ReadonlySet<string>,
+    view: ConstructVaultCompanionView,
+  ) =>
+    vaultDisplayedReport(
+      visibility,
+      buildConstructVaultBanner(readings, CLIENT_NOW, hidden, view),
+      isVaultBannerHiddenByUser(readings, CLIENT_NOW, hidden, view),
+    );
+
+  it("reports the approvals shown inline, most urgent first, and never the VM notes", () => {
+    const view = companion([
+      approval("c-late", { deadline: CLIENT_NOW + 8 * MIN }),
+      approval("c-soon", { deadline: CLIENT_NOW + 2 * MIN }),
+    ]);
+    expect(report("visible", [reading([note("n", { approveUrl: null })])], none, view)).toEqual([
+      "c-soon",
+      "c-late",
+    ]);
+  });
+
+  it("reports only what is rendered: not the requests beyond the first three", () => {
+    const view = companion(
+      ["c1", "c2", "c3", "c4"].map((id, index) =>
+        approval(id, { deadline: CLIENT_NOW + (index + 1) * MIN }),
+      ),
+    );
+    expect(report("visible", [], none, view)).toEqual(["c1", "c2", "c3"]);
+    // A more urgent VM note pushes the last approval out of the banner.
+    const urgent = reading([note("n", { deadline: SERVER_NOW + 30_000 })]);
+    expect(report("visible", [urgent], none, view)).toEqual(["c1", "c2"]);
+  });
+
+  it("leaves out an approval decided here, an expired one and one the Companion no longer lists", () => {
+    const view = companion(
+      [approval("c1"), approval("c2"), approval("gone", { deadline: CLIENT_NOW - 1 })],
+      { decided: new Set(["c1"]) },
+    );
+    expect(report("visible", [], none, view)).toEqual(["c2"]);
+    const later = companion([approval("c3")], {
+      recent: rememberVaultApprovals(new Map(), [approval("c2"), approval("c3")], CLIENT_NOW),
+    });
+    expect(report("visible", [], none, later)).toEqual(["c3"]);
+  });
+
+  it("reports an empty list while the page is visible and shows none of them", () => {
+    expect(report("visible", [], none, companion([]))).toEqual([]);
+    expect(report("visible", [reading([note("n")])], none, companion([]))).toEqual([]);
+    // Only the result line of the last decision is left.
+    const resultOnly = companion([], {
+      result: { text: "Approved github-token for agent-vm.", at: CLIENT_NOW, pending: false },
+    });
+    expect(report("visible", [], none, resultOnly)).toEqual([]);
+  });
+
+  it("reports nothing while the page is hidden", () => {
+    expect(report("hidden", [], none, companion([approval("c1")]))).toBeNull();
+    expect(report("hidden", [], none, companion([]))).toBeNull();
+  });
+
+  it("reports nothing while the user keeps the banner closed, and again once another request waits", () => {
+    const view = companion([approval("c1")]);
+    const hidden = new Set(buildConstructVaultBanner([], CLIENT_NOW, none, view)?.keys);
+    expect(isVaultBannerHiddenByUser([], CLIENT_NOW, hidden, view)).toBe(true);
+    expect(report("visible", [], hidden, view)).toBeNull();
+    // A closed banner over VM notes says nothing either.
+    const notes = [reading([note("n")])];
+    const hiddenNotes = new Set(buildConstructVaultBanner(notes, CLIENT_NOW, none)?.keys);
+    expect(report("visible", notes, hiddenNotes, companion([]))).toBeNull();
+    // Another request brings the banner back, with every request that waits.
+    expect(report("visible", [], hidden, companion([approval("c1"), approval("c2")]))).toEqual([
+      "c1",
+      "c2",
+    ]);
+    // Once the closed requests are gone, the visible page reports again.
+    expect(isVaultBannerHiddenByUser([], CLIENT_NOW, hidden, companion([]))).toBe(false);
+    expect(report("visible", [], hidden, companion([]))).toEqual([]);
   });
 });

@@ -259,57 +259,14 @@ export function buildConstructVaultBanner(
   hiddenKeys: ReadonlySet<string>,
   companion: ConstructVaultCompanionView | null = null,
 ): ConstructVaultBanner | null {
-  const waiting: WaitingEntry[] = [];
-  const claiming: ConstructVaultApproval[] = [];
-  if (companion !== null) {
-    const listed = new Set<string>();
-    for (const approval of companion.approvals) {
-      listed.add(approval.id);
-      claiming.push(approval);
-      if (companion.decided.has(approval.id)) continue;
-      const left = approval.deadline === null ? Infinity : approval.deadline - clientNow;
-      if (left <= 0) continue;
-      waiting.push({
-        kind: "approval",
-        key: constructVaultApprovalKey(approval.id),
-        left,
-        names: approval.names,
-        approval,
-      });
-    }
-    for (const { approval, lastSeen } of companion.recent.values()) {
-      if (!listed.has(approval.id) && clientNow - lastSeen < VAULT_MATCH_GRACE_MS) {
-        claiming.push(approval);
-      }
-    }
-  }
-  const seen = new Set<string>();
-  for (const reading of readings) {
-    const serverNow = reading.pending.now + Math.max(0, clientNow - reading.receivedAt);
-    for (const note of reading.pending.notes) {
-      const key = constructVaultPendingKey(note.vm, note.id);
-      const left = note.deadline - serverNow;
-      if (left <= 0 || seen.has(key)) continue;
-      seen.add(key);
-      if (claiming.some((approval) => vaultNoteMatchesApproval(note, approval))) continue;
-      waiting.push({
-        kind: "note",
-        key,
-        left,
-        vm: note.vm === "" ? reading.environmentLabel : note.vm,
-        names: note.names,
-        reason: note.reason,
-        approveUrl: note.approveUrl,
-      });
-    }
-  }
+  const waiting = collectVaultWaiting(readings, clientNow, companion);
   const lastResult = companion?.result ?? null;
   const resultLine =
     lastResult !== null &&
     (lastResult.pending || clientNow - lastResult.at < VAULT_RESULT_VISIBLE_MS)
       ? lastResult
       : null;
-  if (waiting.length > 0 && waiting.every((request) => hiddenKeys.has(request.key))) return null;
+  if (everyVaultRequestHidden(waiting, hiddenKeys)) return null;
   if (waiting.length === 0 && resultLine === null) return null;
   waiting.sort((a, b) => a.left - b.left || compareText(a.key, b.key));
 
@@ -379,4 +336,96 @@ export function buildConstructVaultBanner(
     nextChangeAt,
     signature: JSON.stringify([title, items, more, companionHint, result, busy]),
   };
+}
+
+/** Every request that waits, unsorted: the Companion's approvals and the VM notes that are
+ *  not one of them. */
+function collectVaultWaiting(
+  readings: Iterable<ConstructVaultPendingReading>,
+  clientNow: number,
+  companion: ConstructVaultCompanionView | null,
+): WaitingEntry[] {
+  const waiting: WaitingEntry[] = [];
+  const claiming: ConstructVaultApproval[] = [];
+  if (companion !== null) {
+    const listed = new Set<string>();
+    for (const approval of companion.approvals) {
+      listed.add(approval.id);
+      claiming.push(approval);
+      if (companion.decided.has(approval.id)) continue;
+      const left = approval.deadline === null ? Infinity : approval.deadline - clientNow;
+      if (left <= 0) continue;
+      waiting.push({
+        kind: "approval",
+        key: constructVaultApprovalKey(approval.id),
+        left,
+        names: approval.names,
+        approval,
+      });
+    }
+    for (const { approval, lastSeen } of companion.recent.values()) {
+      if (!listed.has(approval.id) && clientNow - lastSeen < VAULT_MATCH_GRACE_MS) {
+        claiming.push(approval);
+      }
+    }
+  }
+  const seen = new Set<string>();
+  for (const reading of readings) {
+    const serverNow = reading.pending.now + Math.max(0, clientNow - reading.receivedAt);
+    for (const note of reading.pending.notes) {
+      const key = constructVaultPendingKey(note.vm, note.id);
+      const left = note.deadline - serverNow;
+      if (left <= 0 || seen.has(key)) continue;
+      seen.add(key);
+      if (claiming.some((approval) => vaultNoteMatchesApproval(note, approval))) continue;
+      waiting.push({
+        kind: "note",
+        key,
+        left,
+        vm: note.vm === "" ? reading.environmentLabel : note.vm,
+        names: note.names,
+        reason: note.reason,
+        approveUrl: note.approveUrl,
+      });
+    }
+  }
+  return waiting;
+}
+
+/** Requests wait, and the user closed the banner on every one of them. */
+function everyVaultRequestHidden(
+  waiting: ReadonlyArray<WaitingEntry>,
+  hiddenKeys: ReadonlySet<string>,
+): boolean {
+  return waiting.length > 0 && waiting.every((request) => hiddenKeys.has(request.key));
+}
+
+/**
+ * The user closed the banner on every request that waits: it stays away until another
+ * request waits (`buildConstructVaultBanner` is null), and it tells the Companion nothing.
+ */
+export function isVaultBannerHiddenByUser(
+  readings: Iterable<ConstructVaultPendingReading>,
+  clientNow: number,
+  hiddenKeys: ReadonlySet<string>,
+  companion: ConstructVaultCompanionView | null = null,
+): boolean {
+  return everyVaultRequestHidden(collectVaultWaiting(readings, clientNow, companion), hiddenKeys);
+}
+
+/**
+ * What the Desktop app reports to the Construct Companion after each successful answer
+ * from it: the ids of the Companion approvals the banner shows inline, possibly none (the
+ * app is visible and shows none). Null reports nothing: the page is hidden, or the user
+ * closed the banner on the requests that wait. Without reports the Companion's marks
+ * expire and its own pop-out takes over.
+ */
+export function vaultDisplayedReport(
+  visibility: DocumentVisibilityState,
+  banner: ConstructVaultBanner | null,
+  hiddenByUser: boolean,
+): ReadonlyArray<string> | null {
+  if (visibility !== "visible" || hiddenByUser) return null;
+  if (banner === null) return [];
+  return banner.items.flatMap((item) => (item.kind === "approval" ? [item.id] : []));
 }
