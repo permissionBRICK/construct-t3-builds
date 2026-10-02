@@ -132,7 +132,11 @@ through re-indentation) and the list of `conflicts`.
   for the same request appears once, as the Companion item. Every poll shows only what
   the Companion lists at that moment, so a request answered anywhere else disappears on
   the next poll. A request decided in the banner disappears at once, and a result line
-  reports the Companion's answer. Browsers and the PWA keep the link and hint.
+  reports the Companion's answer. After each Companion answer, while the page is visible
+  and the user has not closed the banner, the app reports the ids of the approvals shown
+  inline (an empty list when none) to `POST /v1/vault/approvals/displayed`, so the
+  Companion holds back its own pop-out. A hidden page or a closed banner reports nothing,
+  and the Companion's pop-out takes over. Browsers and the PWA keep the link and hint.
 - **Omniloop tab** (`construct.omniloop*` RPCs, capability `constructOmniloop`, proxy
   route `/construct/omniloop/<ticket>/*`): the omniloop dashboard of the thread's own
   VM in the right panel, served through the T3 server behind a ticket, plus a composer
