@@ -50,3 +50,17 @@ export const constructVaultDecide = DesktopIpc.makeIpcMethod({
     );
   }),
 });
+
+/** Which Companion approvals the banner shows inline; the ids are checked here, and
+ *  nothing about the report comes back (the Companion's pop-out covers failures). */
+export const constructVaultDisplayed = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.CONSTRUCT_VAULT_DISPLAYED_CHANNEL,
+  payload: Schema.Struct({ ids: Schema.Array(Schema.String) }),
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.constructVault.displayed")(function* (input) {
+    const options = yield* companionOptions;
+    yield* Effect.promise(() =>
+      ConstructVaultApprovals.reportConstructVaultDisplayed(input.ids, options),
+    );
+  }),
+});
