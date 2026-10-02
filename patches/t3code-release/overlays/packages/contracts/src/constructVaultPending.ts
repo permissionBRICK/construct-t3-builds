@@ -83,9 +83,11 @@ export const ConstructVaultApprovalsResult = Schema.Union([
 ]);
 export type ConstructVaultApprovalsResult = typeof ConstructVaultApprovalsResult.Type;
 
+/** `host-failed`: the host service refused or missed a hosted VM's decision. */
 export const ConstructVaultDecideFailure = Schema.Literals([
   "already-decided",
   "not-found",
+  "host-failed",
   "unavailable",
   "error",
 ]);

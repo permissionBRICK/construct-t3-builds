@@ -213,6 +213,8 @@ export function vaultDecisionResultText(
       return `${what} was already answered elsewhere.`;
     case "not-found":
       return `${what} is no longer waiting.`;
+    case "host-failed":
+      return `The host could not be reached for ${what}. Try again, or answer in the Companion.`;
     case "unavailable":
       return `The Construct Companion is not reachable. ${what} still waits.`;
     case "error":

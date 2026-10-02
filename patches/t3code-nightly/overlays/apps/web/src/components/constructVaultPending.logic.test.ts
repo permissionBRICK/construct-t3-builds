@@ -509,6 +509,9 @@ describe("decisions", () => {
     expect(vaultDecisionResultText(item, "approve", { ok: false, reason: "not-found" })).toBe(
       "github-token, npm-token for agent-vm is no longer waiting.",
     );
+    expect(vaultDecisionResultText(item, "approve", { ok: false, reason: "host-failed" })).toBe(
+      "The host could not be reached for github-token, npm-token for agent-vm. Try again, or answer in the Companion.",
+    );
     expect(vaultDecisionResultText(item, "approve", { ok: false, reason: "unavailable" })).toBe(
       "The Construct Companion is not reachable. github-token, npm-token for agent-vm still waits.",
     );
@@ -521,6 +524,7 @@ describe("decisions", () => {
     expect(vaultDecisionSettles({ ok: true })).toBe(true);
     expect(vaultDecisionSettles({ ok: false, reason: "already-decided" })).toBe(true);
     expect(vaultDecisionSettles({ ok: false, reason: "not-found" })).toBe(true);
+    expect(vaultDecisionSettles({ ok: false, reason: "host-failed" })).toBe(false);
     expect(vaultDecisionSettles({ ok: false, reason: "unavailable" })).toBe(false);
     expect(vaultDecisionSettles({ ok: false, reason: "error" })).toBe(false);
   });

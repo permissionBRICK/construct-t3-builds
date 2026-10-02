@@ -167,7 +167,7 @@ try {
 
   await desktopFlow(await openPage());
   assert.deepEqual(errors, []);
-  console.log(`PASS ${channel}: Desktop inline approval through the Companion (matching, arming, optimistic decide, answered elsewhere, failures)`);
+  console.log(`PASS ${channel}: Desktop inline approval through the Companion (matching, arming, optimistic decide, answered elsewhere, host and Companion failures)`);
 } finally {
   await browser.close();
 }
@@ -300,18 +300,28 @@ async function desktopFlow(page) {
   assert.equal(await item('Third request').count(), 0);
   await set(`window.companion.answer.approvals = []`);
 
-  // The Companion cannot be reached: the item comes back to be answered again.
-  await set(`window.companion.reply = {ok: false, reason: 'unavailable'};
-    window.companion.answer.approvals = [approval('c-4', {names: ['ssh-key'], title: 'Fourth request'})]`);
+  // The host refused a hosted VM's decision: the item comes back to be answered again.
+  const armedAgain = () => page.waitForFunction(() =>
+    document.querySelector('[data-slot="construct-vault-approval"] button:last-child')?.disabled === false, null, {timeout: 2_500});
+  await set(`window.companion.reply = {ok: false, reason: 'host-failed'};
+    window.companion.answer.approvals = [approval('c-4', {kind: 'host', host: 'home', hostRequestId: 'host-appr-4', names: ['ssh-key'], title: 'Fourth request'})]`);
   const fourth = item('Fourth request');
   await fourth.waitFor({timeout: 5_000});
-  await page.waitForFunction(() => document.querySelector('[data-slot="construct-vault-approval"] button:last-child')?.disabled === false, null, {timeout: 2_500});
+  await armedAgain();
+  await fourth.getByRole('button', {name: 'Approve'}).click();
+  await line.filter({hasText: 'The host could not be reached for ssh-key for agent-vm. Try again, or answer in the Companion.'}).waitFor({timeout: 2_000});
+  assert.equal(await fourth.count(), 1, 'a refused decision brings the item back');
+  await shot('desktop-host-failed');
+
+  // The Companion cannot be reached: the item comes back as well.
+  await set(`window.companion.reply = {ok: false, reason: 'unavailable'}`);
+  await armedAgain();
   await fourth.getByRole('button', {name: 'Approve'}).click();
   await line.filter({hasText: 'The Construct Companion is not reachable. ssh-key for agent-vm still waits.'}).waitFor({timeout: 2_000});
   assert.equal(await fourth.count(), 1, 'a failed decision brings the item back');
   await shot('desktop-unreachable');
   assert.deepEqual(await page.evaluate(() => window.companion.decisions),
-    [['c-local', 'approve'], ['c-3', 'deny'], ['c-4', 'approve']]);
+    [['c-local', 'approve'], ['c-3', 'deny'], ['c-4', 'approve'], ['c-4', 'approve']]);
 
   // Nothing waits any more: the banner goes away once the result line has been read.
   await set(`window.companion.answer.approvals = []; window.fixture.answers['env-a'] = []`);

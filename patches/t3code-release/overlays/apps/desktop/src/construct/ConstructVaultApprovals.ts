@@ -341,5 +341,21 @@ export async function decideConstructVaultApproval(
   if (response.status >= 200 && response.status < 300) return { ok: true };
   if (response.status === 404) return { ok: false, reason: "not-found" };
   if (response.status === 409) return { ok: false, reason: "already-decided" };
+  // A hosted VM's decision the host service refused or could not take.
+  if (response.status === 502 && problemCode(response.body) === "host-failed") {
+    return { ok: false, reason: "host-failed" };
+  }
   return { ok: false, reason: "error" };
+}
+
+/** The `code` of a Companion problem answer, or null. */
+function problemCode(body: string): string | null {
+  try {
+    const value: unknown = JSON.parse(body);
+    if (typeof value !== "object" || value === null) return null;
+    const code = (value as { code?: unknown }).code;
+    return typeof code === "string" ? code : null;
+  } catch {
+    return null;
+  }
 }

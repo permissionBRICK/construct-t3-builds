@@ -338,7 +338,7 @@ describe("decideConstructVaultApproval", () => {
     );
   });
 
-  it("maps 404 and 409, and refuses invalid arguments without asking", async () => {
+  it("maps 404, 409 and the host's 502, and refuses invalid arguments without asking", async () => {
     reply = () => ({ status: 404, body: '{"code":"not-found"}' });
     assert.deepEqual(await decideConstructVaultApproval("appr-1", "approve", options(live())), {
       ok: false,
@@ -348,6 +348,25 @@ describe("decideConstructVaultApproval", () => {
     assert.deepEqual(await decideConstructVaultApproval("appr-1", "deny", options(live())), {
       ok: false,
       reason: "already-decided",
+    });
+    reply = () => ({
+      status: 502,
+      body: JSON.stringify({
+        type: "about:blank",
+        title: "The host did not take the answer. See the Key Vault activity.",
+        status: 502,
+        code: "host-failed",
+      }),
+    });
+    assert.deepEqual(await decideConstructVaultApproval("appr-1", "approve", options(live())), {
+      ok: false,
+      reason: "host-failed",
+    });
+    // Any other 502 is a plain error.
+    reply = () => ({ status: 502, body: "Bad Gateway" });
+    assert.deepEqual(await decideConstructVaultApproval("appr-1", "approve", options(live())), {
+      ok: false,
+      reason: "error",
     });
     reply = () => ({ status: 400, body: "" });
     assert.deepEqual(await decideConstructVaultApproval("appr-1", "deny", options(live())), {
