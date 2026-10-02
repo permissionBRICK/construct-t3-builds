@@ -10,6 +10,10 @@
     "apps/server/src/constructOmniloopProxy.test.ts",
     "apps/server/src/constructOmniloopProxy.ts",
     "apps/server/src/constructPwa.test.ts",
+    "apps/server/src/constructVaultPending.logic.test.ts",
+    "apps/server/src/constructVaultPending.logic.ts",
+    "apps/server/src/constructVaultPending.test.ts",
+    "apps/server/src/constructVaultPending.ts",
     "apps/server/src/publicBaseUrl.test.ts",
     "apps/server/src/publicBaseUrl.ts",
     "apps/server/src/voiceInput.test.ts",
@@ -18,6 +22,7 @@
     "apps/web/src/components/ConstructAutoLink.tsx",
     "apps/web/src/components/ConstructDiskSpaceNotification.tsx",
     "apps/web/src/components/ConstructUpdateNotification.tsx",
+    "apps/web/src/components/ConstructVaultPendingNotification.tsx",
     "apps/web/src/components/constructDiskSpace.logic.test.ts",
     "apps/web/src/components/constructDiskSpace.logic.ts",
     "apps/web/src/components/constructInstances.link.ts",
@@ -26,6 +31,8 @@
     "apps/web/src/components/constructUpdate.logic.test.ts",
     "apps/web/src/components/constructUpdate.logic.ts",
     "apps/web/src/components/constructUpdate.ts",
+    "apps/web/src/components/constructVaultPending.logic.test.ts",
+    "apps/web/src/components/constructVaultPending.logic.ts",
     "apps/web/src/components/omniloop/OmniloopPanel.tsx",
     "apps/web/src/components/omniloop/omniloopSurface.tsx",
     "apps/web/src/components/omniloop/omniloopWorkflows.logic.test.ts",
@@ -34,6 +41,7 @@
     "apps/web/src/components/settings/ConstructProviderRow.tsx",
     "apps/web/src/state/constructDiskSpace.ts",
     "apps/web/src/state/constructOmniloop.ts",
+    "apps/web/src/state/constructVaultPending.ts",
     "apps/web/src/state/voiceInput.ts",
     "apps/web/src/voice/clientAudioCapture.test.ts",
     "apps/web/src/voice/clientAudioCapture.ts",
@@ -43,6 +51,7 @@
     "apps/web/src/voice/voiceInputFailure.ts",
     "packages/contracts/src/constructDiskSpace.ts",
     "packages/contracts/src/constructOmniloop.ts",
+    "packages/contracts/src/constructVaultPending.ts",
     "packages/contracts/src/voiceInput.test.ts",
     "packages/contracts/src/voiceInput.ts",
     "apps/web/src/voice/voiceSessionRecovery.ts",
@@ -295,6 +304,11 @@
     {
       "path": "apps/server/src/auth/RpcAuthorization.ts",
       "after": "[WS_METHODS.serverUpdateServerWithProgress]: AuthOrchestrationOperateScope,",
+      "insert": "  [WS_METHODS.constructVaultPending]: AuthOrchestrationReadScope,\n"
+    },
+    {
+      "path": "apps/server/src/auth/RpcAuthorization.ts",
+      "after": "[WS_METHODS.serverUpdateServerWithProgress]: AuthOrchestrationOperateScope,",
       "insert": "  [WS_METHODS.constructOmniloopStatus]: AuthOrchestrationReadScope,\n  [WS_METHODS.constructOmniloopTicket]: AuthOrchestrationReadScope,\n  [WS_METHODS.constructOmniloopWorkflows]: AuthOrchestrationReadScope,\n"
     },
     {
@@ -331,6 +345,11 @@
       "path": "apps/server/src/environment/ServerEnvironment.ts",
       "after": "threadTitleRegeneration: true,",
       "insert": "      constructDiskSpace: true,\n"
+    },
+    {
+      "path": "apps/server/src/environment/ServerEnvironment.ts",
+      "after": "threadTitleRegeneration: true,",
+      "insert": "      constructVaultPending: true,\n"
     },
     {
       "path": "apps/server/src/environment/ServerEnvironment.ts",
@@ -385,8 +404,18 @@
     },
     {
       "path": "apps/server/src/ws.ts",
+      "after": "import * as SessionStore from \"./auth/SessionStore.ts\";",
+      "insert": "import { readConstructVaultPending } from \"./constructVaultPending.ts\";\n"
+    },
+    {
+      "path": "apps/server/src/ws.ts",
       "before": "[WS_METHODS.serverUpsertKeybinding]: (rule) =>",
       "insert": "        [WS_METHODS.constructDiskSpace]: (_input) =>\n          observeRpcEffect(WS_METHODS.constructDiskSpace, readConstructDiskSpace(), {\n            \"rpc.aggregate\": \"construct-disk-space\",\n          }),\n"
+    },
+    {
+      "path": "apps/server/src/ws.ts",
+      "before": "[WS_METHODS.serverUpsertKeybinding]: (rule) =>",
+      "insert": "        // Polled every 3 s by every open client: kept out of the RPC traces.\n        [WS_METHODS.constructVaultPending]: (_input) => readConstructVaultPending(),\n"
     },
     {
       "path": "apps/server/src/ws.ts",
@@ -565,8 +594,18 @@
     },
     {
       "path": "apps/web/src/routes/__root.tsx",
+      "after": "import { ConnectOnboardingDialog } from \"../components/cloud/ConnectOnboardingDialog\";",
+      "insert": "import { ConstructVaultPendingNotification } from \"../components/ConstructVaultPendingNotification\";\n"
+    },
+    {
+      "path": "apps/web/src/routes/__root.tsx",
       "after": "{primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}",
       "insert": "        <ConstructDiskSpaceNotification />\n"
+    },
+    {
+      "path": "apps/web/src/routes/__root.tsx",
+      "after": "{primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}",
+      "insert": "        <ConstructVaultPendingNotification />\n"
     },
     {
       "path": "packages/client-runtime/src/rpc/client.ts",
@@ -591,6 +630,11 @@
     {
       "path": "packages/contracts/src/environment.ts",
       "after": "serverSelfUpdateProgress: Schema.optionalKey(Schema.Boolean),",
+      "insert": "  /** Construct-patched servers answer `construct.vaultPending` (key vault requests awaiting approval). */\n  constructVaultPending: Schema.optionalKey(Schema.Boolean),\n"
+    },
+    {
+      "path": "packages/contracts/src/environment.ts",
+      "after": "serverSelfUpdateProgress: Schema.optionalKey(Schema.Boolean),",
       "insert": "  /** Construct-patched servers proxy the VM's omniloop dashboard and answer `construct.omniloop*`. */\n  constructOmniloop: Schema.optionalKey(Schema.Boolean),\n"
     },
     {
@@ -602,6 +646,11 @@
       "path": "packages/contracts/src/index.ts",
       "after": "export * from \"./vcs.ts\";",
       "insert": "export * from \"./constructDiskSpace.ts\";\n"
+    },
+    {
+      "path": "packages/contracts/src/index.ts",
+      "after": "export * from \"./vcs.ts\";",
+      "insert": "export * from \"./constructVaultPending.ts\";\n"
     },
     {
       "path": "packages/contracts/src/index.ts",
@@ -650,8 +699,18 @@
     },
     {
       "path": "packages/contracts/src/rpc.ts",
+      "after": "import { VcsError } from \"./vcs.ts\";",
+      "insert": "import { ConstructVaultPending } from \"./constructVaultPending.ts\";\n"
+    },
+    {
+      "path": "packages/contracts/src/rpc.ts",
       "after": "serverUpdateServerWithProgress: \"server.updateServerWithProgress\",",
       "insert": "  constructDiskSpace: \"construct.diskSpace\",\n"
+    },
+    {
+      "path": "packages/contracts/src/rpc.ts",
+      "after": "serverUpdateServerWithProgress: \"server.updateServerWithProgress\",",
+      "insert": "  constructVaultPending: \"construct.vaultPending\",\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
@@ -660,8 +719,18 @@
     },
     {
       "path": "packages/contracts/src/rpc.ts",
+      "before": "const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {",
+      "insert": "export const WsConstructVaultPendingRpc = Rpc.make(WS_METHODS.constructVaultPending, {\n  payload: Schema.Struct({}),\n  success: ConstructVaultPending,\n  error: EnvironmentAuthorizationError,\n});\n\n"
+    },
+    {
+      "path": "packages/contracts/src/rpc.ts",
       "after": "WsServerUpdateServerWithProgressRpc,",
       "insert": "  WsConstructDiskSpaceRpc,\n"
+    },
+    {
+      "path": "packages/contracts/src/rpc.ts",
+      "after": "WsServerUpdateServerWithProgressRpc,",
+      "insert": "  WsConstructVaultPendingRpc,\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
