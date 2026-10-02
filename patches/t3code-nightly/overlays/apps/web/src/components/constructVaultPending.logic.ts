@@ -21,6 +21,17 @@ export const VAULT_RESULT_VISIBLE_MS = 5_000;
  * list before the VM's CLI learns the answer and removes its note.
  */
 export const VAULT_MATCH_GRACE_MS = 15_000;
+/** The servers, and the Companion, are asked this often while the page is visible. */
+export const VAULT_POLL_INTERVAL_MS = 3_000;
+/**
+ * In the Desktop app, a VM note no Companion approval matches yet is held back this long
+ * after the banner first saw it: the Companion learns of a hosted VM's request only on its
+ * next host poll, seconds after the VM wrote its note. The request then shows once, as the
+ * Companion item, instead of first as a link; without a match it shows after the hold.
+ */
+export const VAULT_NOTE_HOLD_MS = 10_000;
+/** While a note is held back, the Companion is asked this often. */
+export const VAULT_HOLD_POLL_INTERVAL_MS = 1_000;
 
 /** One environment's last answer and when it arrived (the client's clock, epoch ms). */
 export interface ConstructVaultPendingReading {
@@ -58,6 +69,10 @@ export interface ConstructVaultCompanionView {
   /** A decision is being sent: every button waits. */
   readonly busy: boolean;
   readonly result: ConstructVaultResultLine | null;
+  /** The Companion answered its last poll (before its first answer it counts as available). */
+  readonly available: boolean;
+  /** When the banner first saw each VM note (client clock), by note key. */
+  readonly notesFirstSeen: ReadonlyMap<string, number>;
 }
 
 export interface ConstructVaultBannerNoteItem {
@@ -175,6 +190,26 @@ export function rememberVaultApprovals(
   return next;
 }
 
+/** When the banner first saw each note the readings list now, and whether one is new. */
+export function rememberVaultNotesSeen(
+  firstSeen: ReadonlyMap<string, number>,
+  readings: Iterable<ConstructVaultPendingReading>,
+  clientNow: number,
+): { readonly firstSeen: Map<string, number>; readonly added: boolean } {
+  const next = new Map<string, number>();
+  let added = false;
+  for (const reading of readings) {
+    for (const note of reading.pending.notes) {
+      const key = constructVaultPendingKey(note.vm, note.id);
+      if (next.has(key)) continue;
+      const since = firstSeen.get(key);
+      if (since === undefined) added = true;
+      next.set(key, since ?? clientNow);
+    }
+  }
+  return { firstSeen: next, added };
+}
+
 /** The decided approvals the Companion still lists; the others are gone for good. */
 export function settleVaultDecided(
   decided: ReadonlySet<string>,
@@ -248,10 +283,11 @@ type WaitingEntry =
  * The banner for the requests the connected Construct VMs report and, in the Desktop
  * app, the approvals the Construct Companion on this PC waits on; null when none waits
  * or the user hid every one that does. A VM note that is a Companion approval is shown
- * once, as the approval. `clientNow` is the client's clock; a note's time left is
- * measured on its server's clock (its `now`, advanced by the time since the answer
- * arrived), so a phone with a wrong clock still counts down correctly. A Companion
- * approval runs on this PC's clock.
+ * once, as the approval; while the Companion answers, a note it does not list yet is held
+ * back for `VAULT_NOTE_HOLD_MS` after it was first seen. `clientNow` is the client's
+ * clock; a note's time left is measured on its server's clock (its `now`, advanced by the
+ * time since the answer arrived), so a phone with a wrong clock still counts down
+ * correctly. A Companion approval runs on this PC's clock.
  */
 export function buildConstructVaultBanner(
   readings: Iterable<ConstructVaultPendingReading>,
@@ -259,7 +295,7 @@ export function buildConstructVaultBanner(
   hiddenKeys: ReadonlySet<string>,
   companion: ConstructVaultCompanionView | null = null,
 ): ConstructVaultBanner | null {
-  const waiting = collectVaultWaiting(readings, clientNow, companion);
+  const { waiting } = collectVaultWaiting(readings, clientNow, companion);
   const lastResult = companion?.result ?? null;
   const resultLine =
     lastResult !== null &&
@@ -338,14 +374,26 @@ export function buildConstructVaultBanner(
   };
 }
 
+/** The end of a note's hold, or null: no Companion to wait for, or no first-seen time. */
+function vaultNoteHoldEnd(
+  companion: ConstructVaultCompanionView | null,
+  key: string,
+): number | null {
+  if (companion === null || !companion.available) return null;
+  const since = companion.notesFirstSeen.get(key);
+  return since === undefined ? null : since + VAULT_NOTE_HOLD_MS;
+}
+
 /** Every request that waits, unsorted: the Companion's approvals and the VM notes that are
- *  not one of them. */
+ *  not one of them, except the notes held back for the Companion (and when the first of
+ *  those shows anyway). */
 function collectVaultWaiting(
   readings: Iterable<ConstructVaultPendingReading>,
   clientNow: number,
   companion: ConstructVaultCompanionView | null,
-): WaitingEntry[] {
+): { readonly waiting: WaitingEntry[]; readonly heldUntil: number | null } {
   const waiting: WaitingEntry[] = [];
+  let heldUntil: number | null = null;
   const claiming: ConstructVaultApproval[] = [];
   if (companion !== null) {
     const listed = new Set<string>();
@@ -378,6 +426,11 @@ function collectVaultWaiting(
       if (left <= 0 || seen.has(key)) continue;
       seen.add(key);
       if (claiming.some((approval) => vaultNoteMatchesApproval(note, approval))) continue;
+      const holdEnd = vaultNoteHoldEnd(companion, key);
+      if (holdEnd !== null && clientNow < holdEnd) {
+        heldUntil = heldUntil === null ? holdEnd : Math.min(heldUntil, holdEnd);
+        continue;
+      }
       waiting.push({
         kind: "note",
         key,
@@ -389,7 +442,7 @@ function collectVaultWaiting(
       });
     }
   }
-  return waiting;
+  return { waiting, heldUntil };
 }
 
 /** Requests wait, and the user closed the banner on every one of them. */
@@ -410,7 +463,25 @@ export function isVaultBannerHiddenByUser(
   hiddenKeys: ReadonlySet<string>,
   companion: ConstructVaultCompanionView | null = null,
 ): boolean {
-  return everyVaultRequestHidden(collectVaultWaiting(readings, clientNow, companion), hiddenKeys);
+  const { waiting } = collectVaultWaiting(readings, clientNow, companion);
+  return everyVaultRequestHidden(waiting, hiddenKeys);
+}
+
+/**
+ * When the first VM note held back for the Companion shows anyway (client clock), or null
+ * when none is held: the banner renders again then, and asks the Companion faster meanwhile.
+ */
+export function vaultNotesHeldUntil(
+  readings: Iterable<ConstructVaultPendingReading>,
+  clientNow: number,
+  companion: ConstructVaultCompanionView | null = null,
+): number | null {
+  return collectVaultWaiting(readings, clientNow, companion).heldUntil;
+}
+
+/** How long the Desktop app waits before it asks the Companion again. */
+export function vaultCompanionPollDelay(heldUntil: number | null): number {
+  return heldUntil === null ? VAULT_POLL_INTERVAL_MS : VAULT_HOLD_POLL_INTERVAL_MS;
 }
 
 /**

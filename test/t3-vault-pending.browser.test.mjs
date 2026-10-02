@@ -28,6 +28,8 @@ const mocks = {
     const read=async({environmentId})=>{
       window.fixture.calls.push(environmentId);
       const notes=window.fixture.answers[environmentId];
+      // When each note was first served, for the hold timings.
+      for(const note of notes??[]) (window.fixture.served??={})[note.id]??=Date.now();
       return notes===undefined?AsyncResult.failure(Cause.fail('offline')):AsyncResult.success({now:Date.now(),notes});
     };
     export const useAtomCommand=()=>read;`,
@@ -167,7 +169,7 @@ try {
 
   await desktopFlow(await openPage());
   assert.deepEqual(errors, []);
-  console.log(`PASS ${channel}: Desktop inline approval through the Companion (matching, arming, optimistic decide, answered elsewhere, host and Companion failures, displayed reports only while visible)`);
+  console.log(`PASS ${channel}: Desktop inline approval through the Companion (matching, arming, optimistic decide, answered elsewhere, host and Companion failures, displayed reports only while visible, notes held back for the Companion)`);
 } finally {
   await browser.close();
 }
@@ -191,11 +193,12 @@ async function desktopFlow(page) {
       names: ['github-token'], createdAt: Date.now(), deadline: Date.now() + 4 * 60_000 + 30_000, ...over});
     // The Companion: its current list, decisions (and lists) held until the test releases
     // them, and the displayed reports with the page's visibility at the time.
-    window.companion = {answer: {available: true, approvals: []}, lists: 0, decisions: [], hold: false, reply: {ok: true}, release: null,
-      holdList: false, releaseList: null, reports: []};
+    window.companion = {answer: {available: true, approvals: []}, lists: 0, listedAt: [], decisions: [], hold: false, reply: {ok: true},
+      release: null, holdList: false, releaseList: null, reports: []};
     window.desktopBridge = {
       constructVaultApprovals: () => {
         window.companion.lists++;
+        window.companion.listedAt.push(Date.now());
         const answer = structuredClone(window.companion.answer);
         return new Promise((resolve) => {
           window.companion.releaseList = () => resolve(answer);
@@ -249,7 +252,8 @@ async function desktopFlow(page) {
   await page.addScriptTag({content: result.outputFiles[0].text});
   await page.evaluate(() => window.render());
   await items.first().waitFor({timeout: 5_000});
-  assert.equal(await toast.textContent(), 'Key vault: 3 requests waiting for your approval');
+  // The note the Companion does not list waits for it: neither shown nor counted yet.
+  assert.equal(await toast.textContent(), 'Key vault: 2 requests waiting for your approval');
   assert.equal(await items.count(), 2, 'two Companion approvals, each once');
   const local = item('Key vault request from agent-vm');
   // Plain text: markup in the Companion's message is shown, never interpreted.
@@ -261,12 +265,18 @@ async function desktopFlow(page) {
   assert.equal(await local.getByRole('button', {name: 'Deny'}).isDisabled(), false);
   await page.waitForFunction(() => [...document.querySelectorAll('[data-slot="construct-vault-approval"] button')]
     .every((button) => !button.disabled), null, {timeout: 2_500});
-  // The matched notes are not shown again (no approval link); the unknown one keeps the hint.
+  // The matched notes are not shown again (no approval link).
   assert.equal(await banner.locator('a').count(), 0);
-  assert.match(await banner.textContent(), /docker-hub.*The agent on other-vm · publish the release · \d+ min left/);
-  assert.match(await banner.textContent(), /Approve it in the Construct Companion on your PC\./);
+  assert.doesNotMatch(await banner.textContent(), /docker-hub/);
   // Each answer tells the Companion which of its approvals show here, never the notes.
   assert.deepEqual((await nextReport()).toSorted(), ['c-host', 'c-local']);
+  // No approval for the unknown note: it shows 10 s after it arrived, with the hint.
+  await banner.filter({hasText: 'docker-hub'}).waitFor({timeout: 12_000});
+  const unknownAfter = await page.evaluate(() => Date.now() - window.fixture.served.unknown);
+  assert.ok(unknownAfter >= 9_900 && unknownAfter < 11_500, `the unknown note showed after ${unknownAfter} ms`);
+  assert.equal(await toast.textContent(), 'Key vault: 3 requests waiting for your approval');
+  assert.match(await banner.textContent(), /docker-hub.*The agent on other-vm · publish the release · \d+ min left/);
+  assert.match(await banner.textContent(), /Approve it in the Construct Companion on your PC\./);
   await shot('desktop');
 
   // Approve: the item goes at once, every other button waits while the decision is sent.
@@ -382,7 +392,61 @@ async function desktopFlow(page) {
   const unavailable = await reportCount();
   await nextList();
   assert.equal(await reportCount(), unavailable, 'no report without the Companion');
+
+  // Still no Companion: a new VM note shows at once, with its link.
+  const firstLinkAt = (fragment) => page.evaluate((fragment) => window.linksSeen[fragment] ?? null, fragment);
+  await page.evaluate(() => {
+    // When each approval link first appeared in the banner.
+    window.linksSeen = {};
+    new MutationObserver(() => {
+      for (const link of document.querySelectorAll('[data-slot="construct-vault-pending"] a')) {
+        window.linksSeen[new URL(link.href).hash] ??= Date.now();
+      }
+    }).observe(document.body, {subtree: true, childList: true, attributes: true, characterData: true});
+  });
+  await set(`window.fixture.answers['env-a'] = [note('direct', {names: ['cargo-token'], approveUrl: 'https://host.example:7462/vault/#request=host-appr-d'})]`);
+  await banner.locator('a[href$="#request=host-appr-d"]').waitFor({timeout: 5_000});
+  const directAfter = (await firstLinkAt('#request=host-appr-d')) - (await page.evaluate(() => window.fixture.served.direct));
+  assert.ok(directAfter < 1_000, `without the Companion the note showed after ${directAfter} ms`);
+
+  // The Companion answers again. A hosted VM's note arrives first and its approval 3 s
+  // later: the Companion is asked at once and then every second, and only the inline item
+  // ever shows.
+  await set(`window.fixture.answers['env-a'] = []; window.companion.answer = {available: true, approvals: []}`);
+  await banner.waitFor({state: 'detached', timeout: 5_000});
+  await nextList();
+  await set(`window.fixture.answers['env-a'] = [note('held', {names: ['ghcr-token'], approveUrl: 'https://host.example:7462/vault/#request=host-appr-7'})]`);
+  await page.waitForFunction(() => window.fixture.served?.held !== undefined, null, {timeout: 5_000});
+  await page.waitForTimeout(3_000);
+  assert.equal(await banner.count(), 0, 'the note waits for its Companion approval');
+  const heldServed = await page.evaluate(() => window.fixture.served.held);
+  const asked = (await page.evaluate(() => window.companion.listedAt)).filter((at) => at >= heldServed);
+  assert.ok(asked[0] - heldServed < 500, `the Companion was asked ${asked[0] - heldServed} ms after the note arrived`);
+  assert.ok(asked.filter((at) => at < heldServed + 2_900).length >= 3, `asked ${asked.length} times while the note waited`);
+  await set(`window.companion.answer.approvals = [approval('c-7', {kind: 'host', host: 'home', hostRequestId: 'host-appr-7', names: ['ghcr-token'], title: 'Seventh request'})]`);
+  await item('Seventh request').waitFor({timeout: 2_000});
+  assert.equal(await toast.textContent(), 'Key vault: ghcr-token waiting for your approval');
+  assert.deepEqual(await nextReport(), ['c-7']);
+
+  // A note whose approval never comes shows with its link 10 s after it arrived; then the
+  // Companion is asked every 3 seconds again.
+  await set(`window.fixture.answers['env-a'].push(note('never', {names: ['pypi-token'], approveUrl: 'https://host.example:7462/vault/#request=host-appr-8'}))`);
+  await page.waitForFunction(() => window.fixture.served.never !== undefined, null, {timeout: 5_000});
+  await page.waitForTimeout(5_000);
+  assert.equal(await firstLinkAt('#request=host-appr-8'), null, 'held back for now');
+  assert.equal(await toast.textContent(), 'Key vault: ghcr-token waiting for your approval');
+  assert.deepEqual(await lastReport(), ['c-7'], 'the held note is not reported');
+  await banner.locator('a[href$="#request=host-appr-8"]').waitFor({timeout: 7_000});
+  const neverAfter = (await firstLinkAt('#request=host-appr-8')) - (await page.evaluate(() => window.fixture.served.never));
+  assert.ok(neverAfter >= 9_900 && neverAfter < 11_000, `the unmatched note showed after ${neverAfter} ms`);
+  assert.equal(await toast.textContent(), 'Key vault: 2 requests waiting for your approval');
+  assert.equal(await firstLinkAt('#request=host-appr-7'), null, 'the matched note never showed its link');
+  await shot('desktop-held-then-shown');
+  const listsAfterHold = await page.evaluate(() => window.companion.lists);
+  await page.waitForTimeout(2_500);
+  assert.ok((await page.evaluate(() => window.companion.lists)) - listsAfterHold <= 1, 'every 3 s again');
   assert.ok((await page.evaluate(() => window.companion.reports)).every((report) => report.visibility === 'visible'),
     'every report was made while the page was visible');
+  assert.deepEqual(await lastReport(), ['c-7']);
   await page.close();
 }

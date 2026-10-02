@@ -75,8 +75,9 @@ python3 scripts/publisher.py plan --channel nightly --work work-nightly
 
 The browser-driven checks (`test/*.browser.test.mjs`: the update popup, the
 question panels and answer callbacks with mocked audio and transcription, the
-microphone capture shim, the key vault banner and its inline Desktop approval and
-displayed reports through a stubbed Companion bridge) are manual and not part of the build. Run one for an inventory with
+microphone capture shim, the key vault banner with its inline Desktop approval,
+displayed reports and the notes held back for the Companion, through a stubbed Companion
+bridge) are manual and not part of the build. Run one for an inventory with
 `T3_TEST_SOURCE` pointing at its patched upstream checkout with installed
 dependencies, `T3_TEST_TOOLS` at a package directory providing esbuild and
 Playwright, and `T3_TEST_CHANNEL=release|nightly`, for example

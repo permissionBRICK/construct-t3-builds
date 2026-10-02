@@ -129,7 +129,12 @@ through re-indentation) and the list of `conflicts`.
   is enabled one second after an item appears. The main process reads the Companion's
   endpoint file (`%LOCALAPPDATA%\The-Construct\companion\endpoint.json`), calls its
   loopback `/v1/vault/approvals` routes and keeps the bearer token to itself. A VM note
-  for the same request appears once, as the Companion item. Every poll shows only what
+  for the same request appears once, as the Companion item. The Companion learns of a
+  hosted VM's request only on its next host poll, so while it answers, the app holds back
+  a VM note it does not list yet for up to 10 seconds after the note first arrived. It asks
+  the Companion once when the note arrives and then every second until the approval shows
+  or the 10 seconds end. A note without a match then shows with its link or hint. Without
+  an answer from the Companion, notes show at once. Every poll shows only what
   the Companion lists at that moment, so a request answered anywhere else disappears on
   the next poll. A request decided in the banner disappears at once, and a result line
   reports the Companion's answer. After each Companion answer, while the page is visible

@@ -23,15 +23,18 @@ import {
   isVaultApproveArmed,
   isVaultBannerHiddenByUser,
   rememberVaultApprovals,
+  rememberVaultNotesSeen,
   settleVaultDecided,
+  VAULT_POLL_INTERVAL_MS,
+  vaultCompanionPollDelay,
   vaultDecisionResultText,
   vaultDecisionSettles,
   vaultDisplayedReport,
+  vaultNotesHeldUntil,
 } from "./constructVaultPending.logic";
 import { Button } from "./ui/button";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
-const POLL_INTERVAL_MS = 3_000;
 type VaultToastId = ReturnType<typeof toastManager.add>;
 type CompanionBridge = Pick<
   DesktopBridge,
@@ -39,6 +42,8 @@ type CompanionBridge = Pick<
 >;
 /** Requests whose banner the user closed: it stays away until another request waits. */
 const hiddenVaultRequestKeys = new Set<string>();
+/** When the banner first saw each VM note: a restarted poll does not hold a note back anew. */
+let vaultNotesFirstSeen: ReadonlyMap<string, number> = new Map();
 
 /** The Desktop app's way to the Construct Companion on this PC; null in a browser. */
 function companionBridge(): CompanionBridge | null {
@@ -62,7 +67,10 @@ function companionBridge(): CompanionBridge | null {
  * every 3 seconds while the page is visible. In the Desktop app the Construct Companion
  * on this PC is asked as well: its approvals are listed with their dialog texts and
  * Deny / Approve buttons that answer them through the Companion, and a VM's note for
- * the same request is not shown a second time. After each of the Companion's answers,
+ * the same request is not shown a second time. While the Companion answers, a note it
+ * does not list yet is held back for up to 10 seconds after it first arrived, so that the
+ * request does not show as a link first and as the Companion's item a moment later;
+ * meanwhile the Companion is asked every second. After each of the Companion's answers,
  * while the page is visible and the banner is not closed, the Companion hears which of
  * its approvals the banner shows, so that its own pop-out waits for them. Elsewhere the
  * banner only links: it never approves anything and never sees a secret. It goes away by
@@ -95,9 +103,11 @@ export function ConstructVaultPendingNotification() {
     const bridge = companionBridge();
     if (ids.length === 0 && bridge === null) return;
     let cancelled = false;
-    let polling = false;
+    let serversPolling = false;
+    let companionPolling = false;
     let closingBanner = false;
     let renderTimer: ReturnType<typeof setTimeout> | null = null;
+    let companionTimer: ReturnType<typeof setTimeout> | null = null;
     let active: {
       readonly toastId: VaultToastId;
       readonly signature: string;
@@ -110,10 +120,14 @@ export function ConstructVaultPendingNotification() {
     let decided: ReadonlySet<string> = new Set();
     let busy = false;
     let resultLine: ConstructVaultResultLine | null = null;
+    // Until its first answer says otherwise, the Companion may still list a note's request.
+    let companionAvailable = true;
     const shownSince = new Map<string, number>();
-    // What the last render showed, for the report to the Companion.
+    // What the last render showed, for the report to the Companion, and when the first
+    // note held back for the Companion shows anyway.
     let shownBanner: ConstructVaultBanner | null = null;
     let hiddenByUser = false;
+    let heldUntil: number | null = null;
 
     const closeBanner = () => {
       shownSince.clear();
@@ -201,7 +215,16 @@ export function ConstructVaultPendingNotification() {
       const companion =
         bridge === null
           ? null
-          : { approvals, recent, decided, shownSince, busy, result: resultLine };
+          : {
+              approvals,
+              recent,
+              decided,
+              shownSince,
+              busy,
+              result: resultLine,
+              available: companionAvailable,
+              notesFirstSeen: vaultNotesFirstSeen,
+            };
       const banner = buildConstructVaultBanner(
         readings.values(),
         now,
@@ -209,33 +232,61 @@ export function ConstructVaultPendingNotification() {
         companion,
       );
       shownBanner = banner;
+      heldUntil = vaultNotesHeldUntil(readings.values(), now, companion);
       hiddenByUser =
         banner === null &&
         isVaultBannerHiddenByUser(readings.values(), now, hiddenVaultRequestKeys, companion);
       if (banner === null) {
         closeBanner();
-        return;
+      } else {
+        for (const item of banner.items) {
+          if (item.kind === "approval" && !shownSince.has(item.id)) shownSince.set(item.id, now);
+        }
+        showBanner(banner);
       }
-      for (const item of banner.items) {
-        if (item.kind === "approval" && !shownSince.has(item.id)) shownSince.set(item.id, now);
-      }
-      showBanner(banner);
-      // Approve arms and the result line ends without waiting for the next poll.
-      if (banner.nextChangeAt !== null) {
-        renderTimer = setTimeout(render, Math.max(0, banner.nextChangeAt - now) + 20);
-      }
+      // Approve arms, the result line ends and a held note shows without waiting for a poll.
+      const wakeAt = Math.min(banner?.nextChangeAt ?? Infinity, heldUntil ?? Infinity);
+      if (wakeAt !== Infinity) renderTimer = setTimeout(render, Math.max(0, wakeAt - now) + 20);
     };
 
-    const refresh = async () => {
-      // All servers and the Companion at once: one slow answer must not hold up the others.
-      const [results, listed] = await Promise.all([
-        Promise.all(ids.map((environmentId) => read({ environmentId }))),
-        bridge === null
-          ? null
-          : bridge
-              .constructVaultApprovals()
-              .catch((): ConstructVaultApprovalsResult => ({ available: false })),
-      ]);
+    const refreshCompanion = async (companionSide: CompanionBridge) => {
+      const listed = await companionSide
+        .constructVaultApprovals()
+        .catch((): ConstructVaultApprovalsResult => ({ available: false }));
+      if (cancelled) return;
+      // Only what the Companion lists now: an approval answered anywhere else is gone.
+      companionAvailable = listed.available;
+      approvals = listed.available ? listed.approvals : [];
+      recent = rememberVaultApprovals(recent, approvals, Date.now());
+      decided = settleVaultDecided(decided, approvals);
+      render();
+      // The Companion's pop-out waits while this window shows its approvals; it takes
+      // over once the reports stop (hidden page, closed banner, no answer).
+      if (!listed.available) return;
+      const report = vaultDisplayedReport(document.visibilityState, shownBanner, hiddenByUser);
+      if (report === null) return;
+      void companionSide.constructVaultDisplayed(report).catch(() => undefined);
+    };
+
+    // One Companion request at a time, and none while the page is hidden: every 3 seconds,
+    // and every second while a note is held back for it.
+    const pollCompanion = () => {
+      if (bridge === null || companionPolling || cancelled) return;
+      if (companionTimer !== null) clearTimeout(companionTimer);
+      companionTimer = null;
+      // Hidden: the next visibility change starts asking again.
+      if (document.visibilityState === "hidden") return;
+      companionPolling = true;
+      void refreshCompanion(bridge).finally(() => {
+        companionPolling = false;
+        if (cancelled) return;
+        companionTimer = setTimeout(pollCompanion, vaultCompanionPollDelay(heldUntil));
+      });
+    };
+
+    const refreshServers = async () => {
+      // All servers at once: one slow answer must not hold up the others.
+      const results = await Promise.all(ids.map((environmentId) => read({ environmentId })));
       if (cancelled) return;
       const receivedAt = Date.now();
       results.forEach((result, index) => {
@@ -248,26 +299,19 @@ export function ConstructVaultPendingNotification() {
           receivedAt,
         });
       });
-      if (listed !== null) {
-        // Only what the Companion lists now: an approval answered anywhere else is gone.
-        approvals = listed.available ? listed.approvals : [];
-        recent = rememberVaultApprovals(recent, approvals, receivedAt);
-        decided = settleVaultDecided(decided, approvals);
-      }
+      const seen = rememberVaultNotesSeen(vaultNotesFirstSeen, readings.values(), receivedAt);
+      vaultNotesFirstSeen = seen.firstSeen;
       render();
-      // The Companion's pop-out waits while this window shows its approvals; it takes
-      // over once the reports stop (hidden page, closed banner, no answer).
-      if (bridge === null || listed?.available !== true) return;
-      const report = vaultDisplayedReport(document.visibilityState, shownBanner, hiddenByUser);
-      if (report !== null) void bridge.constructVaultDisplayed(report).catch(() => undefined);
+      // A new note waits for the Companion to list its request: ask it now.
+      if (seen.added && heldUntil !== null) pollCompanion();
     };
 
     // One request round at a time, and none while the page is hidden.
-    const poll = () => {
-      if (polling || document.visibilityState === "hidden") return;
-      polling = true;
-      void refresh().finally(() => {
-        polling = false;
+    const pollServers = () => {
+      if (serversPolling || ids.length === 0 || document.visibilityState === "hidden") return;
+      serversPolling = true;
+      void refreshServers().finally(() => {
+        serversPolling = false;
       });
     };
 
@@ -275,14 +319,17 @@ export function ConstructVaultPendingNotification() {
       if (document.visibilityState !== "visible") return;
       // Coming back to the page shows the approvals anew: Approve arms again.
       shownSince.clear();
-      poll();
+      pollServers();
+      pollCompanion();
     };
-    poll();
-    const timer = setInterval(poll, POLL_INTERVAL_MS);
+    pollServers();
+    pollCompanion();
+    const timer = setInterval(pollServers, VAULT_POLL_INTERVAL_MS);
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
       clearInterval(timer);
+      if (companionTimer !== null) clearTimeout(companionTimer);
       if (renderTimer !== null) clearTimeout(renderTimer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       closeBanner();
