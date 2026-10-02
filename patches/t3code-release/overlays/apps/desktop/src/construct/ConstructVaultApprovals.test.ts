@@ -1,5 +1,6 @@
-// @effect-diagnostics nodeBuiltinImport:off globalTimers:off - a fake Companion on a
-// loopback port (with delayed answers) and fake endpoint files in a temporary directory.
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off - a fake
+// Companion on a loopback port (with delayed answers, timed against the request deadline)
+// and fake endpoint files in a temporary directory.
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest";
 import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";
@@ -8,13 +9,16 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import {
+  COMPANION_DISPLAYED_TIMEOUT_MS,
   companionEndpointPath,
   type ConstructVaultCompanionOptions,
+  constructVaultDisplayedIds,
   decideConstructVaultApproval,
   listConstructVaultApprovals,
   parseCompanionApprovals,
   parseCompanionEndpoint,
   readCompanionEndpoint,
+  reportConstructVaultDisplayed,
   sanitizeCompanionApproval,
 } from "./ConstructVaultApprovals.ts";
 
@@ -56,6 +60,7 @@ interface Seen {
   readonly method: string;
   readonly url: string;
   readonly authorization: string | undefined;
+  readonly contentType: string | undefined;
   readonly body: string;
 }
 
@@ -79,6 +84,7 @@ beforeAll(async () => {
         method: request.method ?? "",
         url: request.url ?? "",
         authorization: request.headers.authorization,
+        contentType: request.headers["content-type"],
         body,
       };
       requests.push(seen);
@@ -429,5 +435,94 @@ describe("decideConstructVaultApproval", () => {
       ),
       { ok: false, reason: "error" },
     );
+  });
+});
+
+describe("constructVaultDisplayedIds", () => {
+  it("accepts up to 50 approval ids, none included", () => {
+    assert.deepEqual(constructVaultDisplayedIds([]), []);
+    assert.deepEqual(constructVaultDisplayedIds(["appr-1", "a.b~c_d-1"]), ["appr-1", "a.b~c_d-1"]);
+    const fifty = Array.from({ length: 50 }, (_, index) => `appr-${index}`);
+    assert.deepEqual(constructVaultDisplayedIds(fifty), fifty);
+    assert.deepEqual(constructVaultDisplayedIds(["x".repeat(128)]), ["x".repeat(128)]);
+  });
+
+  it("refuses anything else as a whole", () => {
+    for (const ids of [
+      undefined,
+      null,
+      "appr-1",
+      { ids: ["appr-1"] },
+      Array.from({ length: 51 }, (_, index) => `appr-${index}`),
+      ["appr-1", ""],
+      ["appr-1", "a b"],
+      ["../health"],
+      ["a/b"],
+      ["x".repeat(129)],
+      ["appr-1", 42],
+      [null],
+    ]) {
+      assert.isNull(constructVaultDisplayedIds(ids), JSON.stringify(ids));
+    }
+  });
+});
+
+describe("reportConstructVaultDisplayed", () => {
+  it("posts the shown ids with the bearer token, an empty list as well", async () => {
+    reply = () => ({ status: 204 });
+    requests.length = 0;
+    assert.isUndefined(await reportConstructVaultDisplayed(["appr-1", "appr-2"], options(live())));
+    assert.isUndefined(await reportConstructVaultDisplayed([], options(live())));
+    assert.deepEqual(
+      requests.map((seen) => [seen.method, seen.url, seen.authorization, seen.contentType]),
+      [
+        ["POST", "/v1/vault/approvals/displayed", `Bearer ${TOKEN}`, "application/json"],
+        ["POST", "/v1/vault/approvals/displayed", `Bearer ${TOKEN}`, "application/json"],
+      ],
+    );
+    assert.deepEqual(
+      requests.map((seen) => seen.body),
+      ['{"ids":["appr-1","appr-2"]}', '{"ids":[]}'],
+    );
+  });
+
+  it("sends nothing for invalid ids or without a running Companion", async () => {
+    reply = () => ({ status: 204 });
+    requests.length = 0;
+    await reportConstructVaultDisplayed(["a b"], options(live()));
+    await reportConstructVaultDisplayed("appr-1", options(live()));
+    await reportConstructVaultDisplayed(
+      Array.from({ length: 51 }, (_, index) => `appr-${index}`),
+      options(live()),
+    );
+    await reportConstructVaultDisplayed(["appr-1"], options(null));
+    await reportConstructVaultDisplayed(["appr-1"], options(live({ pid: 7 })));
+    await reportConstructVaultDisplayed(["appr-1"], options(live(), { platform: "linux" }));
+    assert.equal(requests.length, 0);
+  });
+
+  it("ignores refusals, failures and a hanging Companion, within its deadline", async () => {
+    assert.equal(COMPANION_DISPLAYED_TIMEOUT_MS, 2_000);
+    for (const answer of [
+      { status: 400, body: '{"code":"invalid"}' },
+      { status: 404, body: "" },
+      { status: 500, body: "boom" },
+    ]) {
+      reply = () => answer;
+      assert.isUndefined(await reportConstructVaultDisplayed(["appr-1"], options(live())));
+    }
+    // A wrong token: the fake Companion answers 401.
+    assert.isUndefined(
+      await reportConstructVaultDisplayed(["appr-1"], options(live({ token: "cd".repeat(32) }))),
+    );
+    assert.isUndefined(
+      await reportConstructVaultDisplayed(["appr-1"], options(live({ port: await unusedPort() }))),
+    );
+    reply = () => ({ status: 204, delayMs: 500 });
+    const started = Date.now();
+    assert.isUndefined(
+      await reportConstructVaultDisplayed(["appr-1"], options(live(), { displayedTimeoutMs: 50 })),
+    );
+    assert.isBelow(Date.now() - started, 400, "gives up at its deadline");
   });
 });

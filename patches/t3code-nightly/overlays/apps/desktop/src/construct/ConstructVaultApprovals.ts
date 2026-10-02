@@ -7,8 +7,9 @@
 // The Companion (Windows tray app) writes `%LOCALAPPDATA%\The-Construct\companion\
 // endpoint.json` with its loopback port and a bearer token (the contract of
 // extension/src/companion.js `parseEndpoint`). The Desktop main process lists the
-// approvals the Companion waits on and forwards the user's decision; the token stays in
-// this module: it is never logged, returned or passed to the renderer.
+// approvals the Companion waits on, forwards the user's decision and reports which
+// approvals the app shows; the token stays in this module: it is never logged, returned
+// or passed to the renderer.
 
 import type {
   ConstructVaultApproval,
@@ -24,6 +25,8 @@ export const COMPANION_IPC_API_VERSION = 1;
 export const COMPANION_LIST_TIMEOUT_MS = 2_000;
 /** A host approval is forwarded to the host service before the Companion answers. */
 export const COMPANION_DECIDE_TIMEOUT_MS = 8_000;
+/** A displayed report is renewed with every poll: a late one is worth nothing. */
+export const COMPANION_DISPLAYED_TIMEOUT_MS = 2_000;
 const MAX_ENDPOINT_BYTES = 16 * 1024;
 const MAX_RESPONSE_BYTES = 512 * 1024;
 const MAX_APPROVALS = 50;
@@ -56,6 +59,7 @@ export interface ConstructVaultCompanionOptions {
   readonly pidAlive?: (pid: number) => boolean;
   readonly listTimeoutMs?: number;
   readonly decideTimeoutMs?: number;
+  readonly displayedTimeoutMs?: number;
 }
 
 /** `<LOCALAPPDATA or TEMP>\The-Construct\companion\endpoint.json`, Windows only. */
@@ -346,6 +350,35 @@ export async function decideConstructVaultApproval(
     return { ok: false, reason: "host-failed" };
   }
   return { ok: false, reason: "error" };
+}
+
+/** The ids of a displayed report: at most 50 approval ids, or null for anything else. */
+export function constructVaultDisplayedIds(ids: unknown): ReadonlyArray<string> | null {
+  if (!Array.isArray(ids) || ids.length > MAX_APPROVALS) return null;
+  return ids.every(isConstructVaultApprovalId) ? [...ids] : null;
+}
+
+/**
+ * Tell the Companion which of its approvals the Desktop app shows inline right now (none:
+ * the app is visible and shows none), so that its own pop-out waits for them. Invalid ids
+ * send nothing; failures and the Companion's answer are ignored: once the reports stop,
+ * the Companion's marks expire and its pop-out takes over.
+ */
+export async function reportConstructVaultDisplayed(
+  ids: unknown,
+  options: ConstructVaultCompanionOptions,
+): Promise<void> {
+  const displayed = constructVaultDisplayedIds(ids);
+  if (displayed === null) return;
+  const endpoint = readCompanionEndpoint(options);
+  if (endpoint === null) return;
+  await companionRequest(
+    endpoint,
+    "POST",
+    "/v1/vault/approvals/displayed",
+    { ids: displayed },
+    options.displayedTimeoutMs ?? COMPANION_DISPLAYED_TIMEOUT_MS,
+  );
 }
 
 /** The `code` of a Companion problem answer, or null. */

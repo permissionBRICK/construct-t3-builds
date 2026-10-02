@@ -21,17 +21,22 @@ import {
   type ConstructVaultRecentApproval,
   type ConstructVaultResultLine,
   isVaultApproveArmed,
+  isVaultBannerHiddenByUser,
   rememberVaultApprovals,
   settleVaultDecided,
   vaultDecisionResultText,
   vaultDecisionSettles,
+  vaultDisplayedReport,
 } from "./constructVaultPending.logic";
 import { Button } from "./ui/button";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
 const POLL_INTERVAL_MS = 3_000;
 type VaultToastId = ReturnType<typeof toastManager.add>;
-type CompanionBridge = Pick<DesktopBridge, "constructVaultApprovals" | "constructVaultDecide">;
+type CompanionBridge = Pick<
+  DesktopBridge,
+  "constructVaultApprovals" | "constructVaultDecide" | "constructVaultDisplayed"
+>;
 /** Requests whose banner the user closed: it stays away until another request waits. */
 const hiddenVaultRequestKeys = new Set<string>();
 
@@ -41,7 +46,8 @@ function companionBridge(): CompanionBridge | null {
   if (
     bridge === undefined ||
     typeof bridge.constructVaultApprovals !== "function" ||
-    typeof bridge.constructVaultDecide !== "function"
+    typeof bridge.constructVaultDecide !== "function" ||
+    typeof bridge.constructVaultDisplayed !== "function"
   ) {
     return null;
   }
@@ -56,9 +62,11 @@ function companionBridge(): CompanionBridge | null {
  * every 3 seconds while the page is visible. In the Desktop app the Construct Companion
  * on this PC is asked as well: its approvals are listed with their dialog texts and
  * Deny / Approve buttons that answer them through the Companion, and a VM's note for
- * the same request is not shown a second time. Elsewhere the banner only links: it
- * never approves anything and never sees a secret. It goes away by itself once nothing
- * waits; closing it hides the requests it showed.
+ * the same request is not shown a second time. After each of the Companion's answers,
+ * while the page is visible and the banner is not closed, the Companion hears which of
+ * its approvals the banner shows, so that its own pop-out waits for them. Elsewhere the
+ * banner only links: it never approves anything and never sees a secret. It goes away by
+ * itself once nothing waits; closing it hides the requests it showed.
  */
 export function ConstructVaultPendingNotification() {
   const serverConfigs = useServerConfigs();
@@ -103,6 +111,9 @@ export function ConstructVaultPendingNotification() {
     let busy = false;
     let resultLine: ConstructVaultResultLine | null = null;
     const shownSince = new Map<string, number>();
+    // What the last render showed, for the report to the Companion.
+    let shownBanner: ConstructVaultBanner | null = null;
+    let hiddenByUser = false;
 
     const closeBanner = () => {
       shownSince.clear();
@@ -187,14 +198,20 @@ export function ConstructVaultPendingNotification() {
       renderTimer = null;
       if (cancelled) return;
       const now = Date.now();
+      const companion =
+        bridge === null
+          ? null
+          : { approvals, recent, decided, shownSince, busy, result: resultLine };
       const banner = buildConstructVaultBanner(
         readings.values(),
         now,
         hiddenVaultRequestKeys,
-        bridge === null
-          ? null
-          : { approvals, recent, decided, shownSince, busy, result: resultLine },
+        companion,
       );
+      shownBanner = banner;
+      hiddenByUser =
+        banner === null &&
+        isVaultBannerHiddenByUser(readings.values(), now, hiddenVaultRequestKeys, companion);
       if (banner === null) {
         closeBanner();
         return;
@@ -238,6 +255,11 @@ export function ConstructVaultPendingNotification() {
         decided = settleVaultDecided(decided, approvals);
       }
       render();
+      // The Companion's pop-out waits while this window shows its approvals; it takes
+      // over once the reports stop (hidden page, closed banner, no answer).
+      if (bridge === null || listed?.available !== true) return;
+      const report = vaultDisplayedReport(document.visibilityState, shownBanner, hiddenByUser);
+      if (report !== null) void bridge.constructVaultDisplayed(report).catch(() => undefined);
     };
 
     // One request round at a time, and none while the page is hidden.

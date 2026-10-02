@@ -167,7 +167,7 @@ try {
 
   await desktopFlow(await openPage());
   assert.deepEqual(errors, []);
-  console.log(`PASS ${channel}: Desktop inline approval through the Companion (matching, arming, optimistic decide, answered elsewhere, host and Companion failures)`);
+  console.log(`PASS ${channel}: Desktop inline approval through the Companion (matching, arming, optimistic decide, answered elsewhere, host and Companion failures, displayed reports only while visible)`);
 } finally {
   await browser.close();
 }
@@ -189,12 +189,21 @@ async function desktopFlow(page) {
       requestId: null, hostRequestId: null, op: 'request', title: 'Key vault request from agent-vm',
       message: 'The agent asks for github-token.\nReason: publish the release', action: 'Approve', deny: 'Deny',
       names: ['github-token'], createdAt: Date.now(), deadline: Date.now() + 4 * 60_000 + 30_000, ...over});
-    // The Companion: its current list, and decisions held until the test releases them.
-    window.companion = {answer: {available: true, approvals: []}, lists: 0, decisions: [], hold: false, reply: {ok: true}, release: null};
+    // The Companion: its current list, decisions (and lists) held until the test releases
+    // them, and the displayed reports with the page's visibility at the time.
+    window.companion = {answer: {available: true, approvals: []}, lists: 0, decisions: [], hold: false, reply: {ok: true}, release: null,
+      holdList: false, releaseList: null, reports: []};
     window.desktopBridge = {
-      constructVaultApprovals: async () => {
+      constructVaultApprovals: () => {
         window.companion.lists++;
-        return structuredClone(window.companion.answer);
+        const answer = structuredClone(window.companion.answer);
+        return new Promise((resolve) => {
+          window.companion.releaseList = () => resolve(answer);
+          if (!window.companion.holdList) window.companion.releaseList();
+        });
+      },
+      constructVaultDisplayed: async (ids) => {
+        window.companion.reports.push({ids: [...ids], visibility: window.visibility});
       },
       constructVaultDecide: (id, decision) => {
         window.companion.decisions.push([id, decision]);
@@ -219,6 +228,13 @@ async function desktopFlow(page) {
   const nextList = async () => {
     const lists = await page.evaluate(() => window.companion.lists);
     await page.waitForFunction((count) => window.companion.lists > count + 1, lists, {timeout: 8_000});
+  };
+  const reportCount = () => page.evaluate(() => window.companion.reports.length);
+  const lastReport = () => page.evaluate(() => window.companion.reports.at(-1)?.ids ?? null);
+  const nextReport = async () => {
+    const count = await reportCount();
+    await page.waitForFunction((count) => window.companion.reports.length > count, count, {timeout: 5_000});
+    return lastReport();
   };
 
   // A local VM's request (its note is the approval's requestId), a hosted VM's request (the
@@ -249,6 +265,8 @@ async function desktopFlow(page) {
   assert.equal(await banner.locator('a').count(), 0);
   assert.match(await banner.textContent(), /docker-hub.*The agent on other-vm · publish the release · \d+ min left/);
   assert.match(await banner.textContent(), /Approve it in the Construct Companion on your PC\./);
+  // Each answer tells the Companion which of its approvals show here, never the notes.
+  assert.deepEqual((await nextReport()).toSorted(), ['c-host', 'c-local']);
   await shot('desktop');
 
   // Approve: the item goes at once, every other button waits while the decision is sent.
@@ -268,9 +286,10 @@ async function desktopFlow(page) {
     .every((button) => !button.disabled), null, {timeout: 2_500});
   assert.equal(await toast.textContent(), 'Key vault: 2 requests waiting for your approval');
   await shot('desktop-approved');
-  // The Companion still lists it for a moment: it stays gone.
+  // The Companion still lists it for a moment: it stays gone, and is no longer reported.
   await nextList();
   assert.equal(await local.count(), 0);
+  assert.deepEqual(await lastReport(), ['c-host']);
   // Then the Companion drops it, while the VM's note lingers until its CLI hears the answer.
   await set(`window.companion.answer.approvals = window.companion.answer.approvals.filter((a) => a.id !== 'c-local')`);
   await nextList();
@@ -284,6 +303,7 @@ async function desktopFlow(page) {
   assert.equal(await items.count(), 0);
   assert.equal(await banner.locator('a').count(), 0);
   assert.equal(await toast.textContent(), 'Key vault: docker-hub waiting for your approval');
+  assert.deepEqual(await lastReport(), [], 'visible, but none of its approvals shows');
   // Their CLIs heard the answers and removed their notes.
   await set(`window.fixture.answers['env-a'] = window.fixture.answers['env-a'].filter((n) => n.id === 'unknown')`);
 
@@ -326,5 +346,43 @@ async function desktopFlow(page) {
   // Nothing waits any more: the banner goes away once the result line has been read.
   await set(`window.companion.answer.approvals = []; window.fixture.answers['env-a'] = []`);
   await banner.waitFor({state: 'detached', timeout: 10_000});
+  // The visible page keeps reporting that it shows none.
+  assert.deepEqual(await nextReport(), []);
+
+  // Hidden while the Companion's answer is on its way: that answer reports nothing, and
+  // nothing at all while hidden; visible again, it reports at once.
+  await set(`window.companion.answer.approvals = [approval('c-5', {names: ['gh-token'], title: 'Fifth request'})]`);
+  await item('Fifth request').waitFor({timeout: 5_000});
+  assert.deepEqual(await nextReport(), ['c-5']);
+  const held = await page.evaluate(() => { window.companion.holdList = true; return window.companion.lists; });
+  await page.waitForFunction((count) => window.companion.lists > count, held, {timeout: 5_000});
+  const beforeHidden = await reportCount();
+  await set(`window.visibility = 'hidden'; document.dispatchEvent(new Event('visibilitychange'))`);
+  await set('window.companion.holdList = false; window.companion.releaseList()');
+  await page.waitForTimeout(3_500);
+  assert.equal(await reportCount(), beforeHidden, 'no report while the page is hidden');
+  await set(`window.visibility = 'visible'; document.dispatchEvent(new Event('visibilitychange'))`);
+  assert.deepEqual(await nextReport(), ['c-5']);
+
+  // Closed by the user: nothing is reported while its requests wait, though the page is
+  // visible; another request brings the banner and the reports back.
+  await page.locator('[data-slot="toast-close"]').click();
+  await banner.waitFor({state: 'detached', timeout: 5_000});
+  const closed = await reportCount();
+  await nextList();
+  await nextList();
+  assert.equal(await reportCount(), closed, 'no report while the banner is closed');
+  await set(`window.companion.answer.approvals.push(approval('c-6', {names: ['pypi-token'], title: 'Sixth request'}))`);
+  await item('Sixth request').waitFor({timeout: 5_000});
+  assert.deepEqual((await nextReport()).toSorted(), ['c-5', 'c-6']);
+
+  // No answer from the Companion: nothing to report.
+  await set(`window.companion.answer = {available: false}`);
+  await items.first().waitFor({state: 'detached', timeout: 5_000});
+  const unavailable = await reportCount();
+  await nextList();
+  assert.equal(await reportCount(), unavailable, 'no report without the Companion');
+  assert.ok((await page.evaluate(() => window.companion.reports)).every((report) => report.visibility === 'visible'),
+    'every report was made while the page was visible');
   await page.close();
 }
