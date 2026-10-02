@@ -124,6 +124,15 @@ through re-indentation) and the list of `conflicts`.
   there is no link). The server only reads the CLI's notes in
   `/run/construct/vault-pending` (`CONSTRUCT_VAULT_PENDING_DIR` overrides it) and
   validates them as untrusted input; clients ask every 3 seconds while the page is visible.
+  In the Desktop app on Windows, the banner also lists the approvals the local Construct
+  Companion waits on, with the Companion's own texts and Deny and Approve buttons. Approve
+  is enabled one second after an item appears. The main process reads the Companion's
+  endpoint file (`%LOCALAPPDATA%\The-Construct\companion\endpoint.json`), calls its
+  loopback `/v1/vault/approvals` routes and keeps the bearer token to itself. A VM note
+  for the same request appears once, as the Companion item. Every poll shows only what
+  the Companion lists at that moment, so a request answered anywhere else disappears on
+  the next poll. A request decided in the banner disappears at once, and a result line
+  reports the Companion's answer. Browsers and the PWA keep the link and hint.
 - **Omniloop tab** (`construct.omniloop*` RPCs, capability `constructOmniloop`, proxy
   route `/construct/omniloop/<ticket>/*`): the omniloop dashboard of the thread's own
   VM in the right panel, served through the T3 server behind a ticket, plus a composer
