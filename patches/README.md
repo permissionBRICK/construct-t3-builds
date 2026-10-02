@@ -118,6 +118,12 @@ through re-indentation) and the list of `conflicts`.
   remain available independently of the active thread.
 - **Disk-space warning** (`construct.diskSpace` RPC, capability `constructDiskSpace`):
   a prompt when the VM disk is almost full or only the root reserve is left.
+- **Key vault banner** (`construct.vaultPending` RPC, capability `constructVaultPending`):
+  while an agent's `construct secret` call waits for the user's approval, every open
+  client shows a banner that links to the approval page (or names the Companion when
+  there is no link). The server only reads the CLI's notes in
+  `/run/construct/vault-pending` (`CONSTRUCT_VAULT_PENDING_DIR` overrides it) and
+  validates them as untrusted input; clients ask every 3 seconds while the page is visible.
 - **Omniloop tab** (`construct.omniloop*` RPCs, capability `constructOmniloop`, proxy
   route `/construct/omniloop/<ticket>/*`): the omniloop dashboard of the thread's own
   VM in the right panel, served through the T3 server behind a ticket, plus a composer
