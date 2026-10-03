@@ -146,6 +146,12 @@ through re-indentation) and the list of `conflicts`.
   route `/construct/omniloop/<ticket>/*`): the omniloop dashboard of the thread's own
   VM in the right panel, served through the T3 server behind a ticket, plus a composer
   banner and tab badge for the workflows the thread started.
+- **Codex capacity retry and OpenCode monitor.** The release inventory gets both from
+  the runtime patchers in `extension/vm/`. The nightly server builds them into its
+  source (`constructCapacityRetry.ts`, `constructOpenCodeMonitor.ts`) and marks its
+  entry bundle, so the patchers report it compatible and leave it unchanged. Nightly
+  has no Claude usage-limit park; upstream's "Auto-resume limited threads" setting
+  replaces it.
 
 ## Local build cache and Windows handoff
 

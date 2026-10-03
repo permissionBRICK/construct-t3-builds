@@ -1,7 +1,7 @@
 import type {
   ConstructOmniloopWorkflow,
   EnvironmentId,
-  OrchestrationThreadActivity,
+  OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useEffect, useMemo, useState } from "react";
@@ -34,16 +34,16 @@ export interface ConstructOmniloopThreadState {
 
 /**
  * Follows the omniloop workflows a thread started: the ids come from the
- * thread's own tool-call activities, the status from the VM's daemon (polled
+ * thread's own tool-call turn items, the status from the VM's daemon (polled
  * every 15 s while any workflow is live). Nothing runs for threads that never
  * called omniloop, or on servers without the capability.
  */
 export function useConstructOmniloopThread(options: {
   readonly threadRef: { readonly environmentId: EnvironmentId; readonly threadId: string } | null;
-  readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
+  readonly turnItems: ReadonlyArray<OrchestrationV2TurnItem> | undefined;
   readonly onOpen: (workflowId: string | null) => void;
 }): ConstructOmniloopThreadState {
-  const { threadRef, activities, onOpen } = options;
+  const { threadRef, turnItems, onOpen } = options;
   const environmentId = threadRef?.environmentId ?? null;
   const serverConfigs = useServerConfigs();
   const capable =
@@ -51,8 +51,8 @@ export function useConstructOmniloopThread(options: {
     serverConfigs.get(environmentId)?.environment.capabilities.constructOmniloop === true;
   const available = useConstructOmniloopAvailable(environmentId);
   const workflowIds = useMemo(
-    () => (capable ? extractOmniloopWorkflowIds(activities) : []),
-    [capable, activities],
+    () => (capable && turnItems !== undefined ? extractOmniloopWorkflowIds(turnItems) : []),
+    [capable, turnItems],
   );
   const idsKey = workflowIds.join(",");
   const readWorkflows = useAtomCommand(readConstructOmniloopWorkflows, {

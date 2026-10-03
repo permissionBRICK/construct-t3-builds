@@ -128,6 +128,23 @@ try {
   assert.equal(readFileSync(incompatible, "utf8"), unknownSource);
   assert.match(skipped.stderr, /leaving this T3 bundle unchanged/);
 
+  const integrated = join(temporary, "integrated.mjs");
+  const integratedSource = "/**\n * __CONSTRUCT_T3_OPENCODE_MONITOR source__\n */\nexport const untouched = true;\n";
+  writeFileSync(integrated, integratedSource);
+  const integratedStatus = run("status", integrated);
+  assert.equal(integratedStatus.status, 0, integratedStatus.stderr);
+  assert.deepEqual(JSON.parse(integratedStatus.stdout), {
+    patched: false,
+    compatible: true,
+    version: null,
+    bundle: integrated,
+    integrated: true,
+  });
+  const integratedApply = run("apply", integrated);
+  assert.equal(integratedApply.status, 0, integratedApply.stderr);
+  assert.match(integratedApply.stdout, /from source; nothing to patch/);
+  assert.equal(readFileSync(integrated, "utf8"), integratedSource);
+
   console.log("T3/OpenCode monitoring patch tests passed");
 } finally {
   rmSync(temporary, { recursive: true, force: true });

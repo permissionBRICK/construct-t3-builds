@@ -29,6 +29,9 @@
 // revert  restores the pristine bundle from the .t3park-orig backup.
 // status  prints JSON: { patched, version, bundle }.
 //
+// A server whose inventory builds these features into its source (the nightly
+// inventory) carries SOURCE_MARKER in its entry bundle: compatible, nothing to patch.
+//
 // Exit codes: 0 ok/no-op, 1 hard error, 2 anchors not found (bundle changed).
 
 import { readFileSync, writeFileSync, copyFileSync, existsSync, renameSync, chmodSync, statSync } from "node:fs";
@@ -38,6 +41,7 @@ const VERSION = "v7";
 const MARKER = "/*__T3PARK " + VERSION + "*/";
 const MARKER_RE = /\/\*__T3PARK (v\d+)\*\//;
 const TOKEN_FILE = "/etc/construct/t3park-token";
+const SOURCE_MARKER = "__T3PARK source__";
 
 const args = process.argv.slice(2);
 const mode = args[0];
@@ -526,14 +530,19 @@ if (!existsSync(bundle)) fail("bundle not found: " + bundle + (mode === "revert"
 let src = readFileSync(bundle, "utf8");
 const version = currentVersion(src);
 const launcher = version === null && countOccurrences(src, ANCHOR_LAUNCHER) === 1;
+const integrated = version === null && src.includes(SOURCE_MARKER);
 
 if (mode === "status") {
-  const compatible = version === VERSION || (
+  const compatible = version === VERSION || integrated || (
     version === null &&
     countOccurrences(src, ANCHOR_RATELIMIT) === 1 &&
     countOccurrences(src, ANCHOR_RESULT) === 1
   );
   const status = { patched: version !== null, compatible, version, bundle, backup: existsSync(backup) };
+  if (integrated) {
+    status.integrated = true;
+    status.detail = "this server builds the feature in from source; there is nothing to patch";
+  }
   if (launcher) {
     status.launcher = true;
     status.detail = "this is the t3 npm package launcher; it spawns the platform executable and carries no server code — the patch target is the source-built apps/server/dist/bin.mjs";
@@ -557,6 +566,7 @@ if (mode === "revert") {
 
 // mode === "apply"
 if (version === VERSION) { console.log("t3park: already patched (" + VERSION + ")"); ensureToken(); process.exit(0); }
+if (integrated) { console.log("t3park: " + bundle + " builds the feature in from source; nothing to patch"); process.exit(0); }
 let srcIsStockBundle = true; // src is the on-disk bundle and it is stock
 if (version !== null) {
   // Older patch version: take the pristine source from the backup instead —

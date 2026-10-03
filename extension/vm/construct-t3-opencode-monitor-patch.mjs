@@ -20,6 +20,8 @@
 //
 // A changed upstream bundle is deliberately a successful no-op: installing or
 // updating T3 must still succeed, with only the monitoring pill degraded.
+// A server whose inventory builds the monitor into its source (the nightly
+// inventory) carries SOURCE_MARKER in its entry bundle: compatible, nothing to patch.
 
 import {
   chmodSync,
@@ -34,6 +36,7 @@ import { execFileSync } from "node:child_process";
 
 const VERSION = "v1";
 const MARKER = "/*__CONSTRUCT_T3_OPENCODE_MONITOR " + VERSION + "*/";
+const SOURCE_MARKER = "__CONSTRUCT_T3_OPENCODE_MONITOR source__";
 
 const args = process.argv.slice(2);
 const mode = args[0];
@@ -121,9 +124,16 @@ function countOccurrences(haystack, needle) {
 const source = readFileSync(bundle, "utf8");
 const patched = source.includes(MARKER);
 const anchorCount = countOccurrences(source, ANCHOR);
+const integrated = !patched && source.includes(SOURCE_MARKER);
 
 if (mode === "status") {
-  console.log(JSON.stringify({ patched, compatible: patched || anchorCount === 1, version: patched ? VERSION : null, bundle }));
+  console.log(JSON.stringify({
+    patched,
+    compatible: patched || integrated || anchorCount === 1,
+    version: patched ? VERSION : null,
+    bundle,
+    ...(integrated ? { integrated: true } : {}),
+  }));
   process.exit(0);
 }
 
@@ -167,6 +177,11 @@ if (mode === "revert") {
 
 if (patched) {
   console.log("t3-opencode-monitor: already patched (" + VERSION + ")");
+  process.exit(0);
+}
+
+if (integrated) {
+  console.log("t3-opencode-monitor: " + bundle + " builds the monitor in from source; nothing to patch");
   process.exit(0);
 }
 
