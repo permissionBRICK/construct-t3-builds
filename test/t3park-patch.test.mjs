@@ -97,6 +97,23 @@ ok("guard: names the npm launcher instead of an anchor conflict", () => {
   assert.equal(readFileSync(bundle, "utf8"), launcher);
   assert.equal(existsSync(bundle + ".t3park-orig"), false);
 });
+const integratedEntry = `#!/usr/bin/env node
+/**
+ * __T3PARK source__
+ */
+const { runCli } = await import("./binCli.mjs");
+runCli();
+`;
+ok("integrated: a server built with the feature in source needs no runtime patch", () => {
+  writeFileSync(bundle, integratedEntry);
+  const status = JSON.parse(runPatcher("status"));
+  assert.equal(status.compatible, true);
+  assert.equal(status.patched, false);
+  assert.equal(status.integrated, true);
+  assert.match(runPatcher("apply"), /from source; nothing to patch/);
+  assert.equal(readFileSync(bundle, "utf8"), integratedEntry);
+  assert.equal(existsSync(bundle + ".t3park-orig"), false);
+});
 writeFileSync(bundle, original);
 
 const dispatches = [];

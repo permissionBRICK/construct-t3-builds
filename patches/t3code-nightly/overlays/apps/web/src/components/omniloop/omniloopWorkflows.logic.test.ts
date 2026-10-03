@@ -1,26 +1,27 @@
-import type { ConstructOmniloopWorkflow, OrchestrationThreadActivity } from "@t3tools/contracts";
+import type { ConstructOmniloopWorkflow, OrchestrationV2TurnItem } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   describeOmniloopWorkflows,
   extractOmniloopWorkflowIds,
-  isOmniloopToolActivity,
+  isOmniloopToolItem,
 } from "./omniloopWorkflows.logic";
 
-const activity = (
+const toolItem = (
   id: string,
-  payload: unknown,
-  summary = "tool",
-): OrchestrationThreadActivity =>
+  toolName: string,
+  input: unknown,
+  output?: unknown,
+): OrchestrationV2TurnItem =>
   ({
     id,
-    tone: "tool",
-    kind: "tool.completed",
-    summary,
-    payload,
-    turnId: null,
-    createdAt: "2026-09-04T10:00:00.000Z",
-  }) as unknown as OrchestrationThreadActivity;
+    type: "dynamic_tool",
+    toolName,
+    title: null,
+    status: "completed",
+    input,
+    ...(output === undefined ? {} : { output }),
+  }) as unknown as OrchestrationV2TurnItem;
 
 const workflow = (
   id: string,
@@ -31,35 +32,26 @@ const workflow = (
 describe("extractOmniloopWorkflowIds", () => {
   it("finds ids in omniloop submit results and later status calls, oldest first", () => {
     const ids = extractOmniloopWorkflowIds([
-      activity("1", {
-        itemType: "mcp_tool_call",
-        data: {
-          toolName: "mcp__omniloop__submit",
-          result: { content: '{"status":"started","workflow_id":"wf_V1StGXR8Z5jd"}' },
-        },
-      }),
-      activity("2", {
-        itemType: "mcp_tool_call",
-        data: { item: { tool: "status", server: "omniloop", arguments: { workflow_id: "wf_Abc123xyz789" } } },
-      }),
-      activity("3", {
-        itemType: "mcp_tool_call",
-        data: { toolName: "mcp__omniloop__await", input: { workflow_id: "wf_V1StGXR8Z5jd" } },
-      }),
+      toolItem("1", "mcp__omniloop__submit", { script: "x" }, [
+        { type: "text", text: '{"status":"started","workflow_id":"wf_V1StGXR8Z5jd"}' },
+      ]),
+      toolItem("2", "omniloop.status", { workflow_id: "wf_Abc123xyz789" }),
+      toolItem("3", "mcp__omniloop__await", { workflow_id: "wf_V1StGXR8Z5jd" }),
     ]);
     expect(ids).toEqual(["wf_V1StGXR8Z5jd", "wf_Abc123xyz789"]);
   });
 
   it("ignores other tools even when they mention workflow-looking ids", () => {
-    const activities = [
-      activity("1", {
-        itemType: "mcp_tool_call",
-        data: { toolName: "mcp__t3-code__preview_open", result: { content: "wf_NotOmniloop1" } },
-      }),
-      activity("2", { itemType: "command_execution", data: { command: "echo wf_NotOmniloop2" } }),
+    const items = [
+      toolItem("1", "mcp__t3-code__preview_open", {}, "wf_NotOmniloop1"),
+      {
+        id: "2",
+        type: "command_execution",
+        input: "echo wf_NotOmniloop2",
+      } as unknown as OrchestrationV2TurnItem,
     ];
-    expect(activities.map(isOmniloopToolActivity)).toEqual([false, false]);
-    expect(extractOmniloopWorkflowIds(activities)).toEqual([]);
+    expect(items.map(isOmniloopToolItem)).toEqual([false, false]);
+    expect(extractOmniloopWorkflowIds(items)).toEqual([]);
   });
 });
 
@@ -87,6 +79,9 @@ describe("describeOmniloopWorkflows", () => {
       workflow("wf_a", "running"),
       workflow("wf_b", "pending"),
     ]);
-    expect(notice).toEqual({ title: "2 omniloop workflows 1 running, 1 waiting", workflowId: "wf_b" });
+    expect(notice).toEqual({
+      title: "2 omniloop workflows 1 running, 1 waiting",
+      workflowId: "wf_b",
+    });
   });
 });

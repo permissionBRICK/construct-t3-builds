@@ -37,7 +37,8 @@ try {
     const bundledServer = join(runtime, 'apps/server/dist/bin.mjs');
     const original = readFileSync(join(source, 'apps/server/dist/bin.mjs'));
     assert.deepEqual(readFileSync(bundledServer), original);
-    assert.match(original.toString(), /\/\*__T3PARK v7\*\//);
+    // The release server carries the runtime patch; the nightly server builds it in from source.
+    assert.match(original.toString(), /\/\*__T3PARK v7\*\/|__T3PARK source__/);
     assert.match(original.toString(), /__CONSTRUCT_T3_OPENCODE_MONITOR/);
     assert.deepEqual(readFileSync(join(runtime, 'node')), readFileSync(process.execPath));
     assert.match(run(join(runtime, 't3'), ['--version']), /t3 v/);
