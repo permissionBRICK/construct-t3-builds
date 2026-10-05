@@ -146,6 +146,18 @@ through re-indentation) and the list of `conflicts`.
   route `/construct/omniloop/<ticket>/*`): the omniloop dashboard of the thread's own
   VM in the right panel, served through the T3 server behind a ticket, plus a composer
   banner and tab badge for the workflows the thread started.
+- **Session renewal** (`POST /construct/session/renew`): a paired client in use during the
+  last 7 days of its 30-day session gets 30 days from now, on the same session. A session
+  nobody uses in that week expires as before. The server re-signs upstream's own token
+  claims with the new `exp` and updates the session row. It checks the new token with
+  upstream's verifier first, so if upstream changes its token format, the server does not
+  renew. The response's `Set-Cookie` renews a browser's cookie session, and the web app
+  asks when it loads. Saved bearer connections (the Desktop app, or a browser paired with
+  another server) ask when they connect and store the renewed token. Every six hours the
+  web app checks both again, so a connection that stays up into its last week also renews
+  and reconnects once with the new token. A server without the route answers 404 and the
+  client keeps its token. The patch leaves T3 Connect's proof-bound tokens alone because
+  they refresh on their own.
 - **Codex capacity retry and OpenCode monitor.** The release inventory gets both from
   the runtime patchers in `extension/vm/`. The nightly server builds them into its
   source (`constructCapacityRetry.ts`, `constructOpenCodeMonitor.ts`) and marks its

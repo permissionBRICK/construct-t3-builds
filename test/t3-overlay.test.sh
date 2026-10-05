@@ -151,6 +151,7 @@ run_in "typecheck (transformed runtime)" desktop "${work}/node_modules/.bin/tsc"
 run_in "typecheck (transformed runtime)" web "${work}/node_modules/.bin/tsc" --noEmit
 run_in "overlay vitest" desktop "${work}/node_modules/.bin/vitest" run src/updates/ConstructUpdates.test.ts
 run_in "overlay vitest" web "${work}/node_modules/.bin/vitest" run \
-  src/components/constructInstances.logic.test.ts src/components/constructUpdate.logic.test.ts
+  src/components/constructInstances.logic.test.ts src/components/constructUpdate.logic.test.ts \
+  src/state/constructSessionRenewal.logic.test.ts
 
 finish
