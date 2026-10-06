@@ -58,7 +58,15 @@
     "packages/contracts/src/voiceInput.test.ts",
     "packages/contracts/src/voiceInput.ts",
     "apps/web/src/voice/voiceSessionRecovery.ts",
-    "apps/web/src/voice/voiceSessionRecovery.test.ts"
+    "apps/web/src/voice/voiceSessionRecovery.test.ts",
+    "apps/server/src/constructSessionRenewal.ts",
+    "apps/server/src/constructSessionRenewal.test.ts",
+    "packages/client-runtime/src/connection/constructSessionRenewal.ts",
+    "apps/web/src/state/constructSessionRenewal.ts",
+    "apps/web/src/components/ConstructSessionRenewal.tsx",
+    "packages/client-runtime/src/connection/constructSessionRenewal.test.ts",
+    "apps/web/src/state/constructSessionRenewal.logic.ts",
+    "apps/web/src/state/constructSessionRenewal.logic.test.ts"
   ],
   "transforms": [
     {
@@ -172,6 +180,17 @@
       "scope": "export const makeRoutesLayer",
       "after": "otlpTracesProxyRouteLayer,",
       "insert": "    constructOmniloopProxyRouteLayer,\n"
+    },
+    {
+      "path": "apps/server/src/server.ts",
+      "after": "import * as McpHttpServer from \"./mcp/McpHttpServer.ts\";",
+      "insert": "import { constructSessionRenewalRouteLayer } from \"./constructSessionRenewal.ts\";\n"
+    },
+    {
+      "path": "apps/server/src/server.ts",
+      "scope": "export const makeRoutesLayer",
+      "after": "otlpTracesProxyRouteLayer,",
+      "insert": "    constructSessionRenewalRouteLayer,\n"
     },
     {
       "path": "packages/shared/src/devProxy.ts",
@@ -1116,6 +1135,37 @@
       "path": "packages/contracts/src/ipc.ts",
       "after": "downloadUpdate: () => Promise<DesktopUpdateActionResult>;",
       "insert": "  /** Construct builds: the ids of the Companion approvals the key vault banner shows\n   *  inline (none: the window is visible and shows none), so that the Companion's own\n   *  pop-out waits for them. Failures are ignored. */\n  constructVaultDisplayed: (ids: ReadonlyArray<string>) => Promise<void>;\n"
+    },
+    {
+      "path": "packages/client-runtime/src/connection/index.ts",
+      "after": "export * as CredentialStore from \"./credentialStore.ts\";",
+      "insert": "export * as ConstructSessionRenewal from \"./constructSessionRenewal.ts\";\n"
+    },
+    {
+      "path": "packages/client-runtime/src/connection/resolver.ts",
+      "after": "import * as ConnectionCredentialStore from \"./credentialStore.ts\";",
+      "insert": "import { renewBearerCredential } from \"./constructSessionRenewal.ts\";\n"
+    },
+    {
+      "path": "packages/client-runtime/src/connection/resolver.ts",
+      "scope": "const makeBearerBroker",
+      "before": "const authorized = yield* remote.authorizeBearer({",
+      "insert": "    const constructBearerToken = yield* renewBearerCredential({\n      credentials,\n      connectionId: target.connectionId,\n      httpBaseUrl: profile.httpBaseUrl,\n      token: credential.token,\n    });\n"
+    },
+    {
+      "path": "packages/client-runtime/src/connection/resolver.ts",
+      "find": "bearerToken: credential.token,",
+      "replace": "bearerToken: constructBearerToken,"
+    },
+    {
+      "path": "apps/web/src/routes/__root.tsx",
+      "after": "import { ConnectOnboardingDialog } from \"../components/cloud/ConnectOnboardingDialog\";",
+      "insert": "import { ConstructSessionRenewal } from \"../components/ConstructSessionRenewal\";\n"
+    },
+    {
+      "path": "apps/web/src/routes/__root.tsx",
+      "after": "{primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}",
+      "insert": "        <ConstructSessionRenewal />\n"
     }
   ]
 }

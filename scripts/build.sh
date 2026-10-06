@@ -24,8 +24,9 @@ source_dir="$(dirname "$(dirname "$(dirname "$(dirname "$(readlink -f "$work/t3"
 # suites against the selected upstream (owner, 2026-09-12). Browser-driven checks
 # (test/*.browser.test.mjs) are manual, per README: they need Chromium and a fresh
 # upstream can break their harness independently of the patch.
-(cd "$source_dir/apps/web" && "$source_dir/node_modules/.bin/vp" test run --project unit src/voice)
-(cd "$source_dir/apps/server" && "$source_dir/node_modules/.bin/vp" test run src/voiceInput.test.ts src/environment/ServerEnvironment.test.ts)
+(cd "$source_dir/apps/web" && "$source_dir/node_modules/.bin/vp" test run --project unit src/voice src/state/constructSessionRenewal.logic.test.ts)
+(cd "$source_dir/apps/server" && "$source_dir/node_modules/.bin/vp" test run src/voiceInput.test.ts src/environment/ServerEnvironment.test.ts src/constructSessionRenewal.test.ts)
+(cd "$source_dir/packages/client-runtime" && "$source_dir/node_modules/.bin/vp" test run src/connection/constructSessionRenewal.test.ts)
 node "$publisher/scripts/package-linux.mjs" "$source_dir" "$work/linux-runtime" "$(command -v node)"
 # The distributed runtime uses the exact Node executable that built its native modules.
 curl -fsSL "https://raw.githubusercontent.com/nodejs/node/v${expected_node}/LICENSE" -o "$work/linux-runtime/NODE-LICENSE"
