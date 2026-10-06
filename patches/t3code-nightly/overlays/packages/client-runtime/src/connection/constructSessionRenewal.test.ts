@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Base64Url from "effect/encoding/Base64Url";
 import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -17,7 +17,7 @@ const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.UTC(2026, 9, 5);
 
 function tokenExpiringAt(exp: number): string {
-  return `${Encoding.encodeBase64Url(JSON.stringify({ v: 1, kind: "session", sid: "s1", exp }))}.sig`;
+  return `${Base64Url.encode(JSON.stringify({ v: 1, kind: "session", sid: "s1", exp }))}.sig`;
 }
 
 function memoryStore(options?: { readonly failPut?: boolean }) {
@@ -63,7 +63,7 @@ describe("sessionRenewalDue", () => {
   it("asks the server when the expiry cannot be read", () => {
     expect(sessionTokenExpiry("opaque-token")).toBeNull();
     expect(sessionRenewalDue("opaque-token", NOW)).toBe(true);
-    expect(sessionRenewalDue(`${Encoding.encodeBase64Url("{}")}.sig`, NOW)).toBe(true);
+    expect(sessionRenewalDue(`${Base64Url.encode("{}")}.sig`, NOW)).toBe(true);
   });
 });
 
