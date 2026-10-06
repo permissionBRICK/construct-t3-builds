@@ -6,7 +6,7 @@ import { join } from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { HttpRouter } from "effect/unstable/http";
+import { HttpRouter } from "effect/http";
 import * as ServerConfig from "./config.ts";
 import { staticAndDevRouteLayer } from "./http.ts";
 

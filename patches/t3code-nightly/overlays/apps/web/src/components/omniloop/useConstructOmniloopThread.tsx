@@ -3,7 +3,7 @@ import type {
   EnvironmentId,
   OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useEffect, useMemo, useState } from "react";
 
 import { cn } from "../../lib/utils";

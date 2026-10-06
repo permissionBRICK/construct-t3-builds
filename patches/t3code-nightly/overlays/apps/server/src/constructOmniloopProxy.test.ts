@@ -3,7 +3,7 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { FetchHttpClient, HttpBody, HttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
+import { FetchHttpClient, HttpBody, HttpClient, HttpRouter, HttpServer } from "effect/http";
 import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";
 import * as NodeOS from "node:os";
@@ -82,7 +82,7 @@ describe("constructOmniloopProxyRouteLayer", () => {
         // The route (like the real server) forwards with the fetch-based client, so the
         // test also addresses the router by its real port instead of the test-bound client.
         const address = (yield* HttpServer.HttpServer).address;
-        const origin = address._tag === "TcpAddress" ? `http://127.0.0.1:${address.port}` : "";
+        const origin = address._tag === "UnixPathAddress" ? "" : `http://127.0.0.1:${address.port}`;
         const httpClient = yield* HttpClient.HttpClient;
         const { ticket } = omniloopTicketStore.mint();
         const base = `${origin}${CONSTRUCT_OMNILOOP_PROXY_PREFIX}/${ticket}`;
