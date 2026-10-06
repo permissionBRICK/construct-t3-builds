@@ -10,7 +10,7 @@ import {
 } from "@t3tools/client-runtime/connection";
 import { EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Base64Url from "effect/encoding/Base64Url";
 import * as Option from "effect/Option";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -22,7 +22,7 @@ const PRIMARY = EnvironmentId.make("primary");
 const VM = EnvironmentId.make("haus-vm");
 
 function tokenExpiringAt(exp: number): string {
-  return `${Encoding.encodeBase64Url(JSON.stringify({ sid: "s1", exp }))}.sig`;
+  return `${Base64Url.encode(JSON.stringify({ sid: "s1", exp }))}.sig`;
 }
 
 function setup(input: {
