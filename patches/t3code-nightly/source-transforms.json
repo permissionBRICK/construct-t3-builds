@@ -188,8 +188,7 @@
     },
     {
       "path": "apps/server/src/server.ts",
-      "scope": "const makeRoutesLayer",
-      "after": "otlpTracesProxyRouteLayer,",
+      "after": "ServerHttp.layerOtlpTracesProxyRoute,",
       "insert": "    constructOmniloopProxyRouteLayer,\n"
     },
     {
@@ -199,8 +198,7 @@
     },
     {
       "path": "apps/server/src/server.ts",
-      "scope": "const makeRoutesLayer",
-      "after": "otlpTracesProxyRouteLayer,",
+      "after": "ServerHttp.layerOtlpTracesProxyRoute,",
       "insert": "    constructSessionRenewalRouteLayer,\n"
     },
     {
@@ -927,8 +925,8 @@
     },
     {
       "path": "apps/server/src/orchestration-v2/runtimeLayer.ts",
-      "before": "providerContinuationWorkerProvided,",
-      "insert": "  constructCapacityRetryWorkerLive.pipe(\n    Layer.provide(Layer.mergeAll(threadManagementProvided, eventSinkProvided)),\n  ),\n"
+      "before": "layerProviderContinuationWorkerProvided,",
+      "insert": "  constructCapacityRetryWorkerLive.pipe(\n    Layer.provide(Layer.mergeAll(layerThreadManagementProvided, layerEventSinkProvided)),\n  ),\n"
     },
     {
       "path": "apps/server/src/orchestration-v2/Adapters/OpenCodeAdapterV2.ts",
