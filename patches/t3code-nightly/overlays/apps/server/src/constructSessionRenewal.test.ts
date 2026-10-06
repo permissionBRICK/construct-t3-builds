@@ -12,11 +12,11 @@ import * as SessionStore from "./auth/SessionStore.ts";
 import * as ServerConfig from "./config.ts";
 import { renewSessionToken } from "./constructSessionRenewal.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
-import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "./persistence/Sqlite.ts";
 
 const testLayer = SessionStore.layer.pipe(
   Layer.provideMerge(ServerSecretStore.layer),
-  Layer.provideMerge(SqlitePersistenceMemory),
+  Layer.provideMerge(SqlitePersistence.layerMemory),
   Layer.provide(
     Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
       getEnvironmentId: Effect.succeed(EnvironmentId.make("renewal-test")),

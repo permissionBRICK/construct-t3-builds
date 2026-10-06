@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { HttpRouter } from "effect/http";
 import * as ServerConfig from "./config.ts";
-import { staticAndDevRouteLayer } from "./http.ts";
+import { layerStaticAndDevRoute } from "./http.ts";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -25,7 +25,7 @@ it("serves VM-specific installation names without altering static metadata or ap
     Effect.map(ServerConfig.ServerConfig, (value) => ({ ...value, staticDir: directory })),
   ).pipe(Layer.provide(ServerConfig.layerTest(directory, directory)));
   const app = HttpRouter.toWebHandler(
-    staticAndDevRouteLayer.pipe(Layer.provideMerge(config), Layer.provideMerge(NodeServices.layer)),
+    layerStaticAndDevRoute.pipe(Layer.provideMerge(config), Layer.provideMerge(NodeServices.layer)),
     { disableLogger: true },
   );
   try {
