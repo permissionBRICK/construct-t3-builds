@@ -6,7 +6,7 @@ import {
   HttpRouter,
   HttpServerRequest,
   HttpServerResponse,
-} from "effect/unstable/http";
+} from "effect/http";
 
 import {
   CONSTRUCT_OMNILOOP_PROXY_PREFIX,

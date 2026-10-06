@@ -444,7 +444,7 @@
     {
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
       "after": "import { useAtomCommand } from \"../../state/use-atom-command\";",
-      "insert": "import { AsyncResult } from \"effect/unstable/reactivity\";\n"
+      "insert": "import { AsyncResult } from \"effect/reactivity\";\n"
     },
     {
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
@@ -971,7 +971,7 @@
     },
     {
       "path": "apps/server/src/http.ts",
-      "before": "import * as Mime from \"effect/unstable/http/Mime\";",
+      "before": "import * as Mime from \"effect/http/Mime\";",
       "insert": "import { hostname as constructPwaHostname } from \"node:os\";\n"
     },
     {

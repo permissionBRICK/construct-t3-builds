@@ -18,12 +18,15 @@ const {build} = toolRequire('esbuild');
 const {chromium} = toolRequire('playwright');
 const web = path.join(source, 'apps/web/src');
 const overlay = path.join(root, `patches/t3code-${channel}/overlays/apps/web/src`);
+const component = path.join(overlay, 'components/ConstructVaultPendingNotification.tsx');
+// The fixture's results come from the same AsyncResult module the component imports.
+const asyncResultModule = fs.readFileSync(component, 'utf8').match(/^import \{ AsyncResult \} from ("[^"]+");$/m)[1];
 // Keyed by the end of the import path, so `~/x` and `../x` hit the same fixture.
 const mocks = {
   'state/entities': 'export const useServerConfigs=()=>window.fixture.configs;',
   'state/environments': 'export const useEnvironments=()=>({environments:window.fixture.environments});',
   'state/constructVaultPending': 'export const readConstructVaultPending={};',
-  'state/use-atom-command': `import {AsyncResult} from 'effect/unstable/reactivity';
+  'state/use-atom-command': `import {AsyncResult} from ${asyncResultModule};
     import * as Cause from 'effect/Cause';
     const read=async({environmentId})=>{
       window.fixture.calls.push(environmentId);
@@ -62,7 +65,7 @@ const fixtures = {name: 'fixtures', setup(b) {
 const result = await build({
   stdin: {contents: `import {createRoot} from 'react-dom/client';
     import {ToastProvider} from ${JSON.stringify(path.join(web, 'components/ui/toast.tsx'))};
-    import {ConstructVaultPendingNotification} from ${JSON.stringify(path.join(overlay, 'components/ConstructVaultPendingNotification.tsx'))};
+    import {ConstructVaultPendingNotification} from ${JSON.stringify(component)};
     window.render=()=>createRoot(document.getElementById('root')).render(<ToastProvider><ConstructVaultPendingNotification /></ToastProvider>);`,
   loader: 'tsx', resolveDir: root},
   bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic',
