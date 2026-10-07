@@ -324,22 +324,22 @@
     },
     {
       "path": "apps/server/src/auth/RpcAuthorization.ts",
-      "after": "[WS_METHODS.serverUpdateServerWithProgress]: AuthOrchestrationOperateScope,",
+      "after": "[WS_METHODS.serverUpdateServerWithProgress]:",
       "insert": "  [WS_METHODS.voiceInputStart]: AuthOrchestrationOperateScope,\n  [WS_METHODS.voiceInputStop]: AuthOrchestrationOperateScope,\n  [WS_METHODS.voiceInputAudio]: AuthOrchestrationOperateScope,\n"
     },
     {
       "path": "apps/server/src/auth/RpcAuthorization.ts",
-      "after": "[WS_METHODS.serverUpdateServerWithProgress]: AuthOrchestrationOperateScope,",
+      "after": "[WS_METHODS.serverUpdateServerWithProgress]:",
       "insert": "  [WS_METHODS.constructDiskSpace]: AuthOrchestrationReadScope,\n"
     },
     {
       "path": "apps/server/src/auth/RpcAuthorization.ts",
-      "after": "[WS_METHODS.serverUpdateServerWithProgress]: AuthOrchestrationOperateScope,",
+      "after": "[WS_METHODS.serverUpdateServerWithProgress]:",
       "insert": "  [WS_METHODS.constructVaultPending]: AuthOrchestrationReadScope,\n"
     },
     {
       "path": "apps/server/src/auth/RpcAuthorization.ts",
-      "after": "[WS_METHODS.serverUpdateServerWithProgress]: AuthOrchestrationOperateScope,",
+      "after": "[WS_METHODS.serverUpdateServerWithProgress]:",
       "insert": "  [WS_METHODS.constructOmniloopStatus]: AuthOrchestrationReadScope,\n  [WS_METHODS.constructOmniloopTicket]: AuthOrchestrationReadScope,\n  [WS_METHODS.constructOmniloopWorkflows]: AuthOrchestrationReadScope,\n"
     },
     {
@@ -388,6 +388,31 @@
       "insert": "      constructOmniloop: true,\n"
     },
     {
+      "path": "apps/server/src/observability/RpcInstrumentation.ts",
+      "after": "[WS_METHODS.serverUpdateServerWithProgress]:",
+      "insert": "  [WS_METHODS.voiceInputStart]: \"voice-input\",\n  [WS_METHODS.voiceInputStop]: \"voice-input\",\n  [WS_METHODS.voiceInputAudio]: \"voice-input\",\n"
+    },
+    {
+      "path": "apps/server/src/observability/RpcInstrumentation.ts",
+      "after": "[WS_METHODS.serverUpdateServerWithProgress]:",
+      "insert": "  [WS_METHODS.constructDiskSpace]: \"construct-disk-space\",\n"
+    },
+    {
+      "path": "apps/server/src/observability/RpcInstrumentation.ts",
+      "after": "[WS_METHODS.serverUpdateServerWithProgress]:",
+      "insert": "  [WS_METHODS.constructVaultPending]: \"construct-vault-pending\",\n"
+    },
+    {
+      "path": "apps/server/src/observability/RpcInstrumentation.ts",
+      "after": "const RPC_METHODS_WITH_TRACING_DISABLED",
+      "insert": "  // Construct: polled every 3 s by every open client.\n  WS_METHODS.constructVaultPending,\n"
+    },
+    {
+      "path": "apps/server/src/observability/RpcInstrumentation.ts",
+      "after": "[WS_METHODS.serverUpdateServerWithProgress]:",
+      "insert": "  [WS_METHODS.constructOmniloopStatus]: \"construct-omniloop\",\n  [WS_METHODS.constructOmniloopTicket]: \"construct-omniloop\",\n  [WS_METHODS.constructOmniloopWorkflows]: \"construct-omniloop\",\n"
+    },
+    {
       "path": "apps/server/src/serverRuntimeStartup.ts",
       "after": "} from \"./startupAccess.ts\";",
       "insert": "import { readPublicBaseUrl } from \"./publicBaseUrl.ts\";\n"
@@ -426,7 +451,7 @@
     {
       "path": "apps/server/src/ws.ts",
       "before": "[WS_METHODS.serverUpsertKeybinding]: (rule) =>",
-      "insert": "        [WS_METHODS.voiceInputStart]: (input) =>\n          observeRpcStream(\n            WS_METHODS.voiceInputStart,\n            startVoiceInput(input.sessionId, input.source, input.resume),\n            { \"rpc.aggregate\": \"voice-input\" },\n          ),\n        [WS_METHODS.voiceInputStop]: (input) =>\n          observeRpcEffect(WS_METHODS.voiceInputStop, stopVoiceInput(input.sessionId), {\n            \"rpc.aggregate\": \"voice-input\",\n          }),\n        [WS_METHODS.voiceInputAudio]: (input) =>\n          observeRpcEffect(\n            WS_METHODS.voiceInputAudio,\n            pushVoiceAudio(input.sessionId, input.chunk, input.sequence),\n            { \"rpc.aggregate\": \"voice-input\" },\n          ),\n"
+      "insert": "        [WS_METHODS.voiceInputStart]: (input) =>\n          startVoiceInput(input.sessionId, input.source, input.resume),\n        [WS_METHODS.voiceInputStop]: (input) => stopVoiceInput(input.sessionId),\n        [WS_METHODS.voiceInputAudio]: (input) =>\n          pushVoiceAudio(input.sessionId, input.chunk, input.sequence),\n"
     },
     {
       "path": "apps/server/src/ws.ts",
@@ -441,12 +466,12 @@
     {
       "path": "apps/server/src/ws.ts",
       "before": "[WS_METHODS.serverUpsertKeybinding]: (rule) =>",
-      "insert": "        [WS_METHODS.constructDiskSpace]: (_input) =>\n          observeRpcEffect(WS_METHODS.constructDiskSpace, readConstructDiskSpace(), {\n            \"rpc.aggregate\": \"construct-disk-space\",\n          }),\n"
+      "insert": "        [WS_METHODS.constructDiskSpace]: (_input) => readConstructDiskSpace(),\n"
     },
     {
       "path": "apps/server/src/ws.ts",
       "before": "[WS_METHODS.serverUpsertKeybinding]: (rule) =>",
-      "insert": "        // Polled every 3 s by every open client: kept out of the RPC traces.\n        [WS_METHODS.constructVaultPending]: (_input) => readConstructVaultPending(),\n"
+      "insert": "        [WS_METHODS.constructVaultPending]: (_input) => readConstructVaultPending(),\n"
     },
     {
       "path": "apps/server/src/ws.ts",
@@ -456,7 +481,7 @@
     {
       "path": "apps/server/src/ws.ts",
       "before": "[WS_METHODS.serverUpsertKeybinding]: (rule) =>",
-      "insert": "        [WS_METHODS.constructOmniloopStatus]: (_input) =>\n          observeRpcEffect(WS_METHODS.constructOmniloopStatus, readOmniloopStatus(), {\n            \"rpc.aggregate\": \"construct-omniloop\",\n          }),\n        [WS_METHODS.constructOmniloopTicket]: (_input) =>\n          observeRpcEffect(WS_METHODS.constructOmniloopTicket, issueOmniloopTicket(), {\n            \"rpc.aggregate\": \"construct-omniloop\",\n          }),\n        [WS_METHODS.constructOmniloopWorkflows]: (input) =>\n          observeRpcEffect(\n            WS_METHODS.constructOmniloopWorkflows,\n            readOmniloopWorkflows(input.workflowIds),\n            { \"rpc.aggregate\": \"construct-omniloop\" },\n          ),\n"
+      "insert": "        [WS_METHODS.constructOmniloopStatus]: (_input) => readOmniloopStatus(),\n        [WS_METHODS.constructOmniloopTicket]: (_input) => issueOmniloopTicket(),\n        [WS_METHODS.constructOmniloopWorkflows]: (input) =>\n          readOmniloopWorkflows(input.workflowIds),\n"
     },
     {
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
@@ -901,12 +926,12 @@
     {
       "path": "apps/server/src/cli/auth.ts",
       "after": "  baseUrl: baseUrlFlag,",
-      "insert": "  scopes: scopesFlag,\n"
+      "insert": "  constructScopes: scopesFlag,\n"
     },
     {
       "path": "apps/server/src/cli/auth.ts",
-      "find": "            scopes: AuthStandardClientScopes,\n            subject: \"one-time-token\",",
-      "replace": "            scopes:\n              Option.isSome(flags.scopes) && flags.scopes.value === \"administrative\"\n                ? AuthAdministrativeScopes\n                : AuthStandardClientScopes,\n            subject: \"one-time-token\","
+      "find": "            scopes: flags.scopes,\n            subject: \"one-time-token\",",
+      "replace": "            scopes:\n              Option.isSome(flags.constructScopes) && flags.constructScopes.value === \"administrative\"\n                ? AuthAdministrativeScopes\n                : flags.scopes,\n            subject: \"one-time-token\","
     },
     {
       "path": "apps/server/src/orchestration-v2/ProviderEventIngestor.ts",
@@ -998,7 +1023,7 @@
     },
     {
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
-      "before": "if (noProviderAvailable || isSendDisabled) {",
+      "before": "if (",
       "scope": "const submitComposer = useCallback(",
       "insert": "      if (voiceInsertionRef.current) {\n        event?.preventDefault();\n        voiceInsertionRef.current.submitArgs ??= [dispatchMode, submissionIntent];\n        stopVoiceRecording();\n        return;\n      }\n"
     },
