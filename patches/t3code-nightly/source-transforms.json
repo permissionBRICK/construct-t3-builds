@@ -85,19 +85,19 @@
     },
     {
       "path": "apps/web/src/components/ChatView.tsx",
-      "after": "const parkedThreadItems = parkedThreadBannerItem === null ? [] : [parkedThreadBannerItem];",
+      "after": "const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];",
       "insert": "    const omniloopItems = constructOmniloop.bannerItem === null ? [] : [constructOmniloop.bannerItem];\n"
     },
     {
       "path": "apps/web/src/components/ChatView.tsx",
       "scope": "const composerBannerItems = useMemo",
-      "after": "...parkedThreadItems,",
+      "after": "...limitRecoveryItems,",
       "insert": "        ...omniloopItems,\n",
       "every": true
     },
     {
       "path": "apps/web/src/components/ChatView.tsx",
-      "after": "parkedThreadBannerItem,",
+      "after": "limitRecoveryBanner,",
       "insert": "    constructOmniloop.bannerItem,\n"
     },
     {
