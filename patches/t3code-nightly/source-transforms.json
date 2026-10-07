@@ -203,8 +203,8 @@
     },
     {
       "path": "packages/shared/src/devProxy.ts",
-      "find": "\"/.well-known\", \"/ws\"] as const",
-      "replace": "\"/.well-known\", \"/ws\", \"/construct\"] as const"
+      "find": "\"/mcp\"] as const",
+      "replace": "\"/mcp\", \"/construct\"] as const"
     },
     {
       "path": "apps/desktop/src/electron/ElectronProtocol.test.ts",
