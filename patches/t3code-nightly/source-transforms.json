@@ -14,8 +14,8 @@
     "apps/server/src/constructOmniloop.ts",
     "apps/server/src/constructOmniloopProxy.test.ts",
     "apps/server/src/constructOmniloopProxy.ts",
-    "apps/server/src/constructOpenCodeMonitor.test.ts",
-    "apps/server/src/constructOpenCodeMonitor.ts",
+    "packages/provider-opencode/src/server/constructOpenCodeMonitor.test.ts",
+    "packages/provider-opencode/src/server/constructOpenCodeMonitor.ts",
     "apps/server/src/constructPwa.test.ts",
     "apps/server/src/constructVaultPending.logic.test.ts",
     "apps/server/src/constructVaultPending.logic.ts",
@@ -953,33 +953,33 @@
       "insert": "  constructCapacityRetryWorkerLive.pipe(\n    Layer.provide(Layer.mergeAll(layerThreadManagementProvided, layerEventSinkProvided)),\n  ),\n"
     },
     {
-      "path": "apps/server/src/orchestration-v2/Adapters/OpenCodeAdapterV2.ts",
-      "after": "import { openCodeToolTurnItem } from \"./OpenCodeToolItems.ts\";",
-      "insert": "import {\n  constructOpenCodeMonitorRoster,\n  hasConstructOpenCodeMonitor,\n  withoutConstructOpenCodeMonitors,\n} from \"../../constructOpenCodeMonitor.ts\";\n"
+      "path": "packages/provider-opencode/src/server/adapter.ts",
+      "after": "import { openCodeToolTurnItem } from \"./toolItems.ts\";",
+      "insert": "import {\n  constructOpenCodeMonitorRoster,\n  hasConstructOpenCodeMonitor,\n  withoutConstructOpenCodeMonitors,\n} from \"./constructOpenCodeMonitor.ts\";\n"
     },
     {
-      "path": "apps/server/src/orchestration-v2/Adapters/OpenCodeAdapterV2.ts",
+      "path": "packages/provider-opencode/src/server/adapter.ts",
       "before": "const itemOrdinal = (turn: ActiveOpenCodeTurn, nativeItemId: string): number => {",
       "insert": "        // Construct: the background plugin's armed watchers are monitors of the root thread.\n        const trackConstructOpenCodeMonitor = (state: OpenCodeThreadState, part: OpenCodePart) =>\n          Effect.gen(function* () {\n            let owner = state;\n            while (owner.parentSubagent !== null) owner = owner.parentSubagent.parentState;\n            const roster = constructOpenCodeMonitorRoster(\n              owner.providerThread.pendingBackgroundTasks ?? [],\n              part,\n              state.messageRoles.get(part.messageID) === \"user\",\n            );\n            if (roster !== null) yield* updateProviderThread(owner, { pendingBackgroundTasks: roster });\n          });\n\n"
     },
     {
-      "path": "apps/server/src/orchestration-v2/Adapters/OpenCodeAdapterV2.ts",
+      "path": "packages/provider-opencode/src/server/adapter.ts",
       "after": "const state = threads.get(part.sessionID);",
       "insert": "          if (state !== undefined) yield* trackConstructOpenCodeMonitor(state, part);\n"
     },
     {
-      "path": "apps/server/src/orchestration-v2/Adapters/OpenCodeAdapterV2.ts",
+      "path": "packages/provider-opencode/src/server/adapter.ts",
       "find": "hasPendingBackgroundWork: Effect.sync(() => busySessionIds.size > 0),",
       "replace": "hasPendingBackgroundWork: Effect.sync(\n            () =>\n              busySessionIds.size > 0 ||\n              [...threads.values()].some((state) => hasConstructOpenCodeMonitor(state.providerThread)),\n          ),\n          hasPendingBackgroundWorkForThread: (providerThread) =>\n            Effect.sync(() =>\n              hasConstructOpenCodeMonitor(\n                threads.get(providerThread.nativeThreadRef?.nativeId ?? \"\")?.providerThread,\n              ),\n            ),"
     },
     {
-      "path": "apps/server/src/orchestration-v2/Adapters/OpenCodeAdapterV2.ts",
+      "path": "packages/provider-opencode/src/server/adapter.ts",
       "scope": "interruptTurn: (interruptInput) =>",
       "before": "yield* abortDescendants(sessionId);",
       "insert": "                if (state !== undefined && hasConstructOpenCodeMonitor(state.providerThread))\n                  yield* updateProviderThread(state, {\n                    pendingBackgroundTasks: withoutConstructOpenCodeMonitors(state.providerThread),\n                  });\n"
     },
     {
-      "path": "apps/server/src/orchestration-v2/Adapters/OpenCodeAdapterV2.test.ts",
+      "path": "packages/provider-opencode/src/server/adapter.test.ts",
       "before": "it.effect(\"titles OpenCode reads and searches from their input\", () =>",
       "insert": "  it.effect(\"Construct: keeps the background plugin's armed watcher as a monitor until its wake\", () =>\n    Effect.gen(function* () {\n      const nativeEvents = asyncEventStream();\n      const push = (event: unknown) => Effect.promise(() => nativeEvents.push(event));\n      const root = \"ses_monitor\";\n      let promptId = \"\";\n      const harness = yield* makeOpenCodeRuntimeHarness(\"construct-monitor\", root, {\n        event: { subscribe: async () => ({ stream: nativeEvents.stream }) },\n        session: {\n          create: async () => ({ data: { id: root, time: { created: 1, updated: 1 } } }),\n          promptAsync: async (input: { messageID: string }) => {\n            promptId = input.messageID;\n            return { data: true };\n          },\n          abort: async () => ({ data: true }),\n        },\n      });\n      const { hasPendingBackgroundWork, hasPendingBackgroundWorkForThread } = harness.runtime;\n      if (hasPendingBackgroundWork === undefined || hasPendingBackgroundWorkForThread === undefined) {\n        return yield* Effect.die(\"OpenCode runtime must expose both pending-work probes.\");\n      }\n      type Roster = OrchestrationV2ProviderThread[\"pendingBackgroundTasks\"];\n      const rosters = yield* Queue.unbounded<Roster>();\n      yield* harness.runtime.events.pipe(\n        Stream.runForEach((event) =>\n          event.type === \"provider_thread.updated\"\n            ? Queue.offer(rosters, event.providerThread.pendingBackgroundTasks).pipe(Effect.asVoid)\n            : Effect.void,\n        ),\n        Effect.forkScoped,\n      );\n      const rosterOfLength = (length: number) =>\n        Effect.gen(function* () {\n          while (true) {\n            const roster = (yield* Queue.take(rosters)) ?? [];\n            if (roster.length === length) return roster;\n          }\n        });\n      yield* harness.startTurn();\n      const status = (type: \"busy\" | \"idle\") => ({\n        type: \"session.status\",\n        properties: { sessionID: root, status: { type } },\n      });\n      yield* push({\n        type: \"message.updated\",\n        properties: {\n          sessionID: root,\n          info: { id: promptId, sessionID: root, role: \"user\", time: { created: 1 } },\n        },\n      });\n      yield* push(status(\"busy\"));\n      yield* push({\n        type: \"message.part.updated\",\n        properties: {\n          sessionID: root,\n          part: {\n            id: \"prt_background\",\n            sessionID: root,\n            messageID: \"msg_root_assistant\",\n            type: \"tool\",\n            tool: \"background\",\n            callID: \"call_background\",\n            state: {\n              status: \"completed\",\n              input: { command: \"gh run watch\" },\n              output: \"started\",\n              title: \"Watch CI\",\n              metadata: { id: \"job-7\", wait: true },\n              time: { start: 2, end: 3 },\n            },\n          },\n        },\n      });\n      assert.deepEqual(yield* rosterOfLength(1), [\n        { taskId: \"job-7\", kind: \"monitor\", description: \"Watch CI\" },\n      ]);\n      yield* push(status(\"idle\"));\n      assert.isTrue(yield* hasPendingBackgroundWork, \"an armed watcher must pin idle release\");\n      assert.isTrue(yield* hasPendingBackgroundWorkForThread(harness.providerThread));\n\n      yield* push({\n        type: \"message.updated\",\n        properties: {\n          sessionID: root,\n          info: { id: \"msg_wake\", sessionID: root, role: \"user\", time: { created: 4 } },\n        },\n      });\n      yield* push({\n        type: \"message.part.updated\",\n        properties: {\n          sessionID: root,\n          part: {\n            id: \"prt_wake\",\n            sessionID: root,\n            messageID: \"msg_wake\",\n            type: \"text\",\n            text: '<background-task id=\"job-7\" status=\"completed\">\\nCI passed',\n          },\n        },\n      });\n      assert.deepEqual(yield* rosterOfLength(0), []);\n      assert.isFalse(yield* hasPendingBackgroundWork);\n      assert.isFalse(yield* hasPendingBackgroundWorkForThread(harness.providerThread));\n    }).pipe(Effect.provide(IdAllocator.layer), Effect.scoped),\n  );\n\n",
       "optional": true
