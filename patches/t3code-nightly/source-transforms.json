@@ -531,8 +531,7 @@
     },
     {
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
-      "scope": "const applyPromptReplacement = useCallback(",
-      "after": "false,",
+      "after": "nextExpandedCursor,\nisLiteralPendingAnswer,",
       "insert": "          options?.focusEditorAfterReplace,\n"
     },
     {
@@ -935,7 +934,7 @@
     },
     {
       "path": "apps/server/src/orchestration-v2/ProviderEventIngestor.ts",
-      "after": "import { makeProviderFailureTurnItem } from \"./ProviderFailure.ts\";",
+      "after": "import { makeProviderFailureTurnItem } from \"@t3tools/provider-core/server/failure\";",
       "insert": "import { constructCapacityFailure } from \"../constructCapacityRetry.ts\";\n"
     },
     {
