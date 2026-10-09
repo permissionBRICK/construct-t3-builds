@@ -36,7 +36,7 @@ echo "=== T3 overlay + transform inventory ==="
 # their contents can differ to match each channel's current APIs. The exception is a
 # feature one channel builds into its source while the other gets it from a runtime
 # patcher in extension/vm (nightly's orchestration v2 vs the release server).
-channel_only='^\./apps/server/src/(constructCapacityRetry|constructOpenCodeMonitor)(\.test)?\.ts$'
+channel_only='^\./(apps/server/src/constructCapacityRetry|packages/provider-opencode/src/server/constructOpenCodeMonitor)(\.test)?\.ts$'
 release_files="$(cd "${repo}/patches/t3code-release/overlays" && find . -type f | grep -Ev "${channel_only}" | sort)"
 nightly_files="$(cd "${repo}/patches/t3code-nightly/overlays" && find . -type f | grep -Ev "${channel_only}" | sort)"
 ok "the release and nightly inventories carry the same overlay paths" "$([[ "${release_files}" == "${nightly_files}" ]] && echo 0 || echo 1)"
