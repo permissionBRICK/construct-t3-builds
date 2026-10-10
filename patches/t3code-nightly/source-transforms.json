@@ -939,8 +939,8 @@
     },
     {
       "path": "apps/server/src/orchestration-v2/ProviderEventIngestor.ts",
-      "find": "failure: input.event.failure,",
-      "replace": "failure: yield* constructCapacityFailure(projections, { driver: input.event.driver, threadId: input.threadId, runId: input.runId ?? null }, input.event.failure),"
+      "find": ": input.event.failure;",
+      "replace": ": yield* constructCapacityFailure(projections, { driver: input.event.driver, threadId: input.threadId, runId: input.runId ?? null }, input.event.failure);"
     },
     {
       "path": "apps/server/src/orchestration-v2/runtimeLayer.ts",
