@@ -12,8 +12,8 @@ import {
   startVoiceInput,
   stopVoiceInput,
   VOICE_PAUSE_MS,
-  VOICE_PREROLL_MS,
   VOICE_RECONNECT_GRACE_MS,
+  VOICE_TEXT_IDLE_MS,
   type VoiceAudioSourceHandlers,
 } from "./voiceInput.ts";
 
@@ -333,7 +333,7 @@ describe("voice stream rotation at pauses", () => {
     return { session, callbacks, socket, push, pushed };
   }
 
-  it("finalizes the stream after a pause and continues on a new one without losing audio", () => {
+  it("finalizes the stream after a pause and continues on a new one without losing or repeating audio", () => {
     const { session, callbacks, socket, push, pushed } = recorder();
     try {
       const count = sockets.length;
@@ -351,12 +351,11 @@ describe("voice stream rotation at pauses", () => {
       expect(audioSent(next).length).toBe(0);
       next.emit("open");
 
+      // Each chunk reaches one stream; the chunk that completed the pause opens the next.
       const before = audioSent(socket);
-      expect(Buffer.concat(pushed).subarray(0, before.length).equals(before)).toBe(true);
-      const preroll = VOICE_PREROLL_MS * 32;
       const after = audioSent(next);
-      expect(after.subarray(0, preroll).equals(before.subarray(before.length - preroll))).toBe(true);
-      expect(after.subarray(preroll).equals(Buffer.concat(pushed).subarray(before.length))).toBe(true);
+      expect(Buffer.concat([before, after]).equals(Buffer.concat(pushed))).toBe(true);
+      expect(after.subarray(0, CHUNK_MS * 32).equals(silence(99))).toBe(true);
 
       next.emit("message", JSON.stringify({ type: "TranscriptInterim", data: "second part" }));
       expect(callbacks.event).toHaveBeenLastCalledWith({
@@ -397,6 +396,29 @@ describe("voice stream rotation at pauses", () => {
     }
   });
 
+  it("keeps soft speech in one stream while the service still reports words", () => {
+    const { session, socket, push } = recorder();
+    try {
+      const count = sockets.length;
+      push(speech(0));
+      // Below the level threshold, so only the transcript shows that this is speech.
+      const soft = (id: number) => pcm(200, id);
+      for (let i = 1; i <= 30; i++) {
+        push(soft(i));
+        if (i % 5 === 0)
+          socket.emit("message", JSON.stringify({ type: "TranscriptInterim", data: `w${i}` }));
+      }
+      expect(sockets).toHaveLength(count);
+      for (let i = 1; i < VOICE_TEXT_IDLE_MS / CHUNK_MS; i++) push(soft(30 + i));
+      expect(sockets).toHaveLength(count);
+      push(soft(99));
+      expect(sockets).toHaveLength(count + 1);
+    } finally {
+      session.abort();
+      vi.useRealTimers();
+    }
+  });
+
   it("treats steady background noise as quiet", () => {
     const { session, socket, push } = recorder();
     try {
@@ -426,7 +448,7 @@ describe("voice stream rotation at pauses", () => {
       expect(callbacks.complete).not.toHaveBeenCalled();
       next.emit("open");
       expect(control(next).at(-1)).toBe("CloseStream");
-      expect(audioSent(next).length).toBe(VOICE_PREROLL_MS * 32 + CHUNK_MS * 32);
+      expect(audioSent(next).length).toBe(2 * CHUNK_MS * 32);
       next.emit("message", JSON.stringify({ type: "TranscriptText", data: "Two." }));
       next.emit("close", 1000);
       expect(callbacks.event).toHaveBeenCalledWith({ type: "transcript", text: "One. Two.", final: false });
