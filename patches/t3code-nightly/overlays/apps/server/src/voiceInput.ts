@@ -27,8 +27,8 @@ const STOP_GRACE_MS = 10_000;
 const PCM_BYTES_PER_MS = 32;
 /** Continuous quiet audio after speech that closes the stream so the service finalizes it. */
 export const VOICE_PAUSE_MS = 2_000;
-/** Already sent audio replayed at the start of the next stream. */
-export const VOICE_PREROLL_MS = 500;
+/** Audio without a transcript change before a pause may close the stream. */
+export const VOICE_TEXT_IDLE_MS = 1_000;
 const SILENCE_RMS_MIN = 0.01;
 const SILENCE_NOISE_FACTOR = 3;
 const LEVEL_INTERVAL_MS = 75;
@@ -288,8 +288,10 @@ type TranscriptStream = {
   socket: WebSocket | null;
   /** Audio waiting for the socket to open, oldest first. */
   pending: Buffer[];
-  /** Audio routed to this stream, excluding the pre-roll it was seeded with. */
+  /** Audio routed to this stream. */
   audioBytes: number;
+  /** `audioBytes` when the service last changed this stream's text. */
+  textAudioBytes: number;
   closing: boolean;
   closeSent: boolean;
   done: boolean;
@@ -298,11 +300,12 @@ type TranscriptStream = {
   interim: string;
 };
 
-function newTranscriptStream(pending: Buffer[] = []): TranscriptStream {
+function newTranscriptStream(): TranscriptStream {
   return {
     socket: null,
-    pending,
+    pending: [],
     audioBytes: 0,
+    textAudioBytes: 0,
     closing: false,
     closeSent: false,
     done: false,
@@ -339,9 +342,6 @@ export class VoiceSession {
   private audioTimer: NodeJS.Timeout | null = null;
   private maximumTimer: NodeJS.Timeout | null = null;
   private closeTimer: NodeJS.Timeout | null = null;
-  /** The most recent audio, replayed into the next stream when rotating. */
-  private preroll: Buffer[] = [];
-  private prerollBytes = 0;
   private quietBytes = 0;
   private noiseFloor = 0;
   private lastLevelAt = 0;
@@ -442,6 +442,7 @@ export class VoiceSession {
       }
       if (message.type === "TranscriptInterim" || message.type === "TranscriptText") {
         if (message.data) {
+          if (message.data !== stream.interim) stream.textAudioBytes = stream.audioBytes;
           stream.interim = message.data;
           this.callbacks?.event({ type: "transcript", text: this.fullTranscript(), final: false });
         }
@@ -536,10 +537,9 @@ export class VoiceSession {
     this.resetAudioTimer();
     const rms = audioRms(chunk);
     if (this.source.emitsLevels) this.emitAudioLevel(rms);
-    const stream = this.streams.at(-1)!;
-    this.sendAudio(stream, chunk);
-    this.rememberAudio(chunk);
-    this.trackPause(stream, chunk.length, rms);
+    // The chunk that completes a pause already belongs to the next stream.
+    this.trackPause(this.streams.at(-1)!, chunk.length, rms);
+    this.sendAudio(this.streams.at(-1)!, chunk);
   }
 
   private sendAudio(stream: TranscriptStream, chunk: Buffer): void {
@@ -549,17 +549,11 @@ export class VoiceSession {
     else stream.pending.push(chunk);
   }
 
-  private rememberAudio(chunk: Buffer): void {
-    // Client chunks are views into an RPC buffer; keep a private copy.
-    this.preroll.push(Buffer.from(chunk));
-    this.prerollBytes += chunk.length;
-    while (this.prerollBytes - this.preroll[0]!.length >= VOICE_PREROLL_MS * PCM_BYTES_PER_MS)
-      this.prerollBytes -= this.preroll.shift()!.length;
-  }
-
   /**
    * Silence is measured in audio time, not wall time, so a burst of buffered
    * client audio after a reconnect is judged by what was actually recorded.
+   * Soft speech can pass for quiet, so the service must also have stopped
+   * reporting words.
    */
   private trackPause(stream: TranscriptStream, bytes: number, rms: number): void {
     const quiet = rms < Math.max(SILENCE_RMS_MIN, this.noiseFloor * SILENCE_NOISE_FACTOR);
@@ -574,18 +568,20 @@ export class VoiceSession {
     }
     this.quietBytes += bytes;
     const hasText = stream.committed.length > 0 || stream.interim.trim() !== "";
-    if (this.quietBytes >= VOICE_PAUSE_MS * PCM_BYTES_PER_MS && hasText) this.rotate();
+    const textIdle =
+      stream.audioBytes + bytes - stream.textAudioBytes >= VOICE_TEXT_IDLE_MS * PCM_BYTES_PER_MS;
+    if (this.quietBytes >= VOICE_PAUSE_MS * PCM_BYTES_PER_MS && hasText && textIdle) this.rotate();
   }
 
   /**
    * Closes the live stream so the service finalizes it, and continues on a new
    * one. Every chunk after the cut is queued for the new stream while it
-   * connects, and the new stream starts with the last pre-roll of already sent
-   * (quiet) audio, so speech beginning right at the cut reaches it in full.
+   * connects. No audio reaches both streams: the service would transcribe it
+   * twice.
    */
   private rotate(): void {
     const previous = this.streams.at(-1)!;
-    const next = newTranscriptStream([...this.preroll]);
+    const next = newTranscriptStream();
     this.quietBytes = 0;
     this.streams.push(next);
     this.requestClose(previous);
@@ -660,7 +656,6 @@ export class VoiceSession {
       if (stream.socket && stream.socket.readyState !== WebSocket.CLOSED) stream.socket.terminate();
       stream.socket = null;
     }
-    this.preroll = [];
     for (const timer of [
       this.keepAlive,
       this.audioTimer,

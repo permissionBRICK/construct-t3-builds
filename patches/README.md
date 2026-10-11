@@ -91,10 +91,12 @@ through re-indentation) and the list of `conflicts`.
   The Claude voice service revises its transcript only when a stream closes, so
   after 2 seconds of quiet audio (measured in recorded audio; the threshold
   adapts to background noise) following transcribed speech, the session closes
-  the stream for finalization and continues on a new one. Recording continues
-  without interruption in the UI. Audio after the cut is queued for the new
-  stream while it connects, and the new stream first receives the last 500 ms
-  already sent, so speech starting at the cut is never split or dropped. The
+  the stream for finalization and continues on a new one. Soft speech can pass
+  the level check, so the stream's transcript must also have stayed unchanged
+  for the last second of audio. Recording continues without interruption in
+  the UI. The chunk that completes the pause and all later audio are queued for
+  the new stream while it connects. No audio is sent to both streams, because
+  the service would transcribe it twice and repeat the words at the join. The
   text of each stream is joined in order; a stream that does not finalize within
   3 seconds keeps its last text.
   The composer stays editable while recording and finishing transcription, so
