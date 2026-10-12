@@ -629,6 +629,7 @@
     },
     {
       "path": "apps/web/src/components/sidebar/SidebarUpdatePill.tsx",
+      "scope": "const handleAction",
       "after": "setIsActionPending(true);",
       "insert": "    // Construct-built Desktop apps: \"download\" launches the offered host script\n    // (Update-Construct.ps1 / Update-T3Code.ps1) instead of fetching an installer.\n    const constructInfo = getConstructUpdateInfo(state);\n    if (constructInfo !== null && action === \"download\") {\n      void startConstructUpdate(bridge, constructInfo).finally(() => setIsActionPending(false));\n      return;\n    }\n\n"
     },
