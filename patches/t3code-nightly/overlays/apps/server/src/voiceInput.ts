@@ -208,10 +208,19 @@ function readClaudeAccessToken(): string {
   return token;
 }
 
+function claudeTokenReplaced(rejectedToken: string): boolean {
+  try {
+    return readClaudeAccessToken() !== rejectedToken;
+  } catch {
+    // A file mid-write, or one Claude blanked after a failed refresh: keep waiting.
+    return false;
+  }
+}
+
 // Let Claude own OAuth refresh and credential persistence, including its refresh lock.
 // Several voice sessions can encounter the same expired token at once.
 let claudeAuthRefresh: Promise<void> | null = null;
-function refreshClaudeAuth(): Promise<void> {
+function refreshClaudeAuth(rejectedToken: string): Promise<void> {
   if (claudeAuthRefresh) return claudeAuthRefresh;
   claudeAuthRefresh = (async () => {
     const abort = new AbortController();
@@ -247,7 +256,12 @@ function refreshClaudeAuth(): Promise<void> {
         },
       });
       await Promise.race([
-        q.initializationResult(),
+        (async () => {
+          await q!.initializationResult();
+          // Initialization does not wait for the refresh, which Claude persists afterwards.
+          while (!abort.signal.aborted && !claudeTokenReplaced(rejectedToken))
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        })(),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
             () => reject(new Error("Claude authentication refresh timed out.")),
@@ -477,7 +491,7 @@ export class VoiceSession {
       void (async () => {
         try {
           // Another Claude session may already have replaced the rejected token.
-          if (readClaudeAccessToken() === token) await refreshClaudeAuth();
+          if (readClaudeAccessToken() === token) await refreshClaudeAuth(token);
           if (!stream.done && !this.ended) this.connect(stream, true);
         } catch {
           if (!stream.done && !this.ended)

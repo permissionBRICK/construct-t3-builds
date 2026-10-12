@@ -85,8 +85,10 @@ through re-indentation) and the list of `conflicts`.
   the existing five-minute recording limit has an explicit stop reason. Browser
   microphone interruptions and unexpected provider socket closure report errors.
   An initial voice handshake rejected with HTTP 401 initializes Claude without a
-  user message to refresh its login, then retries once with the saved token.
-  Concurrent failures share the refresh, which times out after 15 seconds.
+  user message to refresh its login. Claude saves the new token after its
+  initialization completes, so the session waits until the saved token differs
+  from the rejected one, then retries once with it. Concurrent failures share the
+  refresh, which times out after 15 seconds.
   Reconnection after transcription has begun is not attempted.
   The Claude voice service revises its transcript only when a stream closes, so
   after 2 seconds of quiet audio (measured in recorded audio; the threshold
