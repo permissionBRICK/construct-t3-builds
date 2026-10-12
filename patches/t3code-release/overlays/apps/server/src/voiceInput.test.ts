@@ -616,10 +616,36 @@ describe("voice authentication recovery", () => {
     reject(socket);
     const count = sockets.length;
     session.stop();
+    auth.token = "refreshed-token";
     done();
     await settle();
     expect(sockets).toHaveLength(count);
     session.abort();
+    auth.token = "test-token";
+  });
+  it("waits for Claude to save the refreshed token after initialization", async () => {
+    vi.useFakeTimers();
+    auth.close.mockClear();
+    const { session, callbacks, socket } = pendingSession();
+    try {
+      reject(socket);
+      const count = sockets.length;
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(sockets).toHaveLength(count);
+      expect(auth.close).not.toHaveBeenCalled();
+      auth.token = "refreshed-token";
+      await vi.advanceTimersByTimeAsync(100);
+      expect(auth.close).toHaveBeenCalledTimes(1);
+      expect(sockets).toHaveLength(count + 1);
+      expect(sockets.at(-1)!.options.headers.Authorization).toBe("Bearer refreshed-token");
+      sockets.at(-1)!.emit("open");
+      expect(callbacks.event).toHaveBeenCalledWith({ type: "listening" });
+      expect(callbacks.error).not.toHaveBeenCalled();
+    } finally {
+      session.abort();
+      auth.token = "test-token";
+      vi.useRealTimers();
+    }
   });
   it("reports refresh failures without exposing SDK error details", async () => {
     auth.initialize.mockRejectedValueOnce(new Error("sensitive provider detail"));
