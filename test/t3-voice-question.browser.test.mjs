@@ -36,7 +36,7 @@ const commandKey = upstream.slice(upstream.indexOf('  const onComposerCommandKey
 const replacement = upstream.slice(upstream.indexOf('  const applyPromptReplacement = useCallback('), upstream.indexOf('  const readComposerSnapshot = useCallback('));
 const chatView = readSource('apps/web/src/components/ChatView.tsx');
 const answerChange = chatView.slice(chatView.indexOf('  const onChangeActivePendingUserInputCustomAnswer = useCallback('), chatView.indexOf('  const onAdvanceActivePendingUserInput = useCallback('));
-assert.ok(answerChange.includes('composerRef.current?.focusAt'), 'exercise the real parent answer callback');
+assert.ok(answerChange.includes('setPendingUserInputAnswersByRequestId'), 'exercise the real parent answer callback');
 const changeGuard = inserts.find(s => s.includes('Voice owns the draft')) ?? '';
 const footerControl = manifest.transforms.find(t => t.path.endsWith('/ChatComposer.tsx') && t.before === '<ComposerFooterPrimaryActions').insert;
 const questionControl = inserts.find(s => s.includes('data-question-voice-input')) ?? '';
