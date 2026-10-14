@@ -524,29 +524,6 @@
       "insert": "            {activePendingUserInput && voiceInputControl ? (\n              <div data-question-voice-input className=\"flex items-center justify-end gap-2 px-3 pb-2 sm:px-4\">\n                {voiceInputControl}\n              </div>\n            ) : null}\n"
     },
     {
-      "path": "apps/web/src/components/chat/ChatComposer.tsx",
-      "scope": "onChangeActivePendingUserInputCustomAnswer: (",
-      "after": "cursorAdjacentToMention: boolean,",
-      "insert": "    focusEditorAfterChange?: boolean,\n"
-    },
-    {
-      "path": "apps/web/src/components/chat/ChatComposer.tsx",
-      "after": "nextExpandedCursor,\nisLiteralPendingAnswer,",
-      "insert": "          options?.focusEditorAfterReplace,\n"
-    },
-    {
-      "path": "apps/web/src/components/ChatView.tsx",
-      "scope": "const onChangeActivePendingUserInputCustomAnswer = useCallback(",
-      "after": "_cursorAdjacentToMention: boolean,",
-      "insert": "      focusEditorAfterChange = true,\n"
-    },
-    {
-      "path": "apps/web/src/components/ChatView.tsx",
-      "scope": "const onChangeActivePendingUserInputCustomAnswer = useCallback(",
-      "before": "const snapshot = composerRef.current?.readSnapshot();",
-      "insert": "      // Voice partials update the controlled value without focusing the stale editor.\n      if (!focusEditorAfterChange) return;\n"
-    },
-    {
       "path": "apps/web/src/components/desktopUpdate.logic.ts",
       "after": "import type { DesktopUpdateActionResult, DesktopUpdateState } from \"@t3tools/contracts\";",
       "insert": "import { getConstructUpdateInfo, getConstructUpdateTooltip } from \"./constructUpdate.logic\";\n\n"
