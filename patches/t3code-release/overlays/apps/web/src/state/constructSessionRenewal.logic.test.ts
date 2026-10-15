@@ -10,7 +10,7 @@ import {
 } from "@t3tools/client-runtime/connection";
 import { EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Base64Url from "effect/encoding/Base64Url";
 import * as Option from "effect/Option";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -22,10 +22,15 @@ const PRIMARY = EnvironmentId.make("primary");
 const VM = EnvironmentId.make("haus-vm");
 
 function tokenExpiringAt(exp: number): string {
-  return `${Encoding.encodeBase64Url(JSON.stringify({ sid: "s1", exp }))}.sig`;
+  return `${Base64Url.encode(JSON.stringify({ sid: "s1", exp }))}.sig`;
 }
 
-function setup(input: { readonly vmToken: string; readonly vmEnabled?: boolean }) {
+function setup(input: {
+  readonly vmToken: string;
+  readonly vmEnabled?: boolean;
+  readonly vmConnectionId?: string;
+  readonly vmAuthorization?: "t3-connect";
+}) {
   const entries = new Map<EnvironmentId, ConnectionCatalogEntry>([
     [
       PRIMARY,
@@ -46,15 +51,16 @@ function setup(input: { readonly vmToken: string; readonly vmEnabled?: boolean }
         target: new BearerConnectionTarget({
           environmentId: VM,
           label: "haus-vm",
-          connectionId: "bearer:haus-vm",
+          connectionId: input.vmConnectionId ?? "bearer:haus-vm",
         }),
         profile: Option.some(
           new BearerConnectionProfile({
-            connectionId: "bearer:haus-vm",
+            connectionId: input.vmConnectionId ?? "bearer:haus-vm",
             environmentId: VM,
             label: "haus-vm",
             httpBaseUrl: "http://haus-vm.example:5177/",
             wsBaseUrl: "ws://haus-vm.example:5177/",
+            ...(input.vmAuthorization ? { authorization: input.vmAuthorization } : {}),
           }),
         ),
         enabled: input.vmEnabled ?? true,
@@ -76,7 +82,11 @@ function setup(input: { readonly vmToken: string; readonly vmEnabled?: boolean }
     }),
   );
   const provide = <A, E>(
-    effect: Effect.Effect<A, E, EnvironmentRegistry | CredentialStore.ConnectionCredentialStore>,
+    effect: Effect.Effect<
+      A,
+      E,
+      EnvironmentRegistry.EnvironmentRegistry | CredentialStore.ConnectionCredentialStore
+    >,
   ) =>
     Effect.gen(function* () {
       const entriesRef = yield* SubscriptionRef.make<ReadonlyMap<EnvironmentId, ConnectionCatalogEntry>>(
@@ -84,14 +94,14 @@ function setup(input: { readonly vmToken: string; readonly vmEnabled?: boolean }
       );
       return yield* effect.pipe(
         Effect.provideService(
-          EnvironmentRegistry,
-          EnvironmentRegistry.of({
+          EnvironmentRegistry.EnvironmentRegistry,
+          EnvironmentRegistry.EnvironmentRegistry.of({
             entries: entriesRef,
             retryNow: (environmentId: EnvironmentId) =>
               Effect.sync(() => {
                 retried.push(environmentId);
               }),
-          } as unknown as EnvironmentRegistry["Service"]),
+          } as unknown as EnvironmentRegistry.EnvironmentRegistry["Service"]),
         ),
         Effect.provideService(
           CredentialStore.ConnectionCredentialStore,
@@ -161,5 +171,28 @@ describe("renewSessions", () => {
     );
     expect(early.fetchCalls).toHaveLength(0);
     expect(early.retried).toHaveLength(0);
+  });
+
+  it("renews the credential a learned route borrows and skips T3 Connect routes", async () => {
+    const learned = setup({
+      vmToken: tokenExpiringAt(Date.now() + 2 * DAY),
+      vmConnectionId: "learned:haus-vm:http://haus-vm.example:5177@bearer:haus-vm",
+    });
+    await Effect.runPromise(
+      learned.provide(renewSessions({ browserCookie: false, savedConnections: true })),
+    );
+    expect(learned.stored.get("bearer:haus-vm")).toEqual(
+      new BearerConnectionCredential({ token: "renewed-token" }),
+    );
+    expect(learned.retried).toEqual([VM]);
+
+    const relay = setup({
+      vmToken: tokenExpiringAt(Date.now() + 2 * DAY),
+      vmAuthorization: "t3-connect",
+    });
+    await Effect.runPromise(
+      relay.provide(renewSessions({ browserCookie: false, savedConnections: true })),
+    );
+    expect(relay.fetchCalls).toHaveLength(0);
   });
 });

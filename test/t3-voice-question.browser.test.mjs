@@ -27,21 +27,22 @@ const readSource = file => process.env.T3_TEST_BASELINE
   ? execFileSync('git', ['show', 'HEAD:'+file], {cwd:source, encoding:'utf8'})
   : fs.readFileSync(path.join(source, file), 'utf8');
 const upstream = readSource('apps/web/src/components/chat/ChatComposer.tsx');
-let submit = upstream.slice(upstream.indexOf('  const submitComposer = useCallback('), upstream.indexOf('  const submitCitationAndSend = useCallback('));
+let submit = upstream.slice(upstream.indexOf('  const submitComposer = ('), upstream.indexOf('  const submitCitationAndSend = () => {'));
 if (process.env.T3_TEST_BASELINE) {
-  const guard = manifest.transforms.find(t => t.scope === 'const submitComposer = useCallback(' && t.before === 'if (noProviderAvailable || isSendDisabled) {');
-  submit = submit.replace('      if (noProviderAvailable || isSendDisabled) {', guard.insert+'      if (noProviderAvailable || isSendDisabled) {');
+  const guard = manifest.transforms.find(t => t.scope === 'const submitComposer = (' && t.before === 'if (');
+  submit = submit.replace('    if (\n      noProviderAvailable ||', guard.insert+'    if (\n      noProviderAvailable ||');
 }
 const commandKey = upstream.slice(upstream.indexOf('  const onComposerCommandKey = ('), upstream.indexOf('  // Prompt stash ('));
-const replacement = upstream.slice(upstream.indexOf('  const applyPromptReplacement = useCallback('), upstream.indexOf('  const readComposerSnapshot = useCallback('));
+const replacement = upstream.slice(upstream.indexOf('  const applyPromptReplacement = ('), upstream.indexOf('  const readComposerSnapshot = ('));
 const chatView = readSource('apps/web/src/components/ChatView.tsx');
-const answerChange = chatView.slice(chatView.indexOf('  const onChangeActivePendingUserInputCustomAnswer = useCallback('), chatView.indexOf('  const onAdvanceActivePendingUserInput = useCallback('));
+const answerChange = chatView.slice(chatView.indexOf('  const onChangeActivePendingUserInputCustomAnswer = useMemo('), chatView.indexOf('  const onAdvanceActivePendingUserInput = () => {'));
+const answerSetter = chatView.slice(chatView.indexOf('function makePendingCustomAnswerSetter('), chatView.indexOf('\n}\n', chatView.indexOf('function makePendingCustomAnswerSetter(')) + 3);
 assert.ok(answerChange.includes('setPendingUserInputAnswersByRequestId'), 'exercise the real parent answer callback');
 const changeGuard = inserts.find(s => s.includes('Voice owns the draft')) ?? '';
 const footerControl = manifest.transforms.find(t => t.path.endsWith('/ChatComposer.tsx') && t.before === '<ComposerFooterPrimaryActions').insert;
 const questionControl = inserts.find(s => s.includes('data-question-voice-input')) ?? '';
 const entry = `
-import React, {useState, useRef, useCallback, useEffect} from ${JSON.stringify(sourceRequire.resolve('react'))};
+import React, {useState, useRef, useCallback, useEffect, useMemo} from ${JSON.stringify(sourceRequire.resolve('react'))};
 import {createRoot} from ${JSON.stringify(sourceRequire.resolve('react-dom/client'))};
 import {ComposerPromptEditor} from ${JSON.stringify(path.join(source,"apps/web/src/components/ComposerPromptEditor.tsx"))};
 import {ComposerPendingUserInputPanel} from ${JSON.stringify(path.join(source,'apps/web/src/components/chat/ComposerPendingUserInputPanel.tsx'))};
@@ -50,8 +51,12 @@ import {Tooltip, TooltipTrigger, TooltipPopup} from ${JSON.stringify(path.join(s
 import {MicIcon, SquareIcon} from 'lucide-react';
 import {cn} from ${JSON.stringify(path.join(source,'apps/web/src/lib/utils.ts'))};
 import {submitComposerDraft} from ${JSON.stringify(path.join(source,'apps/web/src/components/chat/composerSubmission.ts'))};
-import {composerSubmissionIntentForEnter} from ${JSON.stringify(path.join(source,'apps/web/src/composer-logic.ts'))};
+import {composerSubmissionIntentForKey} from ${JSON.stringify(path.join(source,'apps/web/src/composer-logic.ts'))};
+import {resolveComposerDispatchMode} from '@t3tools/client-runtime/state/composer-dispatch';
+import {DEFAULT_RESOLVED_KEYBINDINGS} from '@t3tools/shared/keybindings';
 type VoiceInsertionState${types}
+${answerSetter}
+const useStableCallback = callback => callback;
 const voiceSourceHint = 'test microphone'; const isConnecting = false;
 const environmentId = 'env'; const environmentUnavailable = null; const supportsVoiceInput = true;
 const voiceInputSource = {source:window.clientVoice ? 'client' : 'host'}; const composerDraftTarget = 'thread';
@@ -83,6 +88,7 @@ function Harness() {
  const promptRef = useRef(prompt);
  const [composerCursor,setComposerCursor] = useState(0);
  const setComposerTrigger = () => {};
+ const isLiteralPendingAnswer = false; const onTypingGuardDraftChange = () => {};
  const composerEditorRef = useRef(null);
  const readComposerSnapshot = useCallback(() => window.snapshotOverride ?? composerEditorRef.current.readSnapshot(), []);
  const activePendingRequestKey = pending?.requestId ?? 'request';
@@ -127,14 +133,15 @@ function Harness() {
  const isSendDisabled = !(activePendingProgress?.customAnswer ?? prompt).trim();
  const setComposerSubmissionError = () => {};
  const shouldBlurMobileComposerOnSubmit = () => false; const blurMobileComposerAfterSend = () => {};
- const onSend = (event,intent) => {
+ const onSend = (event,_dispatchMode,intent) => {
    event?.preventDefault();
    window.sends.push({text:pending?.customAnswer ?? prompt, snapshot:composerEditorRef.current.readSnapshot().value,
      answers:pending ? buildPendingUserInputAnswers(questions,answers) : null, intent});
  };
  ${submit}
  const planModeUiEnabled = false; const isMobileViewport = layout === 'mobile';
- const phase = 'idle'; const settings = {sendShortcut:'enter'};
+ const phase = 'idle'; const settings = {sendShortcut:'enter',followUpBehavior:'queue'}; const keybindings = DEFAULT_RESOLVED_KEYBINDINGS;
+ const readEnvironmentScope = () => true; const AuthOrchestrationOperateScope = 'orchestration:operate'; const onTypingGuardSend = () => {};
  const listContinuationForEnter = () => null; const listIndentForTab = () => null;
  const routeKind = 'draft'; const composerMenuOpenRef = useRef(false);
  const resolveActiveComposerTrigger = () => ({trigger:null});
@@ -197,6 +204,8 @@ try {
  await page.route('http://voice.test/**', route=>{
    const fileName = new URL(route.request().url()).pathname.slice(1);
    if(!fileName) return route.fulfill({contentType:'text/html',body:'<div id="root"></div>'});
+   // Upstream modules probe the server's environment descriptor; there is no server here.
+   if(fileName.startsWith('.well-known/')) return route.fulfill({status:404,body:''});
    const output = outputs.find(output=>output.fileName===fileName);
    assert.ok(output, `Unexpected browser asset request: ${fileName}`);
    return route.fulfill({contentType:fileName.endsWith('.js')?'text/javascript':'application/octet-stream',

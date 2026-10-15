@@ -162,12 +162,11 @@ through re-indentation) and the list of `conflicts`.
   and reconnects once with the new token. A server without the route answers 404 and the
   client keeps its token. The patch leaves T3 Connect's proof-bound tokens alone because
   they refresh on their own.
-- **Codex capacity retry and OpenCode monitor.** The release inventory gets both from
-  the runtime patchers in `extension/vm/`. The nightly server builds them into its
-  source (`constructCapacityRetry.ts`, `constructOpenCodeMonitor.ts`) and marks its
-  entry bundle, so the patchers report it compatible and leave it unchanged. Nightly
-  has no Claude usage-limit park; upstream's "Auto-resume limited threads" setting
-  replaces it.
+- **Codex capacity retry and OpenCode monitor.** Both channels run upstream's
+  orchestration v2 server and build them into its source (`constructCapacityRetry.ts`,
+  `constructOpenCodeMonitor.ts`). The entry bundle is marked, so the runtime patchers
+  in `extension/vm/` report it compatible and leave it unchanged. There is no Claude
+  usage-limit park; upstream's "Auto-resume limited threads" setting replaces it.
 
 ## Local build cache and Windows handoff
 

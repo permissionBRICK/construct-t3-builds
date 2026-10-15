@@ -2,6 +2,7 @@ import {
   BearerConnectionCredential,
   BearerConnectionProfile,
   ConstructSessionRenewal,
+  credentialConnectionId,
   CredentialStore,
   EnvironmentRegistry,
 } from "@t3tools/client-runtime/connection";
@@ -21,13 +22,14 @@ const isBearerCredential = Schema.is(BearerConnectionCredential);
  *   response renews. Desktop authenticates its own server with a bearer instead.
  * - `savedConnections`: saved bearer connections renew when they connect; this also
  *   covers one that stays connected into its last week. It reconnects once so the
- *   live connection uses the renewed token.
+ *   live connection uses the renewed token. A learned route renews the credential it
+ *   borrows; T3 Connect routes have short-lived tokens of their own.
  */
 export const renewSessions = Effect.fn("construct.sessionRenewal.renewSessions")(function* (input: {
   readonly browserCookie: boolean;
   readonly savedConnections: boolean;
 }) {
-  const registry = yield* EnvironmentRegistry;
+  const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
   const entries = [...(yield* SubscriptionRef.get(registry.entries)).values()];
   if (input.browserCookie) {
     for (const entry of entries) {
@@ -47,13 +49,15 @@ export const renewSessions = Effect.fn("construct.sessionRenewal.renewSessions")
     if (target._tag !== "BearerConnectionTarget" || !entry.enabled || !isBearerProfile(profile)) {
       continue;
     }
+    if (profile.authorization === "t3-connect") continue;
+    const connectionId = credentialConnectionId(target.connectionId);
     const credential = Option.getOrUndefined(
-      yield* credentials.get(target.connectionId).pipe(Effect.orElseSucceed(() => Option.none())),
+      yield* credentials.get(connectionId).pipe(Effect.orElseSucceed(() => Option.none())),
     );
     if (!isBearerCredential(credential)) continue;
     const token = yield* ConstructSessionRenewal.renewBearerCredential({
       credentials,
-      connectionId: target.connectionId,
+      connectionId,
       httpBaseUrl: profile.httpBaseUrl,
       token: credential.token,
     });

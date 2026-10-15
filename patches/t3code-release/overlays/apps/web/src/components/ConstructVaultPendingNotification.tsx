@@ -6,7 +6,7 @@ import type {
   DesktopBridge,
   EnvironmentId,
 } from "@t3tools/contracts";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { KeyRoundIcon } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 
