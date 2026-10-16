@@ -1,3 +1,6 @@
+import email.message
+import io
+import urllib.error
 import importlib.util
 from pathlib import Path
 import tempfile
@@ -81,6 +84,37 @@ class Decisions(unittest.TestCase):
             self.assertEqual(before, p.recipe_hash(root))
             (root / 'scripts/package-linux.mjs').write_text('changed native packaging')
             self.assertNotEqual(before, p.recipe_hash(root))
+
+class Registry(unittest.TestCase):
+    def response(self, body):
+        r = io.BytesIO(json.dumps(body).encode())
+        r.__enter__, r.__exit__ = lambda: r, lambda *_: None
+        return r
+
+    def error(self, code, retry_after=None):
+        headers = email.message.Message()
+        if retry_after:
+            headers['Retry-After'] = retry_after
+        return urllib.error.HTTPError('https://registry.npmjs.org/t3/latest', code, 'error', headers, None)
+
+    def test_rate_limited_or_unavailable_registry_is_retried(self):
+        replies = [self.error(429, '3'), self.error(503), self.response({'version': '0.1.0'})]
+        with patch.object(p.urllib.request, 'urlopen', side_effect=replies), \
+             patch.object(p.time, 'sleep') as sleep:
+            self.assertEqual(p.api('https://registry.npmjs.org/t3/latest'), {'version': '0.1.0'})
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [3, 20])
+
+    def test_persistent_rate_limit_and_client_errors_still_fail(self):
+        with patch.object(p.urllib.request, 'urlopen', side_effect=[self.error(429)] * p.API_ATTEMPTS), \
+             patch.object(p.time, 'sleep'), self.assertRaises(urllib.error.HTTPError):
+            p.api('https://registry.npmjs.org/t3/latest')
+        with patch.object(p.urllib.request, 'urlopen', side_effect=[self.error(401)]) as urlopen, \
+             self.assertRaises(urllib.error.HTTPError):
+            p.api('https://registry.npmjs.org/t3/latest')
+        self.assertEqual(urlopen.call_count, 1)
+        with patch.object(p.urllib.request, 'urlopen', side_effect=[self.error(404)]):
+            self.assertIsNone(p.api('https://api.github.com/repos/o/r/releases/tags/missing'))
+
 
 class Publication(unittest.TestCase):
     def test_incompatible_plan_fails_job_but_cached_release_succeeds(self):
