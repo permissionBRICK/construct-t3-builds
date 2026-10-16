@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import time
 import urllib.error
 import urllib.request
 
@@ -44,17 +45,25 @@ t3_build_integration_hash "$1/bin/t3code-build-recipe.sh" "$1/bin/apply-t3code-s
 ''', 'hash', construct, inventory)
 
 
+API_ATTEMPTS = 5
+
+
 def api(url):
     headers = {'Accept': 'application/json', 'User-Agent': 'construct-t3-builds'}
     if url.startswith('https://api.github.com/') and os.getenv('GH_TOKEN'):
         headers['Authorization'] = 'Bearer ' + os.environ['GH_TOKEN']
-    try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60) as r:
-            return json.load(r)
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return None
-        raise
+    for attempt in range(API_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            # The npm registry and GitHub rate-limit shared runners; wait instead of failing the poll.
+            if (e.code != 429 and e.code < 500) or attempt == API_ATTEMPTS - 1:
+                raise
+            retry_after = e.headers.get('Retry-After', '') if e.headers else ''
+            time.sleep(min(int(retry_after), 120) if retry_after.isdigit() else 10 * 2 ** attempt)
 
 
 def complete_release(release, channel="stable"):
