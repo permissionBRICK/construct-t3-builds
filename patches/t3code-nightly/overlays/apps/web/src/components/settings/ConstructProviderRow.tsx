@@ -11,6 +11,7 @@ import { startConstructUpdate } from "../constructUpdate";
 import { linkConstructInstance } from "../constructInstances.link";
 import {
   constructEnvironmentConnected, constructLinkedRemotes,
+  getConstructRowAction,
   getConstructRowDetail,
   planConstructProviderRows,
   planConstructSettingsButton,
@@ -222,8 +223,9 @@ function ConstructProviderSectionContent() {
 
 /**
  * One linked remote, or one UNLINKED instance. A linked row this PC's registry
- * recognises offers **Reprovision** for THAT instance (`reprovisionConstructInstance`,
- * which runs `Update-T3Code.ps1 -InstanceName <name>`); a remote that matches nothing
+ * recognises offers **Update T3 Code** when only T3 Code is behind and **Reprovision**
+ * otherwise, for THAT instance (`reprovisionConstructInstance`, which runs
+ * `Update-T3Code.ps1 -InstanceName <name>` with that mode); a remote that matches nothing
  * is read-only and says why. An instance of the registry that runs T3 but that no
  * remote matches offers **Link** — the manual counterpart of the automatic link
  * (ConstructAutoLink.tsx), which also re-adds a connection the user removed by hand.
@@ -238,6 +240,8 @@ function ConstructInstanceRow({
   const [isBusy, setIsBusy] = useState(false);
   const detail = getConstructRowDetail(row);
   const offer = row.provisionStale || row.t3UpdateAvailable;
+  const action = getConstructRowAction(row);
+  const actionLabel = action === "update-t3" ? "Update T3 Code" : "Reprovision";
   const connectPairing = useAtomCommand(connectPairingAtom, { reportFailure: false });
 
   const link = useCallback(async () => {
@@ -283,17 +287,17 @@ function ConstructInstanceRow({
     if (!bridge || row.instanceName === null || isBusy) return;
     setIsBusy(true);
     try {
-      const result = await bridge.reprovisionConstructInstance(row.instanceName);
+      const result = await bridge.reprovisionConstructInstance(row.instanceName, action);
       toastManager.add(
         result.accepted
           ? stackedThreadToast({
               type: "info",
-              title: `Reprovisioning ${row.instanceName}`,
+              title: action === "update-t3" ? `Updating T3 Code on ${row.instanceName}` : `Reprovisioning ${row.instanceName}`,
               description: "Running in a console window. The app restarts by itself if a new Desktop build is installed.",
             })
           : stackedThreadToast({
               type: "error",
-              title: `Could not reprovision ${row.instanceName}`,
+              title: `Could not start: ${actionLabel} ${row.instanceName}`,
               description:
                 result.state.message ?? "Another Construct action is running, or updates are disabled.",
             }),
@@ -302,14 +306,14 @@ function ConstructInstanceRow({
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: `Could not reprovision ${row.instanceName}`,
+          title: `Could not start: ${actionLabel} ${row.instanceName}`,
           description: error instanceof Error ? error.message : "An unexpected error occurred.",
         }),
       );
     } finally {
       setIsBusy(false);
     }
-  }, [isBusy, row.instanceName]);
+  }, [action, actionLabel, isBusy, row.instanceName]);
 
   return (
     <div className="group flex min-h-19 items-start gap-3 rounded-md px-3 py-2 transition-colors hover:bg-foreground/4">
@@ -324,7 +328,11 @@ function ConstructInstanceRow({
             {row.port === null ? "" : `:${row.port}`}
           </code>
           {offer ? (
-            <span role="img" aria-label="Reprovision available" className="inline-flex shrink-0">
+            <span
+              role="img"
+              aria-label={action === "update-t3" ? "T3 Code update available" : "Reprovision available"}
+              className="inline-flex shrink-0"
+            >
               <ArrowUpCircleIcon className="size-3.5 text-update-foreground" />
             </span>
           ) : null}
@@ -358,10 +366,10 @@ function ConstructInstanceRow({
             disabled={isBusy || !row.canReprovision || disabledReason !== null}
             title={disabledReason ?? (row.canReprovision ? undefined : row.note)}
             onClick={() => void reprovision()}
-            aria-label={`Reprovision ${row.instanceName}`}
+            aria-label={`${actionLabel} ${row.instanceName}`}
           >
             {isBusy ? <LoaderIcon className={cn("size-3", "animate-spin")} /> : null}
-            Reprovision
+            {actionLabel}
           </Button>
         )}
       </span>

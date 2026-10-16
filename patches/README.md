@@ -114,12 +114,16 @@ through re-indentation) and the list of `conflicts`.
   reattachment, final-result replay, offline Stop, and real browser AudioWorklet
   capture/flush. The publisher runs the voice unit and browser tests for each pair.
 - **Public base URL** (`T3CODE_PUBLIC_BASE_URL` for pairing URLs behind the TLS proxy).
-- **Construct updates** in the Desktop app (update Construct / reprovision the VM).
-  The reprovision popup resolves the active thread's linked remote to a Construct
-  instance, shows its name, and launches that exact instance. Its offer uses that
-  VM's provisioning marker and T3 channel. Without an unambiguous match, no VM
-  popup is offered. Switching threads replaces the offer; host Construct updates
-  remain available independently of the active thread.
+- **Construct updates** in the Desktop app: update Construct, reprovision a VM that is
+  behind the installed Construct, or update T3 Code alone (`Update-T3Code.ps1 -Mode
+  quick`) when a newer build of this repository is published for the channel. The app
+  reads the same release manifests the VM installs from and compares their
+  `desktopVersion` with its own, so a release counts once its build is published and a
+  rebuild of the same release counts too. The VM popup resolves the active thread's
+  linked remote to a Construct instance, shows its name, and launches that exact
+  instance. Its offer uses that VM's provisioning marker and T3 channel. Without an
+  unambiguous match, no VM popup is offered. Switching threads replaces the offer; host
+  Construct updates remain available independently of the active thread.
 - **Auto-link** (`ConstructAutoLink`, Windows Desktop app): every Construct VM of the PC
   that runs T3 and is not yet a remote environment is linked on its own. The main process
   runs `Get-ConstructT3PairingLink.ps1` hidden to mint a link over SSH. A marker in the

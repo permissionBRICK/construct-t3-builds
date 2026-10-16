@@ -13,6 +13,7 @@ import {
   constructSupportsInstanceName,
   constructUpdateFromManifest,
   constructManifestUrl,
+  constructT3BuildFromManifest,
   fetchConstructJson,
   DEFAULT_CONSTRUCT_VM_TARGET,
   deriveConstructUpdateInfo,
@@ -22,9 +23,10 @@ import {
   openConstructCompanion,
   isConstructManagedBuild,
   isConstructProvisionStale,
+  isNewerConstructT3Build,
   isNewerConstructT3Version,
   collectConstructInstances,
-  planConstructInstanceReprovision,
+  planConstructInstanceLaunch,
   planConstructLaunch,
   constructInstanceStatePath,
   readConstructInstanceState,
@@ -36,6 +38,7 @@ import {
   readConstructVmTargetFromRegistry,
   resolveConstructAction,
   resolveConstructT3Channel,
+  selectConstructNightlyManifestUrl,
   CONSTRUCT_PAIRING_LINK_SCRIPT,
   constructT3LinkStorePath,
   parseConstructPairingLinkOutput,
@@ -117,8 +120,30 @@ const invalidManifests = [
       [0, -1, 1.5, "100", 1073741825].map((size) => ({ [field]: size }))),
   ].map((change) => ({ ...published(), ...change })),
 ];
-const NPM_LATEST_URL = "https://registry.npmjs.org/t3/latest";
-const NPM_NIGHTLY_URL = "https://registry.npmjs.org/t3/nightly";
+const APP_VERSION = "0.0.38-construct.bb8cb346";
+const T3_STABLE_URL =
+  "https://github.com/permissionBRICK/construct-t3-builds/releases/latest/download/manifest.json";
+const T3_RELEASES_URL =
+  "https://api.github.com/repos/permissionBRICK/construct-t3-builds/releases?per_page=100&page=1";
+// A published Construct T3 build's manifest, reduced to what the app reads.
+const t3Build = (desktopVersion: string): ConstructJsonResponse => {
+  const version = desktopVersion.replace(/-construct\.[0-9a-f]+$/, "");
+  return {
+    status: 200,
+    json: { version, channel: version.includes("nightly") ? "nightly" : "stable", desktopVersion },
+  };
+};
+const nightlyRelease = (version: string, publishedAt: string, assets = 4) => ({
+  tag_name: `t3-${version}-${"e".repeat(64)}`,
+  draft: false,
+  prerelease: true,
+  published_at: publishedAt,
+  assets: ["manifest.json", "SHA256SUMS", "T3Code-Construct-Setup.exe", "t3code-server-linux-x64.tar.gz"]
+    .slice(0, assets)
+    .map((name) => ({ name })),
+});
+const nightlyManifestUrl = (version: string) =>
+  `https://github.com/permissionBRICK/construct-t3-builds/releases/download/t3-${version}-${"e".repeat(64)}/manifest.json`;
 
 // The cast keeps this fixture valid across upstream versions: `omittedReleaseCount`
 // is required on newer states and unknown on older ones.
@@ -272,8 +297,54 @@ describe("ConstructUpdates remote results", () => {
   });
 });
 
+describe("Construct T3 builds", () => {
+  it("reads a published build's Desktop version for its own channel only", () => {
+    assert.equal(constructT3BuildFromManifest(t3Build(APP_VERSION), "latest"), APP_VERSION);
+    const nightly = "0.0.39-nightly.20260902.1-construct.4567cdef";
+    assert.equal(constructT3BuildFromManifest(t3Build(nightly), "nightly"), nightly);
+    assert.isNull(constructT3BuildFromManifest(t3Build(nightly), "latest"));
+    assert.isNull(constructT3BuildFromManifest(t3Build(APP_VERSION), "nightly"));
+    for (const json of [
+      null,
+      { version: "0.0.38", channel: "stable" },
+      { version: "0.0.38", channel: "stable", desktopVersion: "0.0.39-construct.bb8cb346" },
+      { version: "0.0.38", channel: "stable", desktopVersion: "0.0.38" },
+      { version: "latest", channel: "stable", desktopVersion: "latest-construct.bb8cb346" },
+    ]) {
+      assert.isNull(constructT3BuildFromManifest({ status: 200, json }, "latest"));
+    }
+    assert.isNull(constructT3BuildFromManifest({ ...t3Build(APP_VERSION), status: 404 }, "latest"));
+    assert.isNull(constructT3BuildFromManifest(null, "latest"));
+  });
+
+  it("picks the newest complete nightly release", () => {
+    assert.equal(
+      selectConstructNightlyManifestUrl([
+        nightlyRelease("0.0.39-nightly.20260902.1", "2026-09-02T10:00:00Z"),
+        nightlyRelease("0.0.39-nightly.20260901.1", "2026-09-01T10:00:00Z"),
+      ]),
+      nightlyManifestUrl("0.0.39-nightly.20260902.1"),
+    );
+    assert.isNull(selectConstructNightlyManifestUrl([]));
+    assert.isNull(selectConstructNightlyManifestUrl({ message: "API rate limit exceeded" }));
+    assert.isNull(
+      selectConstructNightlyManifestUrl([
+        { ...nightlyRelease("0.0.39-nightly.20260902.1", "2026-09-02T10:00:00Z"), tag_name: "t3-moving" },
+      ]),
+    );
+  });
+
+  it("updates to a newer release or a rebuild of this one, never to an older one", () => {
+    assert.isTrue(isNewerConstructT3Build("0.0.39-construct.0123abcd", APP_VERSION, "latest"));
+    assert.isTrue(isNewerConstructT3Build("0.0.38-construct.0123abcd", APP_VERSION, "latest"));
+    assert.isFalse(isNewerConstructT3Build(APP_VERSION, APP_VERSION, "latest"));
+    assert.isFalse(isNewerConstructT3Build("0.0.37-construct.0123abcd", APP_VERSION, "latest"));
+    assert.isFalse(isNewerConstructT3Build(null, APP_VERSION, "latest"));
+  });
+});
+
 describe("ConstructUpdates action + state derivation", () => {
-  it("offers Update Construct first, then a reprovision of the default instance", () => {
+  it("offers Update Construct first, then a reprovision, then a T3 Code update", () => {
     assert.equal(
       resolveConstructAction({
         scriptsDir: SCRIPTS_DIR,
@@ -283,9 +354,9 @@ describe("ConstructUpdates action + state derivation", () => {
       }),
       "update-construct",
     );
-    // A stale VM, or a newer upstream T3, keeps its proactive offer (pill, toast, About
-    // button) for the DEFAULT instance -- the offline / not-yet-paired case the control
-    // exists for. Every other linked VM is reprovisioned from its own Providers row.
+    // A stale VM, or a newer Construct T3 build, keeps its proactive offer (pill, toast,
+    // About button) for the DEFAULT instance -- the offline / not-yet-paired case the
+    // control exists for. Every other linked VM is offered its action on its own row.
     assert.equal(
       resolveConstructAction({
         scriptsDir: SCRIPTS_DIR,
@@ -300,6 +371,16 @@ describe("ConstructUpdates action + state derivation", () => {
         scriptsDir: SCRIPTS_DIR,
         constructUpdateAvailable: false,
         provisionStale: false,
+        t3UpdateAvailable: true,
+      }),
+      "update-t3",
+    );
+    // A pending reprovision updates T3 Code too, so it is offered instead.
+    assert.equal(
+      resolveConstructAction({
+        scriptsDir: SCRIPTS_DIR,
+        constructUpdateAvailable: false,
+        provisionStale: true,
         t3UpdateAvailable: true,
       }),
       "reprovision",
@@ -331,9 +412,9 @@ describe("ConstructUpdates action + state derivation", () => {
       target: DEFAULT_CONSTRUCT_VM_TARGET,
       markers: readConstructMarkers({ installedCommit: INSTALLED, provisionedCommit: INSTALLED }),
       manifest: { available: true, commit: LATEST },
+      desktopVersion: APP_VERSION,
       t3Version: "0.0.38",
-      t3LatestVersion: "0.0.38",
-      t3LatestByChannel: { latest: null, nightly: null },
+      t3LatestByChannel: { latest: APP_VERSION, nightly: null },
       channel: "latest",
       runningAction: null,
       checkedAt: "2026-09-03T10:00:00.000Z",
@@ -357,18 +438,20 @@ describe("ConstructUpdates action + state derivation", () => {
       target: DEFAULT_CONSTRUCT_VM_TARGET,
       markers: readConstructMarkers({ installedCommit: INSTALLED, provisionedCommit: INSTALLED }),
       manifest: { available: false, commit: INSTALLED },
+      desktopVersion: APP_VERSION,
       t3Version: "0.0.38",
-      t3LatestVersion: "0.0.39",
-      t3LatestByChannel: { latest: null, nightly: null },
+      t3LatestByChannel: { latest: "0.0.39-construct.0123abcd", nightly: null },
       channel: "latest",
       runningAction: null,
       checkedAt: null,
       error: null,
     });
-    // A newer upstream T3 is published per instance AND still offered host-wide for the
-    // default instance.
-    assert.equal(t3.action, "reprovision");
+    // A newer Construct T3 build is published per instance AND still offered host-wide for
+    // the default instance, as a T3 Code update.
+    assert.equal(t3.action, "update-t3");
     assert.isTrue(t3.t3UpdateAvailable);
+    assert.equal(t3.t3LatestVersion, "0.0.39");
+    assert.equal(constructAvailableVersionLabel(t3), "T3 Code 0.0.39");
     // ...and the label helper still words it for a row that is running one.
     assert.equal(
       constructAvailableVersionLabel({ ...t3, runningAction: "reprovision" }),
@@ -382,9 +465,9 @@ describe("ConstructUpdates action + state derivation", () => {
       target: DEFAULT_CONSTRUCT_VM_TARGET,
       markers: readConstructMarkers({ installedCommit: INSTALLED, provisionedCommit: PROVISIONED }),
       manifest: { available: false, commit: INSTALLED },
+      desktopVersion: APP_VERSION,
       t3Version: "0.0.38",
-      t3LatestVersion: "0.0.38",
-      t3LatestByChannel: { latest: null, nightly: null },
+      t3LatestByChannel: { latest: APP_VERSION, nightly: null },
       channel: "latest",
       runningAction: null,
       checkedAt: null,
@@ -410,8 +493,8 @@ describe("ConstructUpdates action + state derivation", () => {
           provisionedCommit: PROVISIONED,
         }),
         manifest: null,
+        desktopVersion: APP_VERSION,
         t3Version: "0.0.38",
-        t3LatestVersion: null,
         t3LatestByChannel: { latest: null, nightly: null },
         channel: "latest",
         runningAction: "reprovision",
@@ -431,8 +514,8 @@ describe("ConstructUpdates action + state derivation", () => {
         target: DEFAULT_CONSTRUCT_VM_TARGET,
         markers: readConstructMarkers({ installedCommit: INSTALLED, provisionedCommit: INSTALLED }),
         manifest: null,
+        desktopVersion: APP_VERSION,
         t3Version: "0.0.38",
-        t3LatestVersion: null,
         t3LatestByChannel: { latest: null, nightly: null },
         channel: "latest",
         runningAction: null,
@@ -453,9 +536,9 @@ describe("ConstructUpdates action + state derivation", () => {
         target: DEFAULT_CONSTRUCT_VM_TARGET,
         markers: readConstructMarkers({ installedCommit: INSTALLED, provisionedCommit: INSTALLED }),
         manifest: { available: false, commit: INSTALLED },
+        desktopVersion: APP_VERSION,
         t3Version: "0.0.38",
-        t3LatestVersion: "0.0.38",
-        t3LatestByChannel: { latest: null, nightly: null },
+        t3LatestByChannel: { latest: APP_VERSION, nightly: null },
         channel: "latest",
         runningAction: null,
         checkedAt: null,
@@ -468,10 +551,10 @@ describe("ConstructUpdates action + state derivation", () => {
 });
 
 describe("checkConstructUpdates", () => {
-  it("reads the markers, asks GitHub + npm, and offers the Construct update first", async () => {
+  it("reads the markers, asks GitHub for both releases, and offers the Construct update first", async () => {
     const { fetchJson, calls } = fetcher({
       [MANIFEST_URL]: { status: 200, json: published() },
-      [NPM_LATEST_URL]: { status: 200, json: { version: "0.0.39" } },
+      [T3_STABLE_URL]: t3Build("0.0.39-construct.0123abcd"),
     });
     const info = await checkConstructUpdates({
       appVersion: "0.0.38-construct.bb8cb346",
@@ -483,7 +566,7 @@ describe("checkConstructUpdates", () => {
       now: () => "2026-09-03T10:00:00.000Z",
       joinPath: join,
     });
-    assert.deepEqual(calls, [MANIFEST_URL, NPM_LATEST_URL]);
+    assert.deepEqual(calls, [MANIFEST_URL, T3_STABLE_URL]);
     assert.equal(info.scriptsDir, SCRIPTS_DIR);
     assert.equal(info.installedCommit, INSTALLED);
     assert.equal(info.provisionedCommit, PROVISIONED);
@@ -491,7 +574,9 @@ describe("checkConstructUpdates", () => {
     assert.isTrue(info.constructUpdateAvailable);
     assert.isTrue(info.provisionStale);
     assert.equal(info.t3Version, "0.0.38");
+    assert.equal(info.desktopVersion, APP_VERSION);
     assert.equal(info.t3LatestVersion, "0.0.39");
+    assert.deepEqual(info.t3LatestByChannel, { latest: "0.0.39-construct.0123abcd", nightly: null });
     assert.isTrue(info.t3UpdateAvailable);
     assert.equal(info.action, "update-construct");
     assert.isNull(info.error);
@@ -500,12 +585,12 @@ describe("checkConstructUpdates", () => {
 
   it("carries the published commit and offer through a local refresh", async () => {
     const options = {
-      appVersion: "0.0.38", localAppData: LOCAL_APP_DATA,
+      appVersion: APP_VERSION, localAppData: LOCAL_APP_DATA,
       fs: installedFs({ installedCommit: INSTALLED, provisionedCommit: INSTALLED }),
       previous: null, runningAction: null, now: () => "now", joinPath: join,
     };
     const { fetchJson } = fetcher({ [MANIFEST_URL]: { status: 200, json: published() },
-      [NPM_LATEST_URL]: { status: 200, json: { version: "0.0.38" } } });
+      [T3_STABLE_URL]: t3Build(APP_VERSION) });
     const previous = await checkConstructUpdates({ ...options, fetchJson });
     const local = await checkConstructUpdates({ ...options, previous });
     assert.equal(local.latestCommit, LATEST);
@@ -517,9 +602,9 @@ describe("checkConstructUpdates", () => {
     for (const response of [null, { status: 404, json: null }, { status: 500, json: published() },
       ...invalidManifests.map((json) => ({ status: 200, json }))]) {
       const { fetchJson } = fetcher({ [MANIFEST_URL]: response,
-        [NPM_LATEST_URL]: { status: 200, json: { version: "0.0.38" } } });
+        [T3_STABLE_URL]: t3Build(APP_VERSION) });
       const info = await checkConstructUpdates({
-        appVersion: "0.0.38", localAppData: LOCAL_APP_DATA,
+        appVersion: APP_VERSION, localAppData: LOCAL_APP_DATA,
         fs: installedFs({ installedCommit: INSTALLED, provisionedCommit: INSTALLED }),
         fetchJson, previous: null, runningAction: null, now: () => "now", joinPath: join,
       });
@@ -532,14 +617,14 @@ describe("checkConstructUpdates", () => {
 
   it("does not fetch or carry over a main release offer for a non-main ref", async () => {
     const { fetchJson, calls } = fetcher({ [MANIFEST_URL]: { status: 200, json: published() },
-      [NPM_LATEST_URL]: { status: 200, json: { version: "0.0.38" } } });
+      [T3_STABLE_URL]: t3Build(APP_VERSION) });
     const options = {
-      appVersion: "0.0.38", localAppData: LOCAL_APP_DATA,
+      appVersion: APP_VERSION, localAppData: LOCAL_APP_DATA,
       fs: installedFs({ installedCommit: INSTALLED, provisionedCommit: INSTALLED, constructRef: "dev" }),
       previous: null, runningAction: null, now: () => "now", joinPath: join,
     };
     const info = await checkConstructUpdates({ ...options, fetchJson });
-    assert.deepEqual(calls, [NPM_LATEST_URL]);
+    assert.deepEqual(calls, [T3_STABLE_URL]);
     assert.isFalse(info.constructUpdateAvailable);
     assert.isNull(info.action);
     assert.isNull(info.error);
@@ -551,10 +636,23 @@ describe("checkConstructUpdates", () => {
     assert.isNull(local.action);
   });
 
-  it("uses the nightly registry tag for nightly builds", async () => {
+  it("finds the newest complete nightly build through the releases API", async () => {
     const { fetchJson, calls } = fetcher({
       [MANIFEST_URL]: { status: 200, json: published(INSTALLED) },
-      [NPM_NIGHTLY_URL]: { status: 200, json: { version: "0.0.39-nightly.20260902.1" } },
+      [T3_RELEASES_URL]: {
+        status: 200,
+        json: [
+          nightlyRelease("0.0.39-nightly.20260901.1", "2026-09-01T10:00:00Z"),
+          nightlyRelease("0.0.39-nightly.20260902.1", "2026-09-02T10:00:00Z"),
+          // Still uploading: not every asset is there yet.
+          nightlyRelease("0.0.39-nightly.20260903.1", "2026-09-03T10:00:00Z", 3),
+          { ...nightlyRelease("0.0.39-nightly.20260904.1", "2026-09-04T10:00:00Z"), draft: true },
+          { ...nightlyRelease("0.0.39", "2026-09-05T10:00:00Z"), prerelease: false },
+        ],
+      },
+      [nightlyManifestUrl("0.0.39-nightly.20260902.1")]: t3Build(
+        "0.0.39-nightly.20260902.1-construct.4567cdef",
+      ),
     });
     const info = await checkConstructUpdates({
       appVersion: "0.0.39-nightly.20260901.1-construct.0123abcd",
@@ -566,10 +664,15 @@ describe("checkConstructUpdates", () => {
       now: () => "now",
       joinPath: join,
     });
-    assert.deepEqual(calls, [MANIFEST_URL, NPM_NIGHTLY_URL]);
+    assert.deepEqual(calls, [
+      MANIFEST_URL,
+      T3_RELEASES_URL,
+      nightlyManifestUrl("0.0.39-nightly.20260902.1"),
+    ]);
     assert.isTrue(info.t3UpdateAvailable);
+    assert.equal(info.t3LatestVersion, "0.0.39-nightly.20260902.1");
     // The fact is published for the rows, and the default instance's offer stands.
-    assert.equal(info.action, "reprovision");
+    assert.equal(info.action, "update-t3");
   });
 
   it("keeps the local stale-provision signal when the network is down", async () => {
@@ -589,8 +692,8 @@ describe("checkConstructUpdates", () => {
     // The local stale signal survives a dead network: the default instance's reprovision
     // is still offered, and the check errors ride along.
     assert.equal(info.action, "reprovision");
-    assert.include(info.error ?? "", "GitHub");
-    assert.include(info.error ?? "", "npm");
+    assert.include(info.error ?? "", "Construct updates");
+    assert.include(info.error ?? "", "T3 Code builds");
   });
 
   it("reports a missing Construct install instead of offering anything", async () => {
@@ -608,8 +711,8 @@ describe("checkConstructUpdates", () => {
     assert.isNull(info.scriptsDir);
     assert.isNull(info.action);
     assert.include(info.error ?? "", "not installed");
-    // No installed commit -> no GitHub call; the npm lookup still runs.
-    assert.deepEqual(calls, [NPM_LATEST_URL]);
+    // No installed commit -> no Construct release lookup; the T3 build lookup still runs.
+    assert.deepEqual(calls, [T3_STABLE_URL]);
     assert.equal(applyConstructInfoToState(baseState, info).status, "error");
   });
 
@@ -627,9 +730,10 @@ describe("checkConstructUpdates", () => {
       latestCommit: INSTALLED,
       constructUpdateAvailable: false,
       provisionStale: true,
+      desktopVersion: APP_VERSION,
       t3Version: "0.0.38",
       t3LatestVersion: "0.0.38",
-      t3LatestByChannel: { latest: "0.0.38", nightly: null },
+      t3LatestByChannel: { latest: APP_VERSION, nightly: null },
       t3UpdateAvailable: false,
       action: "reprovision",
       runningAction: "reprovision",
@@ -667,9 +771,10 @@ describe("checkConstructUpdates", () => {
       latestCommit: LATEST,
       constructUpdateAvailable: true,
       provisionStale: false,
+      desktopVersion: APP_VERSION,
       t3Version: "0.0.38",
       t3LatestVersion: "0.0.38",
-      t3LatestByChannel: { latest: "0.0.38", nightly: null },
+      t3LatestByChannel: { latest: APP_VERSION, nightly: null },
       t3UpdateAvailable: false,
       action: "update-construct",
       runningAction: "update-construct",
@@ -761,6 +866,32 @@ describe("planConstructLaunch", () => {
     assert.include(result.plan.args[3], '-Repo "alice/The-Construct" -Ref "feature/x"');
     // With a result path the script closes its console by itself (no "Press Enter").
     assert.match(result.plan.env?.CONSTRUCT_UPDATE_RESULT ?? "", /construct-update-\d+\.result$/);
+  });
+
+  it("tells an Update-T3Code.ps1 that declares -Mode which update to run", () => {
+    const base = installedFs({});
+    const withMode: ConstructFileSystem = {
+      ...base,
+      readTextFile: (path) =>
+        path === `${SCRIPTS_DIR}\\Update-T3Code.ps1`
+          ? "param(\n  [string]$InstanceName = \"\",\n  [string]$Mode = 'auto'\n)\n"
+          : base.readTextFile(path),
+    };
+    const quick = planConstructLaunch("update-t3", info, DEFAULT_CONSTRUCT_VM_TARGET, "win32", withMode, join);
+    assert.isTrue(quick.ok);
+    if (quick.ok) {
+      assert.equal(quick.plan.action, "update-t3");
+      assert.include(quick.plan.args[3], `"start "T3 Code update" /wait`);
+      assert.match(quick.plan.args[3] ?? "", /Update-T3Code\.ps1" -Mode quick"$/);
+      assert.isUndefined(quick.plan.env);
+    }
+    const full = planConstructLaunch("reprovision", info, DEFAULT_CONSTRUCT_VM_TARGET, "win32", withMode, join);
+    assert.isTrue(full.ok);
+    if (full.ok) assert.match(full.plan.args[3] ?? "", /Update-T3Code\.ps1" -Mode reprovision"$/);
+    // An older script has no -Mode and always reprovisions; it is given no argument.
+    const older = planConstructLaunch("update-t3", info, DEFAULT_CONSTRUCT_VM_TARGET, "win32", base, join);
+    assert.isTrue(older.ok);
+    if (older.ok) assert.notInclude(older.plan.args[3], "-Mode");
   });
 
   it("gives the reprovision no result path (the provisioner owns its own pause rules)", () => {
@@ -1301,7 +1432,7 @@ describe("ConstructUpdates target VM (instances.json)", () => {
     };
     const { fetchJson } = fetcher({
       [MANIFEST_URL]: { status: 200, json: published(PROVISIONED) },
-      [NPM_LATEST_URL]: { status: 200, json: { version: "0.0.38" } },
+      [T3_STABLE_URL]: t3Build(APP_VERSION),
     });
     const info = await checkConstructUpdates({
       appVersion: "0.0.38-construct.bb8cb346",
@@ -1673,7 +1804,7 @@ describe("collectConstructInstances", () => {
   });
 });
 
-describe("planConstructInstanceReprovision", () => {
+describe("planConstructInstanceLaunch", () => {
   const view = readConstructInstances(MULTI_REGISTRY);
   const scriptsFs = (nameCapable: boolean): ConstructFileSystem => {
     const base = installedFs({});
@@ -1690,7 +1821,8 @@ describe("planConstructInstanceReprovision", () => {
   const info = { scriptsDir: SCRIPTS_DIR, repo: "permissionBRICK/The-Construct", ref: "main" };
 
   it("targets the named instance", () => {
-    const plan = planConstructInstanceReprovision(
+    const plan = planConstructInstanceLaunch(
+      "reprovision",
       "work-vm",
       view,
       info,
@@ -1703,7 +1835,8 @@ describe("planConstructInstanceReprovision", () => {
   });
 
   it("falls back to the four identity arguments on an older Update-T3Code.ps1", () => {
-    const plan = planConstructInstanceReprovision(
+    const plan = planConstructInstanceLaunch(
+      "reprovision",
       "work-vm",
       view,
       info,
@@ -1719,7 +1852,8 @@ describe("planConstructInstanceReprovision", () => {
   });
 
   it("names even the DEFAULT instance, so a row can never mean 'whichever is default'", () => {
-    const plan = planConstructInstanceReprovision(
+    const plan = planConstructInstanceLaunch(
+      "reprovision",
       "agent-vm",
       view,
       info,
@@ -1731,8 +1865,26 @@ describe("planConstructInstanceReprovision", () => {
     if (plan.ok) assert.include(plan.plan.args[3], '-InstanceName "agent-vm"');
   });
 
+  it("updates T3 Code on the named instance when asked to", () => {
+    const base = scriptsFs(true);
+    const withMode: ConstructFileSystem = {
+      ...base,
+      readTextFile: (path) =>
+        path === `${SCRIPTS_DIR}\\Update-T3Code.ps1`
+          ? 'param(\n  [string]$InstanceName = "",\n  [string]$Mode = "auto"\n)\n'
+          : base.readTextFile(path),
+    };
+    const plan = planConstructInstanceLaunch("update-t3", "work-vm", view, info, "win32", withMode, join);
+    assert.isTrue(plan.ok);
+    if (plan.ok) {
+      assert.equal(plan.plan.action, "update-t3");
+      assert.include(plan.plan.args[3], '-InstanceName "work-vm" -Mode quick');
+    }
+  });
+
   it("refuses a name the registry does not hold", () => {
-    const plan = planConstructInstanceReprovision(
+    const plan = planConstructInstanceLaunch(
+      "reprovision",
       "nope",
       view,
       info,
@@ -1746,7 +1898,8 @@ describe("planConstructInstanceReprovision", () => {
 
   it("refuses when the registry itself was unusable", () => {
     const broken = readConstructInstances({ version: 9 });
-    const plan = planConstructInstanceReprovision(
+    const plan = planConstructInstanceLaunch(
+      "reprovision",
       "agent-vm",
       broken,
       info,

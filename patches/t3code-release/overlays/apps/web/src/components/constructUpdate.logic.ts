@@ -5,7 +5,11 @@ import type {
   DesktopUpdateState,
 } from "@t3tools/contracts";
 
-import { planConstructProviderRows, type ConstructLinkedRemote } from "./constructInstances.logic";
+import {
+  getConstructRowAction,
+  planConstructProviderRows,
+  type ConstructLinkedRemote,
+} from "./constructInstances.logic";
 
 /** The popup follows the current thread's remote, including that VM's own markers.
  * Host updates apply to this PC; VM offers require an unambiguous registry match. */
@@ -30,7 +34,7 @@ export function getConstructThreadUpdateInfo(
     provisionStale: row.provisionStale,
     t3LatestVersion: row.t3LatestVersion,
     t3UpdateAvailable: row.t3UpdateAvailable,
-    action: row.provisionStale || row.t3UpdateAvailable ? "reprovision" : null,
+    action: row.provisionStale || row.t3UpdateAvailable ? getConstructRowAction(row) : null,
   };
 }
 
@@ -63,12 +67,14 @@ export function isConstructManagedUpdateState(
 }
 
 export function getConstructUpdateActionLabel(action: ConstructUpdateAction): string {
-  return action === "update-construct" ? "Update Construct" : "Reprovision VM";
+  if (action === "update-construct") return "Update Construct";
+  return action === "update-t3" ? "Update T3 Code" : "Reprovision VM";
 }
 
 export function getConstructUpdateActionVerb(action: ConstructUpdateAction): string {
-  return action === "update-construct"
-    ? "update Construct on this PC"
+  if (action === "update-construct") return "update Construct on this PC";
+  return action === "update-t3"
+    ? "update T3 Code on the VM and in this app"
     : "reprovision the VM through Construct";
 }
 
@@ -86,12 +92,10 @@ export function getConstructVersionLabel(info: ConstructUpdateInfo): string {
 export function getConstructUpdateHeadline(info: ConstructUpdateInfo): string {
   if (info.runningAction === "update-construct") return "Construct update running";
   if (info.runningAction === "reprovision") return "Construct reprovision running";
+  if (info.runningAction === "update-t3") return "T3 Code update running";
   if (info.action === "update-construct") return "Construct update available";
-  if (info.action === "reprovision") {
-    return info.t3UpdateAvailable && !info.provisionStale
-      ? "T3 Code update available"
-      : "VM reprovision pending";
-  }
+  if (info.action === "update-t3") return "T3 Code update available";
+  if (info.action === "reprovision") return "VM reprovision pending";
   if (info.error !== null) return "Construct update check failed";
   return "Construct is up to date";
 }
@@ -99,19 +103,18 @@ export function getConstructUpdateHeadline(info: ConstructUpdateInfo): string {
 /** One or two sentences under the headline: what changed and what the action does. */
 export function getConstructUpdateDetail(info: ConstructUpdateInfo): string {
   if (info.runningAction !== null) {
-    return info.runningAction === "reprovision"
-      ? "Running in a console window. The app restarts by itself if a new Desktop build is installed."
-      : "Running in a console window. The result shows up here when it closes.";
+    return info.runningAction === "update-construct"
+      ? "Running in a console window. The result shows up here when it closes."
+      : "Running in a console window. The app restarts by itself if a new Desktop build is installed.";
   }
   if (info.action === "update-construct") {
     return "A new Construct update is available. Click to install it on this PC. This doesn't interrupt your work in T3 Code.";
   }
+  if (info.action === "update-t3") {
+    return `T3 Code ${info.t3LatestVersion ?? "update"} is available. Click to install it on "${info.vmName}" and in this app, without a reprovision. Threads that are running stop and are told to continue.`;
+  }
   if (info.action === "reprovision") {
-    const interrupt = "This might interrupt your agents if they get an update too.";
-    if (info.provisionStale) {
-      return `The latest Construct update has not yet been installed onto "${info.vmName}". Click to reprovision and update all your tools. ${interrupt}`;
-    }
-    return `T3 Code ${info.t3LatestVersion ?? "update"} is available. Click to reprovision "${info.vmName}" and install it. ${interrupt}`;
+    return `The latest Construct update has not yet been installed onto "${info.vmName}". Click to reprovision and update all your tools. This might interrupt your agents if they get an update too.`;
   }
   if (info.error !== null) return info.error;
   return info.t3LatestVersion === null
@@ -144,7 +147,7 @@ export function getConstructUpdateNotificationKey(info: ConstructUpdateInfo): st
   return [
     "construct",
     info.action,
-    ...(info.action === "reprovision" ? [info.vmName, info.vmHost] : []),
+    ...(info.action === "update-construct" ? [] : [info.vmName, info.vmHost]),
     info.installedCommit ?? "-",
     info.provisionedCommit ?? "-",
     info.t3UpdateAvailable ? (info.t3LatestVersion ?? "-") : "-",

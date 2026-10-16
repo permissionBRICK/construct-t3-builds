@@ -8,6 +8,7 @@ import {
   constructLinkedInstanceNames,
   constructLinkedRemotes,
   constructRemoteEndpoint,
+  getConstructRowAction,
   getConstructRowDetail,
   matchConstructRemoteToInstance,
   planConstructAutoLink,
@@ -66,9 +67,10 @@ function info(over: Partial<ConstructUpdateInfo> = {}): ConstructUpdateInfo {
     latestCommit: null,
     constructUpdateAvailable: false,
     provisionStale: false,
+    desktopVersion: "0.0.38-construct.bb8cb346",
     t3Version: "0.0.38",
     t3LatestVersion: "0.0.38",
-    t3LatestByChannel: { latest: "0.0.38", nightly: null },
+    t3LatestByChannel: { latest: "0.0.38-construct.bb8cb346", nightly: null },
     t3UpdateAvailable: false,
     action: null,
     runningAction: null,
@@ -221,7 +223,10 @@ describe("planConstructProviderRows", () => {
     const rows = planConstructProviderRows({
       remotes,
       info: info(),
-      t3LatestByChannel: { latest: "0.0.38", nightly: "0.0.39-nightly.20260904.1" },
+      t3LatestByChannel: {
+        latest: "0.0.38-construct.bb8cb346",
+        nightly: "0.0.39-nightly.20260904.1-construct.4567cdef",
+      },
     });
     const work = rows.find((r) => r.instanceName === "work-vm")!;
     const far = rows.find((r) => r.instanceName === "far-vm")!;
@@ -232,6 +237,24 @@ describe("planConstructProviderRows", () => {
     // An instance whose channel this PC does not know says nothing rather than
     // borrowing the app's own answer.
     assert.isNull(rows.find((r) => r.instanceName === "agent-vm")!.t3LatestVersion);
+  });
+
+  it("offers a rebuild of the same release, never an older one", () => {
+    const far = (latest: string) =>
+      planConstructProviderRows({ remotes, info: info(), t3LatestByChannel: { latest } }).find(
+        (r) => r.instanceName === "far-vm",
+      )!;
+    assert.isTrue(far("0.0.38-construct.0123abcd").t3UpdateAvailable);
+    assert.isFalse(far("0.0.37-construct.0123abcd").t3UpdateAvailable);
+    assert.isTrue(far("0.0.39-construct.0123abcd").t3UpdateAvailable);
+  });
+
+  it("updates T3 Code alone only when no reprovision is pending", () => {
+    assert.equal(getConstructRowAction({ provisionStale: false, t3UpdateAvailable: true }), "update-t3");
+    assert.equal(getConstructRowAction({ provisionStale: true, t3UpdateAvailable: true }), "reprovision");
+    assert.equal(getConstructRowAction({ provisionStale: true, t3UpdateAvailable: false }), "reprovision");
+    // A row with nothing pending still offers its plain Reprovision.
+    assert.equal(getConstructRowAction({ provisionStale: false, t3UpdateAvailable: false }), "reprovision");
   });
 
   it("gives an unmatched remote a read-only row that says why", () => {
@@ -330,7 +353,7 @@ describe("planConstructProviderRows", () => {
     const rows = planConstructProviderRows({
       remotes: [remotes[1]!],
       info: info(),
-      t3LatestByChannel: { nightly: "0.0.39-nightly.20260904.1" },
+      t3LatestByChannel: { nightly: "0.0.39-nightly.20260904.1-construct.4567cdef" },
     });
     const detail = getConstructRowDetail(rows[0]!);
     assert.include(detail, "provisioned b262652");

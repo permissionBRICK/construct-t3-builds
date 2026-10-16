@@ -34,9 +34,10 @@ const current: ConstructUpdateInfo = {
   latestCommit: INSTALLED,
   constructUpdateAvailable: false,
   provisionStale: false,
+  desktopVersion: "0.0.38-construct.bb8cb346",
   t3Version: "0.0.38",
   t3LatestVersion: "0.0.38",
-  t3LatestByChannel: { latest: "0.0.38", nightly: null },
+  t3LatestByChannel: { latest: "0.0.38-construct.bb8cb346", nightly: null },
   t3UpdateAvailable: false,
   action: null,
   runningAction: null,
@@ -99,7 +100,7 @@ describe("construct update presentation", () => {
     );
   });
 
-  it("explains a pending reprovision from both causes", () => {
+  it("explains a pending reprovision and a T3 Code update", () => {
     const stale: ConstructUpdateInfo = {
       ...current,
       provisionedCommit: PROVISIONED,
@@ -116,21 +117,30 @@ describe("construct update presentation", () => {
       ...current,
       t3LatestVersion: "0.0.39",
       t3UpdateAvailable: true,
-      action: "reprovision",
+      action: "update-t3",
     };
     expect(getConstructUpdateHeadline(t3)).toBe("T3 Code update available");
     expect(getConstructUpdateDetail(t3)).toBe(
-      'T3 Code 0.0.39 is available. Click to reprovision "agent-vm" and install it. This might interrupt your agents if they get an update too.',
+      'T3 Code 0.0.39 is available. Click to install it on "agent-vm" and in this app, without a reprovision. Threads that are running stop and are told to continue.',
+    );
+    expect(getConstructUpdateButtonLabel(t3)).toBe("Update T3 Code");
+    expect(getConstructUpdateTooltip(t3)).toBe(
+      "T3 Code update available — click to update T3 Code on the VM and in this app.",
     );
     expect(getConstructUpdateNotificationKey(t3)).toBe(
-      `construct:reprovision:agent-vm:agent-vm.mshome.net:${INSTALLED}:${INSTALLED}:0.0.39`,
+      `construct:update-t3:agent-vm:agent-vm.mshome.net:${INSTALLED}:${INSTALLED}:0.0.39`,
+    );
+    expect(getConstructUpdateHeadline({ ...t3, runningAction: "update-t3" })).toBe(
+      "T3 Code update running",
     );
 
+    // A pending reprovision updates T3 Code too, so the check offers that instead.
     const both: ConstructUpdateInfo = {
       ...stale,
       ...t3,
       provisionStale: true,
       provisionedCommit: PROVISIONED,
+      action: "reprovision",
     };
     expect(getConstructUpdateHeadline(both)).toBe("VM reprovision pending");
     expect(getConstructUpdateDetail(both)).toBe(getConstructUpdateDetail(stale));
@@ -282,11 +292,14 @@ describe("thread VM update offers", () => {
       {
         ...info,
         instances: [{ ...vm("thread-vm", 2302, INSTALLED), channel: "nightly" }],
-        t3LatestByChannel: { latest: "0.0.38", nightly: "0.0.39-nightly.20260907" },
+        t3LatestByChannel: {
+          latest: "0.0.38-construct.bb8cb346",
+          nightly: "0.0.39-nightly.20260907-construct.4567cdef",
+        },
       },
       remote,
     )!;
-    expect(offer.action).toBe("reprovision");
+    expect(offer.action).toBe("update-t3");
     expect(offer.t3LatestVersion).toBe("0.0.39-nightly.20260907");
   });
 
