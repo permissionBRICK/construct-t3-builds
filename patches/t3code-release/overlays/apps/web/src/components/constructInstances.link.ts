@@ -1,4 +1,13 @@
-import type { ConstructT3LinkInfo, DesktopBridge } from "@t3tools/contracts";
+import {
+  type ConnectionCatalogEntry,
+  connectionRouteId,
+  connectionRoutes,
+  credentialConnectionId,
+  isLearned,
+} from "@t3tools/client-runtime/connection";
+import type { ConstructT3LinkInfo, DesktopBridge, EnvironmentId } from "@t3tools/contracts";
+import { getPairingTokenFromUrl } from "@t3tools/shared/remote";
+import * as Option from "effect/Option";
 import {
   type AtomCommandResult,
   isAtomCommandInterrupted,
@@ -30,9 +39,15 @@ export type ConstructLinkBridge = Pick<
  *  the remote's descriptor, bootstraps the bearer session and persists the environment,
  *  resolving with the new environment's id. The environment's label is the remote's own
  *  (its descriptor), the same as when a link is pasted into the Connections dialog. */
-export type ConstructConnectPairing = (input: {
-  readonly pairingUrl: string;
-}) => Promise<AtomCommandResult<unknown, unknown>>;
+export type ConstructConnectPairing = (
+  input:
+    | { readonly pairingUrl: string }
+    | {
+        readonly host: string;
+        readonly pairingCode: string;
+        readonly expectedEnvironmentId: EnvironmentId;
+      },
+) => Promise<AtomCommandResult<unknown, unknown>>;
 
 export type ConstructLinkOutcome =
   | { readonly ok: true; readonly environmentId: string; readonly baseUrl: string | null }
@@ -48,6 +63,38 @@ export function constructPairingLinkOrigin(pairUrl: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** The one-time token a pairing link carries (upstream's own reading of it); null when
+ *  it carries none or is not a URL. Pure. */
+export function constructPairingLinkToken(pairUrl: string): string | null {
+  try {
+    return getPairingTokenFromUrl(new URL(pairUrl));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Where a new token for this environment belongs: the address of the paired bearer route
+ * whose stored credential the environment's preferred route uses. The preferred route is
+ * no guide by itself — T3 saves the LAN addresses a server reports as learned routes ahead
+ * of the paired one, and they borrow its credential. Null when that credential is not a
+ * paired bearer route's (T3 Connect, SSH), which a pairing link cannot replace. Pure.
+ */
+export function constructPairedRouteUrl(entry: ConnectionCatalogEntry): string | null {
+  const routes = connectionRoutes(entry);
+  const preferred = routes[0];
+  if (preferred === undefined) return null;
+  const ownerId = credentialConnectionId(connectionRouteId(preferred.target));
+  const owner = routes.find(
+    (route) =>
+      route.target._tag === "BearerConnectionTarget" &&
+      !isLearned(route) &&
+      connectionRouteId(route.target) === ownerId,
+  );
+  const profile = owner === undefined ? null : Option.getOrNull(owner.profile);
+  return profile?._tag === "BearerConnectionProfile" ? profile.httpBaseUrl : null;
 }
 
 function marker(
@@ -105,4 +152,60 @@ export async function linkConstructInstance(input: {
   const environmentId = String(result.value);
   await record(marker("linked", { environmentId, baseUrl }, now));
   return { ok: true, environmentId, baseUrl };
+}
+
+/**
+ * Pair a LINKED remote again (constructInstances.logic.ts planConstructRelink): the VM's
+ * T3 now grants permissions the saved credential predates. The instance mints a link the
+ * same way linkConstructInstance's step 1 does, but its token is redeemed at the paired
+ * route's own address (constructPairedRouteUrl), so T3 replaces that route's credential in
+ * place instead of adding a second address next to it, and only if that address still
+ * reaches the same environment. Only a success touches the marker; a failure is retried on the next app
+ * start. Resolves with the outcome; never rejects.
+ */
+export async function relinkConstructInstance(input: {
+  readonly bridge: ConstructLinkBridge;
+  readonly name: string;
+  readonly environmentId: EnvironmentId;
+  readonly baseUrl: string;
+  readonly connectPairing: ConstructConnectPairing;
+  readonly now?: () => string;
+}): Promise<ConstructLinkOutcome> {
+  const now = input.now ?? (() => new Date().toISOString());
+  let minted: Awaited<ReturnType<ConstructLinkBridge["linkConstructInstance"]>>;
+  try {
+    minted = await input.bridge.linkConstructInstance(input.name);
+  } catch (error) {
+    minted = { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+  if (!minted.ok) return { ok: false, error: minted.error, interrupted: false };
+  const token = constructPairingLinkToken(minted.pairUrl);
+  if (token === null) {
+    return { ok: false, error: "The pairing link carried no token.", interrupted: false };
+  }
+
+  const result = await input.connectPairing({
+    host: input.baseUrl,
+    pairingCode: token,
+    expectedEnvironmentId: input.environmentId,
+  });
+  if (result._tag === "Failure") {
+    if (isAtomCommandInterrupted(result)) {
+      return { ok: false, error: "The link was interrupted.", interrupted: true };
+    }
+    const cause = squashAtomCommandFailure(result);
+    const message = cause instanceof Error ? cause.message : "Could not pair again.";
+    return { ok: false, error: message, interrupted: false };
+  }
+
+  const environmentId = String(result.value);
+  try {
+    await input.bridge.recordConstructInstanceT3Link(
+      input.name,
+      marker("linked", { environmentId, baseUrl: input.baseUrl }, now),
+    );
+  } catch {
+    // The marker is bookkeeping; the new credential is already saved.
+  }
+  return { ok: true, environmentId, baseUrl: input.baseUrl };
 }

@@ -3,6 +3,7 @@ import type { ConstructInstanceInfo, ConstructUpdateInfo } from "@t3tools/contra
 
 import {
   CONSTRUCT_AUTO_LINK_RETRY_MS,
+  constructInstanceForRemote,
   constructInstanceHasT3,
   constructLinkedInstanceNames,
   constructLinkedRemotes,
@@ -11,6 +12,7 @@ import {
   matchConstructRemoteToInstance,
   planConstructAutoLink,
   planConstructProviderRows,
+  planConstructRelink,
   planConstructSettingsButton,
 } from "./constructInstances.logic.ts";
 
@@ -508,6 +510,71 @@ describe("planConstructAutoLink", () => {
     assert.deepEqual(planConstructAutoLink({ info: info({ instances: [agent], runningAction: "reprovision" }), remotes: [], inFlight: none, now: NOW }), []);
     assert.deepEqual(planConstructAutoLink({ info: info({ instances: [agent], scriptsDir: null }), remotes: [], inFlight: none, now: NOW }), []);
     assert.deepEqual(planConstructAutoLink({ info: null, remotes: [], inFlight: none, now: NOW }), []);
+  });
+});
+
+describe("planConstructRelink", () => {
+  const work = instance({ name: "work-vm", t3BaseUrl: "https://work-vm.mshome.net:5178" });
+  const far = instance({ name: "far-vm", vmHost: "buildbox.example.local", publicHost: "far-vm.vpn.example.local", t3Port: 23011 });
+  const all = info({ instances: [work, far] });
+  const none = new Set<string>();
+  const remotes = [
+    { id: "env-work", baseUrl: "https://work-vm.mshome.net:5178" },
+    { id: "env-far", baseUrl: "https://far-vm.vpn.example.local:23011" },
+    { id: "env-other", baseUrl: "https://elsewhere.example.com" },
+  ];
+
+  it("pairs again only the remotes whose session still has the old permissions", () => {
+    assert.deepEqual(planConstructRelink({ info: all, remotes, legacy: new Set(["env-far"]), inFlight: none }), [
+      { name: "far-vm", environmentId: "env-far", baseUrl: "https://far-vm.vpn.example.local:23011" },
+    ]);
+    assert.deepEqual(planConstructRelink({ info: all, remotes, legacy: none, inFlight: none }), []);
+  });
+
+  it("leaves a remote that is not an instance of this PC to the user, even a linked marker's", () => {
+    const linked = { ...work, t3Link: { status: "linked" as const, at: "2026-09-05T10:00:00Z", environmentId: "env-work", baseUrl: "https://work-vm.mshome.net:5178", error: null } };
+    const legacy = new Set(["env-work", "env-other"]);
+    assert.deepEqual(
+      planConstructRelink({ info: info({ instances: [linked] }), remotes, legacy, inFlight: none }).map((plan) => plan.name),
+      ["work-vm"],
+    );
+  });
+
+  it("finds a VM the user paired through an address of their own by its link marker's environment", () => {
+    const marked = (name: string, environmentId: string) => ({
+      status: "linked" as const,
+      at: "2026-09-04T21:52:00Z",
+      environmentId,
+      baseUrl: `https://${name}.mshome.net:5178`,
+      error: null,
+    });
+    const haus = instance({ name: "haus-vm", publicHost: "standpc.example.net", t3Port: 2301, t3Link: marked("haus-vm", "env-haus") });
+    const proxied = { id: "env-haus", baseUrl: "https://t3haus.home.example.net:8443" };
+    assert.equal(constructInstanceForRemote(proxied, [haus, work])?.name, "haus-vm");
+    assert.deepEqual(planConstructRelink({ info: info({ instances: [haus, work] }), remotes: [proxied], legacy: new Set(["env-haus"]), inFlight: none }), [
+      { name: "haus-vm", environmentId: "env-haus", baseUrl: "https://t3haus.home.example.net:8443" },
+    ]);
+    // The address decides first; two markers naming one environment decide nothing.
+    const clone = instance({ name: "clone-vm", t3Link: marked("clone-vm", "env-haus") });
+    assert.isNull(constructInstanceForRemote(proxied, [haus, clone]));
+    assert.equal(constructInstanceForRemote({ id: "env-haus", baseUrl: "https://work-vm.mshome.net:5178" }, [haus, work])?.name, "work-vm");
+  });
+
+  it("plans one re-link per instance and skips one already in flight", () => {
+    const twice = [
+      { id: "env-a", baseUrl: "https://work-vm.mshome.net:5178" },
+      { id: "env-b", baseUrl: "https://WORK-VM.mshome.net:5178/" },
+    ];
+    const legacy = new Set(["env-a", "env-b"]);
+    assert.deepEqual(planConstructRelink({ info: all, remotes: twice, legacy, inFlight: none }).map((plan) => plan.environmentId), ["env-a"]);
+    assert.deepEqual(planConstructRelink({ info: all, remotes: twice, legacy, inFlight: new Set(["work-vm"]) }), []);
+  });
+
+  it("does nothing while a Construct script runs or without Construct", () => {
+    const legacy = new Set(["env-work"]);
+    assert.deepEqual(planConstructRelink({ info: info({ instances: [work], runningAction: "reprovision" }), remotes, legacy, inFlight: none }), []);
+    assert.deepEqual(planConstructRelink({ info: info({ instances: [work], scriptsDir: null }), remotes, legacy, inFlight: none }), []);
+    assert.deepEqual(planConstructRelink({ info: null, remotes, legacy, inFlight: none }), []);
   });
 });
 
