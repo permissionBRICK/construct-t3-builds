@@ -6,19 +6,21 @@
 // Construct-managed updates for the Construct-built T3 Code Desktop app.
 //
 // A Construct build carries `<upstream t3 version>-construct.<hash>` as its app
-// version. Such a build is never updated by electron-updater: the patched
-// server + Desktop installer are rebuilt in the VM by a Construct reprovision
-// and silently installed on this PC. So the Desktop app's update control
-// mirrors what the VS Code control panel does instead:
+// version. Such a build is never updated by electron-updater: Construct installs the
+// patched server in the VM and the matching Desktop installer silently on this PC.
+// So the Desktop app's update control mirrors what the Construct control panel does
+// instead:
 //
 //   1. A different Construct release is published  -> "update-construct"
 //      (Update-Construct.ps1: refreshes the scripts + VS Code panel on this PC;
 //      the panel's own "Update Construct" button does exactly this).
 //   2. The VM was provisioned with a different Construct than the one installed
-//      on this PC (the panel's yellow Reprovision button), or a newer upstream
-//      T3 Code release exists on this build's channel -> "reprovision"
-//      (Update-T3Code.ps1: reruns provisioning with the saved settings, which
-//      rebuilds the patched T3 Code and installs the new Desktop app).
+//      on this PC (the panel's yellow Reprovision button) -> "reprovision"
+//      (Update-T3Code.ps1 -Mode reprovision: reruns provisioning with the saved
+//      settings, which also updates T3 Code and installs the matching Desktop app).
+//   3. A newer Construct T3 build is published for this build's channel -> "update-t3"
+//      (Update-T3Code.ps1 -Mode quick: updates T3 Code in the VM and installs the
+//      matching Desktop app, without a reprovision).
 //
 // Everything here is plain TypeScript with injectable IO so it unit-tests
 // without a network, a Windows filesystem, or Electron. DesktopUpdates.ts owns
@@ -96,10 +98,88 @@ export function resolveConstructT3Channel(t3BaseVersion: string): DesktopUpdateC
   return /-nightly(\.|$)/.test(t3BaseVersion) ? "nightly" : "latest";
 }
 
-export function constructT3RegistryUrl(channel: DesktopUpdateChannel): string {
-  return channel === "nightly"
-    ? "https://registry.npmjs.org/t3/nightly"
-    : "https://registry.npmjs.org/t3/latest";
+// construct-t3-builds publishes every Construct T3 build: a stable one as GitHub's latest
+// release, a nightly one as a prerelease. The same discovery as the Companion's and the
+// VM's (bin/install-t3code-prebuilt.py).
+const CONSTRUCT_T3_BUILDS_REPO = "permissionBRICK/construct-t3-builds";
+const CONSTRUCT_T3_NIGHTLY_TAG = /^t3-\d+\.\d+\.\d+-nightly\.\d+\.\d+-[a-f0-9]{64}$/;
+const CONSTRUCT_T3_BUILD_ASSETS = [
+  "manifest.json",
+  "SHA256SUMS",
+  "T3Code-Construct-Setup.exe",
+  "t3code-server-linux-x64.tar.gz",
+];
+// How many pages of the releases API a nightly lookup reads before giving up.
+const CONSTRUCT_T3_RELEASE_PAGES = 5;
+
+export function constructT3StableManifestUrl(): string {
+  return `https://github.com/${CONSTRUCT_T3_BUILDS_REPO}/releases/latest/download/manifest.json`;
+}
+
+export function constructT3ReleasesUrl(page: number): string {
+  return `https://api.github.com/repos/${CONSTRUCT_T3_BUILDS_REPO}/releases?per_page=100&page=${page}`;
+}
+
+/** The manifest URL of the newest complete nightly release in one page of the releases
+ *  API, or null when the page has none. */
+export function selectConstructNightlyManifestUrl(releases: unknown): string | null {
+  if (!Array.isArray(releases)) return null;
+  let newest: { tag: string; publishedAt: string } | null = null;
+  for (const release of releases as ReadonlyArray<Record<string, unknown>>) {
+    if (typeof release !== "object" || release === null) continue;
+    const tag = release.tag_name;
+    const publishedAt = release.published_at;
+    const assets = Array.isArray(release.assets)
+      ? (release.assets as ReadonlyArray<Record<string, unknown>>).map((asset) => asset?.name)
+      : [];
+    if (
+      release.draft === true || release.prerelease !== true || typeof tag !== "string" ||
+      !CONSTRUCT_T3_NIGHTLY_TAG.test(tag) || typeof publishedAt !== "string" ||
+      !CONSTRUCT_T3_BUILD_ASSETS.every((name) => assets.includes(name))
+    ) continue;
+    if (newest === null || publishedAt > newest.publishedAt) newest = { tag, publishedAt };
+  }
+  return newest === null
+    ? null
+    : `https://github.com/${CONSTRUCT_T3_BUILDS_REPO}/releases/download/${newest.tag}/manifest.json`;
+}
+
+/** The Desktop version (`<t3 version>-construct.<hash>`) of a published build's manifest
+ *  for `channel`, or null when it is not one. */
+export function constructT3BuildFromManifest(
+  response: ConstructJsonResponse | null,
+  channel: DesktopUpdateChannel,
+): string | null {
+  if (response === null || response.status < 200 || response.status >= 300) return null;
+  if (typeof response.json !== "object" || response.json === null) return null;
+  const manifest = response.json as Record<string, unknown>;
+  const { version, desktopVersion } = manifest;
+  if (manifest.channel !== (channel === "nightly" ? "nightly" : "stable")) return null;
+  if (typeof version !== "string" || parseSemver(version) === null) return null;
+  if (resolveConstructT3Channel(version) !== channel) return null;
+  if (typeof desktopVersion !== "string") return null;
+  if (!desktopVersion.startsWith(`${version}-construct.`)) return null;
+  return isConstructManagedBuild(desktopVersion) ? desktopVersion : null;
+}
+
+/** The newest Construct T3 build published for `channel`, as its Desktop version; null
+ *  when none could be read. */
+export async function fetchConstructT3Build(
+  fetchJson: ConstructFetchJson,
+  channel: DesktopUpdateChannel,
+): Promise<string | null> {
+  if (channel !== "nightly") {
+    return constructT3BuildFromManifest(await fetchJson(constructT3StableManifestUrl()), channel);
+  }
+  for (let page = 1; page <= CONSTRUCT_T3_RELEASE_PAGES; page++) {
+    const listing = await fetchJson(constructT3ReleasesUrl(page));
+    if (listing === null || listing.status < 200 || listing.status >= 300) return null;
+    if (!Array.isArray(listing.json)) return null;
+    const url = selectConstructNightlyManifestUrl(listing.json);
+    if (url !== null) return constructT3BuildFromManifest(await fetchJson(url), channel);
+    if (listing.json.length < 100) return null;
+  }
+  return null;
 }
 
 export function constructManifestUrl(markers: ConstructMarkers): string | null {
@@ -1302,12 +1382,13 @@ export function runConstructPairingLink(
 }
 
 /**
- * The launch plan for ONE named instance's Reprovision: Update-T3Code.ps1 aimed at it by
- * name (B11's name-only targeting, through the same planConstructLaunch every other
- * launch uses — nothing here builds a second command line). Refuses a name the registry
- * does not hold, so a per-row button can never fall back to the default VM.
+ * The launch plan for ONE named instance's Reprovision or T3 Code update: Update-T3Code.ps1
+ * aimed at it by name (B11's name-only targeting, through the same planConstructLaunch
+ * every other launch uses — nothing here builds a second command line). Refuses a name
+ * the registry does not hold, so a per-row button can never fall back to the default VM.
  */
-export function planConstructInstanceReprovision(
+export function planConstructInstanceLaunch(
+  action: "reprovision" | "update-t3",
   instanceName: string,
   registry: ConstructRegistryView,
   info: Pick<ConstructUpdateInfo, "scriptsDir" | "repo" | "ref">,
@@ -1320,7 +1401,7 @@ export function planConstructInstanceReprovision(
   if (instance === undefined) {
     return {
       ok: false,
-      error: `"${instanceName}" is not a Construct instance of this PC, so there is nothing to reprovision.`,
+      error: `"${instanceName}" is not a Construct instance of this PC, so there is nothing to ${action === "reprovision" ? "reprovision" : "update"}.`,
     };
   }
   const target: ConstructVmTarget = {
@@ -1337,7 +1418,7 @@ export function planConstructInstanceReprovision(
     isDefault: false,
     problem: registry.problem,
   };
-  return planConstructLaunch("reprovision", info, target, platform, fs, joinPath, tempDir);
+  return planConstructLaunch(action, info, target, platform, fs, joinPath, tempDir);
 }
 
 // ── Remote checks ───────────────────────────────────────────────────────────────
@@ -1398,17 +1479,6 @@ export function constructUpdateFromManifest(
   return { available: !json.commit.startsWith(markers.installedCommit!), commit: json.commit };
 }
 
-/** The version string of an npm dist-tag manifest (`registry.npmjs.org/t3/<tag>`). */
-export function constructT3VersionFromRegistry(
-  response: ConstructJsonResponse | null,
-): string | null {
-  if (response === null || typeof response.json !== "object" || response.json === null) {
-    return null;
-  }
-  const version = (response.json as { version?: unknown }).version;
-  return typeof version === "string" && parseSemver(version) !== null ? version.trim() : null;
-}
-
 /** True when `latest` is a strictly newer release than `installed` on the same channel.
  *  Nightly builds share a semver core across days and differ in the prerelease
  *  (`0.0.39-nightly.20260901.1` vs `.20260902.1`); the shared semver compare orders
@@ -1426,6 +1496,21 @@ export function isNewerConstructT3Version(
   return compareSemverVersions(latest, installed) > 0;
 }
 
+/** Should this app update to the published build `published` (a Desktop version)? A
+ *  newer upstream release on its channel, or the same release built with other patches.
+ *  An older release never: a local build can be ahead of the published one. */
+export function isNewerConstructT3Build(
+  published: string | null,
+  appVersion: string,
+  channel: DesktopUpdateChannel,
+): boolean {
+  if (published === null) return false;
+  const latest = constructT3BaseVersion(published);
+  const installed = constructT3BaseVersion(appVersion);
+  if (latest === installed) return published !== appVersion.trim();
+  return isNewerConstructT3Version(latest, installed, channel);
+}
+
 // ── Derivation ──────────────────────────────────────────────────────────────────
 
 export interface ConstructCheckSnapshot {
@@ -1437,9 +1522,11 @@ export interface ConstructCheckSnapshot {
    *  renderer pairs them with the remotes T3 is linked to (B14, plan §4.12). */
   readonly instances: ReadonlyArray<ConstructInstanceInfo>;
   readonly manifest: ConstructManifestResult | null;
+  /** This app's own version, `<t3 version>-construct.<hash>`. */
+  readonly desktopVersion: string;
   readonly t3Version: string;
-  readonly t3LatestVersion: string | null;
-  /** The newest release on each channel this PC's instances run (see the check). */
+  /** The newest published Construct T3 build (its Desktop version) on each channel this
+   *  PC's instances run (see the check). */
   readonly t3LatestByChannel: { latest: string | null; nightly: string | null };
   readonly channel: DesktopUpdateChannel;
   readonly runningAction: ConstructUpdateAction | null;
@@ -1449,10 +1536,11 @@ export interface ConstructCheckSnapshot {
 
 /**
  * Which script the HOST-WIDE update control launches. `Update-Construct.ps1` is the one
- * host-wide UPDATE (B14, plan §4.12 "T3 Desktop updater"); a reprovision offered here
- * targets the registry's default instance by name, while every other linked VM has its
- * own Providers row. `provisionStale` and `t3UpdateAvailable` describe that default
- * instance (the rows compute their own).
+ * host-wide UPDATE (B14, plan §4.12 "T3 Desktop updater"); a reprovision or T3 update
+ * offered here targets the registry's default instance by name, while every other linked
+ * VM has its own Providers row. `provisionStale` and `t3UpdateAvailable` describe that
+ * default instance (the rows compute their own). A pending reprovision comes before a T3
+ * update because it updates T3 Code as well.
  */
 export function resolveConstructAction(input: {
   readonly scriptsDir: string | null;
@@ -1467,16 +1555,18 @@ export function resolveConstructAction(input: {
   // linked or matched -- that is exactly the offline / not-yet-paired case this control
   // exists for. The launch itself targets the registry's default instance by name; every
   // other instance is reprovisioned from its own Providers row.
-  if (input.provisionStale || input.t3UpdateAvailable) return "reprovision";
+  if (input.provisionStale) return "reprovision";
+  if (input.t3UpdateAvailable) return "update-t3";
   return null;
 }
 
 export function deriveConstructUpdateInfo(snapshot: ConstructCheckSnapshot): ConstructUpdateInfo {
   const constructUpdateAvailable = snapshot.manifest?.available === true;
   const provisionStale = isConstructProvisionStale(snapshot.markers);
-  const t3UpdateAvailable = isNewerConstructT3Version(
-    snapshot.t3LatestVersion,
-    snapshot.t3Version,
+  const t3Latest = snapshot.t3LatestByChannel[snapshot.channel];
+  const t3UpdateAvailable = isNewerConstructT3Build(
+    t3Latest,
+    snapshot.desktopVersion,
     snapshot.channel,
   );
   return {
@@ -1492,8 +1582,9 @@ export function deriveConstructUpdateInfo(snapshot: ConstructCheckSnapshot): Con
     latestCommit: snapshot.manifest?.commit ?? null,
     constructUpdateAvailable,
     provisionStale,
+    desktopVersion: snapshot.desktopVersion,
     t3Version: snapshot.t3Version,
-    t3LatestVersion: snapshot.t3LatestVersion,
+    t3LatestVersion: t3Latest === null ? null : constructT3BaseVersion(t3Latest),
     t3LatestByChannel: snapshot.t3LatestByChannel,
     t3UpdateAvailable,
     action: resolveConstructAction({
@@ -1517,6 +1608,9 @@ export function constructAvailableVersionLabel(info: ConstructUpdateInfo): strin
   const action = info.runningAction ?? info.action;
   if (action === "update-construct") {
     return `Construct ${info.ref}`;
+  }
+  if (action === "update-t3") {
+    return info.t3LatestVersion === null ? "T3 Code" : `T3 Code ${info.t3LatestVersion}`;
   }
   if (action === "reprovision") {
     if (info.t3UpdateAvailable && info.t3LatestVersion !== null) {
@@ -1647,11 +1741,10 @@ export async function checkConstructUpdates(
   // Remote results: fresh when a fetcher is given, else carried over from the previous
   // check as long as they still describe the same installed commit / channel.
   let manifest: ConstructManifestResult | null = null;
-  let t3LatestVersion: string | null = null;
-  // The upstream release per channel. Rows are per instance and instances can be on
-  // DIFFERENT channels (plan §4.12), so a row on the other channel would otherwise be
-  // told about a release that is not on its own. The second npm lookup is made only when
-  // some instance actually runs the other channel.
+  // The published Construct T3 build per channel. Rows are per instance and instances can
+  // be on DIFFERENT channels (plan §4.12), so a row on the other channel would otherwise be
+  // told about a build that is not on its own. The second lookup is made only when some
+  // instance actually runs the other channel.
   const t3LatestByChannel: { latest: string | null; nightly: string | null } = {
     latest: null,
     nightly: null,
@@ -1667,22 +1760,18 @@ export async function checkConstructUpdates(
         : null;
       if (manifest === null) errors.push("Could not check GitHub for Construct updates.");
     }
-    t3LatestVersion = constructT3VersionFromRegistry(
-      await options.fetchJson(constructT3RegistryUrl(channel)),
-    );
-    if (t3LatestVersion === null) errors.push("Could not check npm for T3 Code releases.");
-    t3LatestByChannel[channel] = t3LatestVersion;
+    t3LatestByChannel[channel] = await fetchConstructT3Build(options.fetchJson, channel);
+    if (t3LatestByChannel[channel] === null) {
+      errors.push("Could not check GitHub for T3 Code builds.");
+    }
     if (someInstanceOnOtherChannel) {
-      t3LatestByChannel[otherChannel] = constructT3VersionFromRegistry(
-        await options.fetchJson(constructT3RegistryUrl(otherChannel)),
-      );
+      t3LatestByChannel[otherChannel] = await fetchConstructT3Build(options.fetchJson, otherChannel);
     }
   } else if (previous !== null) {
     if (previous.installedCommit === markers.installedCommit && constructManifestUrl(markers) !== null &&
         previous.latestCommit != null) {
       manifest = { available: previous.constructUpdateAvailable, commit: previous.latestCommit };
     }
-    t3LatestVersion = previous.t3LatestVersion;
     // Optional chaining: `previous` can come from a state this build did not write
     // (an older Desktop, a restored snapshot), and a missing map is "not asked", not a
     // crash in the local-only refresh that runs while a script is going.
@@ -1702,8 +1791,8 @@ export async function checkConstructUpdates(
     target,
     instances,
     manifest,
+    desktopVersion: options.appVersion.trim(),
     t3Version,
-    t3LatestVersion,
     t3LatestByChannel,
     channel,
     runningAction: options.runningAction,
@@ -1750,10 +1839,31 @@ export function constructSupportsInstanceName(
   fs: ConstructFileSystem,
   joinPath: JoinPath = defaultJoinPath,
 ): boolean {
+  return constructReprovisionScriptDeclares(scriptsDir, "InstanceName", fs, joinPath);
+}
+
+/** Does the installed Update-T3Code.ps1 declare `$<name>`? Unreadable or absent: false. */
+function constructReprovisionScriptDeclares(
+  scriptsDir: string,
+  name: string,
+  fs: ConstructFileSystem,
+  joinPath: JoinPath,
+): boolean {
   const text = fs.readTextFile(joinPath(scriptsDir, CONSTRUCT_REPROVISION_SCRIPT));
   if (text === null) return false;
   const code = text.replace(/<#[\s\S]*?#>/g, "").replace(/^[ \t]*#.*$/gm, "");
-  return /\$InstanceName\s*(?:=|,|\)|$)/im.test(code);
+  return new RegExp(`\\$${name}\\s*(?:=|,|\\)|$)`, "im").test(code);
+}
+
+/** What Update-T3Code.ps1 is told to run: `-Mode quick` (T3 Code alone) or
+ *  `-Mode reprovision`. An installed script without `-Mode` predates the quick update and
+ *  always reprovisions, so it gets no argument. */
+export function constructUpdateModeArgs(
+  action: "reprovision" | "update-t3",
+  supportsMode: boolean,
+): ReadonlyArray<string> {
+  if (!supportsMode) return [];
+  return ["-Mode", action === "update-t3" ? "quick" : "reprovision"];
 }
 
 /** The identity arguments Update-T3Code.ps1 forwards to the provisioner. None for the
@@ -1828,20 +1938,31 @@ export function planConstructLaunch(
       error: `Refusing to launch with an invalid Construct source: ${info.repo}@${info.ref}`,
     };
   }
-  if (action === "reprovision" && target.problem !== null) {
+  if (action !== "update-construct" && target.problem !== null) {
     return {
       ok: false,
       error: `${target.problem} Fix instances.json (or reprovision from the VS Code control panel) before reprovisioning from here.`,
     };
   }
-  const title = action === "update-construct" ? "Construct update" : "Construct reprovision";
+  const title =
+    action === "update-construct"
+      ? "Construct update"
+      : action === "update-t3"
+        ? "T3 Code update"
+        : "Construct reprovision";
   const scriptArgs =
     action === "update-construct"
       ? ["-Repo", `"${info.repo}"`, "-Ref", `"${info.ref}"`]
-      : constructReprovisionIdentityArgs(
-          target,
-          constructSupportsInstanceName(info.scriptsDir, fs, joinPath),
-        );
+      : [
+          ...constructReprovisionIdentityArgs(
+            target,
+            constructSupportsInstanceName(info.scriptsDir, fs, joinPath),
+          ),
+          ...constructUpdateModeArgs(
+            action,
+            constructReprovisionScriptDeclares(info.scriptsDir, "Mode", fs, joinPath),
+          ),
+        ];
   const powershell = [
     "powershell.exe",
     "-NoProfile",

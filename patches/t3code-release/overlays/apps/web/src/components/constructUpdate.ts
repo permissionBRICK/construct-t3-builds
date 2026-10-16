@@ -7,7 +7,8 @@ type ConstructUpdateBridge = Pick<DesktopBridge, "downloadUpdate" | "reprovision
 
 /**
  * Run the Construct action the Desktop app currently offers (`downloadUpdate` is the
- * stock IPC for host updates; VM reprovisioning always passes the displayed name). Shared by the
+ * stock IPC for host updates; a reprovision or T3 Code update always passes the displayed
+ * name and the action). Shared by the
  * sidebar pill, the About section, the update popup and the Providers entry so they
  * launch and report identically. Resolves true when a script was started.
  */
@@ -19,9 +20,9 @@ export async function startConstructUpdate(
   const actionLabel = getConstructUpdateActionLabel(info.action);
   try {
     const outcome = getConstructLaunchOutcome(
-      info.action === "reprovision"
-        ? await bridge.reprovisionConstructInstance(info.vmName)
-        : await bridge.downloadUpdate(),
+      info.action === "update-construct"
+        ? await bridge.downloadUpdate()
+        : await bridge.reprovisionConstructInstance(info.vmName, info.action),
     );
     if (outcome.kind === "started") {
       toastManager.add(
@@ -29,9 +30,9 @@ export async function startConstructUpdate(
           type: "info",
           title: `${actionLabel} started`,
           description:
-            outcome.action === "reprovision"
-              ? "Follow the Construct reprovision console window. When it installs a new T3 Code Desktop build, this app closes and reopens on its own."
-              : "Follow the Construct update console window. Reprovision the VM afterwards to apply the update there.",
+            outcome.action === "update-construct"
+              ? "Follow the Construct update console window. Reprovision the VM afterwards to apply the update there."
+              : `Follow the ${outcome.action === "update-t3" ? "T3 Code update" : "Construct reprovision"} console window. When it installs a new T3 Code Desktop build, this app closes and reopens on its own.`,
         }),
       );
       return true;

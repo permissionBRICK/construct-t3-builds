@@ -201,7 +201,8 @@ export interface ConstructProviderRow {
   readonly provisionStale: boolean;
   /** The T3 release this Desktop build was made from. */
   readonly t3Version: string;
-  /** The newest upstream release on THIS INSTANCE's channel; null when unknown. */
+  /** The T3 release of the newest Construct build on THIS INSTANCE's channel; null when
+   *  unknown. */
   readonly t3LatestVersion: string | null;
   readonly t3UpdateAvailable: boolean;
   /** Is a per-row Reprovision offered? False for a remote that is not a Construct
@@ -352,6 +353,19 @@ export function planConstructRelink(input: {
   );
 }
 
+/** The upstream T3 version of a Desktop version (`<t3 version>-construct.<hash>`). */
+function constructT3BaseVersion(desktopVersion: string): string {
+  return desktopVersion.replace(/-construct\.[0-9a-f]{6,}$/i, "");
+}
+
+/** What a row's button runs: a T3 Code update when T3 Code is all that is behind,
+ *  otherwise a reprovision (also the plain button of a row with nothing pending). Pure. */
+export function getConstructRowAction(
+  row: Pick<ConstructProviderRow, "provisionStale" | "t3UpdateAvailable">,
+): "reprovision" | "update-t3" {
+  return row.t3UpdateAvailable && !row.provisionStale ? "update-t3" : "reprovision";
+}
+
 /** Is `latest` newer than `installed` on the same channel? The renderer's copy of the
  *  question ConstructUpdates.isNewerConstructT3Version answers for the app's own build:
  *  here it is asked per row, and a mismatch of channel is never an update. Deliberately
@@ -392,8 +406,9 @@ export function planConstructProviderRows(input: {
   readonly companionInstalled?: boolean;
   readonly remotes: ReadonlyArray<ConstructLinkedRemote>;
   readonly info: ConstructUpdateInfo | null;
-  /** Newest upstream release per channel. The app's own channel is always known; the
-   *  other one only when an instance runs it (the main process asks npm for it then). */
+  /** The newest published Construct T3 build per channel, as its Desktop version. The
+   *  app's own channel is always known; the other one only when an instance runs it (the
+   *  main process looks that one up too then). */
   readonly t3LatestByChannel?: Readonly<Record<string, string | null>>;
 }): ReadonlyArray<ConstructProviderRow> {
   const info = input.info;
@@ -401,6 +416,7 @@ export function planConstructProviderRows(input: {
   const installedCommit = info?.installedCommit ?? null;
   const running = info?.runningAction ?? null;
   const t3Version = info?.t3Version ?? "";
+  const desktopVersion = info?.desktopVersion ?? "";
   const latestByChannel = input.t3LatestByChannel ?? {};
   const linkedNames = constructLinkedInstanceNames(input.remotes, instances);
   // UNLINKED instances follow the linked remotes: one row each for a VM of this PC's
@@ -473,10 +489,12 @@ export function planConstructProviderRows(input: {
     // Only a CONNECTED remote (a running VM) is nudged; a stopped VM is judged when it comes online.
     const stale =
       remote.connected !== false && installedCommit !== null && own !== null && installedCommit !== own;
-    // The upstream release on THIS instance's channel. An instance whose channel this PC
-    // does not know reports no upstream version rather than the app's own.
-    const latest =
+    // The newest build on THIS instance's channel. An instance whose channel this PC does
+    // not know reports none rather than the app's own. The same release rebuilt with other
+    // patches is an update too; an older release never is.
+    const published =
       instance.channel === null ? null : (latestByChannel[instance.channel] ?? null);
+    const latest = published === null ? null : constructT3BaseVersion(published);
     return {
       ...base,
       label: instance.name,
@@ -485,7 +503,8 @@ export function planConstructProviderRows(input: {
       provisionedCommit: own,
       provisionStale: stale,
       t3LatestVersion: latest,
-      t3UpdateAvailable: isNewerT3Version(latest, t3Version),
+      t3UpdateAvailable:
+        latest === t3Version ? published !== desktopVersion : isNewerT3Version(latest, t3Version),
       canReprovision: running === null,
       note: running === null ? "" : "A Construct action is already running.",
     };

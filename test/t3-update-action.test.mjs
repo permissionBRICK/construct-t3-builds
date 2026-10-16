@@ -17,10 +17,11 @@ for(const channel of ['release','nightly']) {
   constructUpdateAvailable:true,t3LatestVersion:null};
  let hostCalls=0;
  const targets=[];
+ const actions=[];
  const resultFor=action=>({accepted:true,completed:false,state:{construct:{...info,runningAction:action}}});
  const bridge={
   downloadUpdate:async()=>{hostCalls++;return resultFor('update-construct');},
-  reprovisionConstructInstance:async name=>{calls++;targets.push(name);return resultFor('reprovision');},
+  reprovisionConstructInstance:async (name,action)=>{calls++;targets.push(name);actions.push(action);return resultFor(action);},
  };
  assert.equal(await startConstructUpdate(bridge,info),true);
  assert.equal(calls,1,'one explicit action must launch without a second confirmation');
@@ -28,6 +29,11 @@ for(const channel of ['release','nightly']) {
  assert.equal(calls,1);
  assert.deepEqual(targets,['thread-vm'],'reprovision must name the displayed thread VM');
  assert.equal(hostCalls,0,'reprovision must not use the host/default-VM launch');
+ assert.deepEqual(actions,['reprovision'],'a reprovision must say so');
+ assert.equal(await startConstructUpdate(bridge,{...info,action:'update-t3'}),true);
+ assert.deepEqual([targets[1],actions[1]],['thread-vm','update-t3'],'a T3 Code update must name the VM and the action');
+ assert.equal(hostCalls,0,'a T3 Code update must not use the host/default-VM launch');
+ calls=1;
  assert.equal(await startConstructUpdate(bridge,{...info,action:'update-construct'}),true);
  assert.equal(hostCalls,1);
  assert.equal(calls,1);
