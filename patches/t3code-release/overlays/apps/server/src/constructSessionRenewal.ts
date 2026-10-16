@@ -2,8 +2,8 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";

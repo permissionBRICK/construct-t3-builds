@@ -1,7 +1,7 @@
 // @effect-diagnostics globalFetchInEffect:off - plain fetch needs no HttpClient in the connection broker, and sends the browser's cookie.
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Base64Url from "effect/encoding/Base64Url";
 import * as Result from "effect/Result";
 
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
@@ -23,7 +23,7 @@ const RENEWAL_TIMEOUT_MS = 5_000;
 export function sessionTokenExpiry(token: string): number | null {
   const [payload] = token.split(".");
   if (!payload) return null;
-  const decoded = Encoding.decodeBase64UrlString(payload);
+  const decoded = Base64Url.decodeString(payload);
   if (Result.isFailure(decoded)) return null;
   try {
     const claims: unknown = JSON.parse(decoded.success);
