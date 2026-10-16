@@ -88,3 +88,14 @@ for (const channel of ["release", "nightly"]) {
 const autoLink = fs.readFileSync(path.join(repoRoot, "patches", "t3code-release", "overlays", "apps", "web", "src", "components", "ConstructAutoLink.tsx"), "utf8");
 ok("auto-link: the renderer links off the planner and never twice per session",
   /planConstructAutoLink\(/.test(autoLink) && /attemptedRef\.current\.add\(name\)/.test(autoLink) && /linkConstructInstance\(\{ bridge, name, connectPairing \}\)/.test(autoLink));
+for (const channel of ["release", "nightly"]) {
+  const components = path.join(repoRoot, "patches", `t3code-${channel}`, "overlays", "apps", "web", "src", "components");
+  const relink = fs.readFileSync(path.join(components, "ConstructAutoLink.tsx"), "utf8");
+  const relinkLink = fs.readFileSync(path.join(components, "constructInstances.link.ts"), "utf8");
+  ok(`auto-link (${channel}): a VM whose session still has T3's old permissions is paired again once per session, in place`,
+    /sessionHasLegacyPermissions\(session\.value\)/.test(relink) && /planConstructRelink\(\{/.test(relink) &&
+    /relinkAttemptedRef\.current\.add\(plan\.name\)/.test(relink) &&
+    /host: input\.baseUrl,\n\s*pairingCode: token,\n\s*expectedEnvironmentId: input\.environmentId,/.test(relinkLink));
+  ok(`auto-link (${channel}): upstream's pair-again notice is dismissed by a layout effect for the VMs Construct re-links`,
+    /useLayoutEffect\(\(\) => \{\n\s*if \(legacy\) \{/.test(relink) && /`t3code:permission-update:v1:\$\{environmentId\}`/.test(relink));
+}

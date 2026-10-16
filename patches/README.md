@@ -120,6 +120,21 @@ through re-indentation) and the list of `conflicts`.
   VM's provisioning marker and T3 channel. Without an unambiguous match, no VM
   popup is offered. Switching threads replaces the offer; host Construct updates
   remain available independently of the active thread.
+- **Auto-link** (`ConstructAutoLink`, Windows Desktop app): every Construct VM of the PC
+  that runs T3 and is not yet a remote environment is linked on its own. The main process
+  runs `Get-ConstructT3PairingLink.ps1` hidden to mint a link over SSH. A marker in the
+  instance's state keeps a connection the user removed from being added back. A linked VM
+  (matched by its paired address, or else by the environment id its marker recorded, which
+  also covers a connection the user paired through a proxy of their own) whose session still has T3's
+  old permission set (upstream's
+  `sessionHasLegacyPermissions`, for example after an upgrade to 0.1) is paired again once
+  per app session. The new token is redeemed for the same environment at the address of the
+  paired route that owns the saved credential, never at a LAN route T3 learned on its own,
+  so the credential is replaced in place. For those VMs a layout effect stores upstream's
+  dismissal of its "Permissions have changed … pair again" notice before that notice's
+  effect runs in the same render (a notice shown before the VM list loaded stays). A
+  failure shows an error and is retried on the next app start. Servers that are not
+  Construct VMs of this PC keep upstream's notice.
 - **Disk-space warning** (`construct.diskSpace` RPC, capability `constructDiskSpace`):
   a prompt when the VM disk is almost full or only the root reserve is left.
 - **Key vault banner** (`construct.vaultPending` RPC, capability `constructVaultPending`):

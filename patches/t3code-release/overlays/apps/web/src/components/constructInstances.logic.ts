@@ -284,6 +284,74 @@ export function planConstructAutoLink(input: {
   return out;
 }
 
+/** One linked remote to pair again: the instance that mints the link, and the saved
+ *  connection the new credential replaces. */
+export interface ConstructRelinkPlan {
+  readonly name: string;
+  readonly environmentId: string;
+  readonly baseUrl: string;
+}
+
+/** The instance a linked remote belongs to, for a re-link: the address match the Providers
+ *  rows use, or else the ONE instance whose link marker recorded this remote's environment.
+ *  The environment id is the server's own, so it still names the VM when the user paired
+ *  it at an address of their own, such as a proxy in front of it. Pure. */
+export function constructInstanceForRemote(
+  remote: ConstructLinkedRemote,
+  instances: ReadonlyArray<ConstructInstanceInfo>,
+): ConstructInstanceInfo | null {
+  const byAddress = matchConstructRemoteToInstance(remote.baseUrl, instances);
+  if (byAddress !== null) return byAddress;
+  const byMarker = instances.filter((instance) => instance.t3Link?.environmentId === remote.id);
+  return byMarker.length === 1 ? byMarker[0]! : null;
+}
+
+/** The linked remotes Construct may pair again: the first remote of each instance of this
+ *  PC (constructInstanceForRemote) — a server this PC does not manage is the user's to
+ *  pair. `remotes` carry the PAIRED route's address (constructPairedRouteUrl), which is
+ *  both what identifies the VM and where its new token is redeemed. Pure. */
+export function constructRelinkCandidates(
+  remotes: ReadonlyArray<ConstructLinkedRemote>,
+  instances: ReadonlyArray<ConstructInstanceInfo>,
+): ReadonlyArray<ConstructRelinkPlan> {
+  const out: ConstructRelinkPlan[] = [];
+  const seen = new Set<string>();
+  for (const remote of remotes) {
+    const instance = constructInstanceForRemote(remote, instances);
+    if (instance === null || seen.has(instance.name)) continue;
+    seen.add(instance.name);
+    out.push({ name: instance.name, environmentId: remote.id, baseUrl: remote.baseUrl });
+  }
+  return out;
+}
+
+/**
+ * Which linked remotes the app should pair AGAIN, on its own: a candidate
+ * (constructRelinkCandidates) whose session still has the permissions T3 granted before it
+ * split them (`legacy`: upstream's sessionHasLegacyPermissions, the test behind its
+ * "Permissions have changed" notice). The VM's T3 was upgraded under the old link; a new
+ * link from the instance carries the current set.
+ *
+ *   * never one an attempt is already in flight for (a failed attempt waits for the next
+ *     app start; the marker is left alone, so a connection the user removes later still
+ *     stays removed),
+ *   * nothing while a Construct script runs.
+ *
+ * Pure.
+ */
+export function planConstructRelink(input: {
+  readonly info: ConstructUpdateInfo | null;
+  readonly remotes: ReadonlyArray<ConstructLinkedRemote>;
+  readonly legacy: ReadonlySet<string>;
+  readonly inFlight: ReadonlySet<string>;
+}): ReadonlyArray<ConstructRelinkPlan> {
+  const info = input.info;
+  if (info === null || info.runningAction !== null || info.scriptsDir === null) return [];
+  return constructRelinkCandidates(input.remotes, info.instances).filter(
+    (candidate) => input.legacy.has(candidate.environmentId) && !input.inFlight.has(candidate.name),
+  );
+}
+
 /** Is `latest` newer than `installed` on the same channel? The renderer's copy of the
  *  question ConstructUpdates.isNewerConstructT3Version answers for the app's own build:
  *  here it is asked per row, and a mismatch of channel is never an update. Deliberately
