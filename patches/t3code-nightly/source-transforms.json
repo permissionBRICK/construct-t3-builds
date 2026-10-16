@@ -1081,7 +1081,7 @@
     },
     {
       "path": "scripts/build-desktop-artifact.ts",
-      "find": "    // The CLI archive runs the single-executable, never a loose server bundle.\n    const bundleEntry = members.find((member) => member.endsWith(\"/bin.mjs\"));\n    if (bundleEntry !== undefined) {\n      return yield* invalidWslRuntime(\n        new Error(`WSL runtime archive contains a server bundle entry ${bundleEntry}`),\n      );\n    }\n",
+      "find": "    const bundleEntry = members.find((member) => member.endsWith(\"/bin.mjs\"));\n    if (bundleEntry !== undefined) {\n      return yield* invalidWslRuntime(\n        new Error(`WSL runtime archive contains a server bundle entry ${bundleEntry}`),\n      );\n    }\n",
       "replace": "    // Construct ships its patched server bundle and matching Node executable.\n"
     },
     {
