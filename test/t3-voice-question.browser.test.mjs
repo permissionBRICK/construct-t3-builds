@@ -102,6 +102,7 @@ function Harness() {
  useEffect(() => {promptRef.current = activePendingProgress?.customAnswer ?? prompt}, [pending,prompt]);
  const [isVoiceRecording,setIsVoiceRecording] = useState(false);
  const [voiceLevel,setVoiceLevel] = useState(0);
+ const [voiceLive,setVoiceLive] = useState(false);
  const [voiceStatus,setVoiceStatus] = useState("Recording");
  const [voiceSubmission,setVoiceSubmission] = useState(null);
  const voiceInsertionRef = useRef(null); const voiceShortcutRef = useRef(null);
@@ -110,7 +111,7 @@ function Harness() {
    if(window.offline) return Promise.resolve({failure:true,cause:{}});
    window.transcript=text=>onEvent({type:'transcript',text});
    window.voiceEvent=onEvent;
-   queueMicrotask(()=>onEvent({type:'listening'}));
+   if(!window.deferListening) queueMicrotask(()=>onEvent({type:'listening'}));
    return new Promise(resolve=>{window.endStream=resolve;window.disconnect=()=>{window.offline=true;resolve({failure:true,cause:{}})}});
  };
  const runStopVoiceInput = useCallback(async () => {
@@ -180,7 +181,7 @@ function Harness() {
    <output>{prompt}</output><span data-status>{voiceStatus}</span>
  </form>;
 }
-window.holdFinal=false;window.toasts=[];window.stops=0;window.starts=[];window.sends=[];window.offline=false;window.received=0;window.captured=0;
+window.holdFinal=false;window.deferListening=false;window.toasts=[];window.stops=0;window.starts=[];window.sends=[];window.offline=false;window.received=0;window.captured=0;
 createRoot(document.getElementById('root')).render(React.createElement(Harness));
 `;
 const browser = await chromium.launch({headless:true, ...(process.env.T3_TEST_CHROMIUM ? {executablePath:process.env.T3_TEST_CHROMIUM} : {})});
@@ -284,6 +285,36 @@ try {
    assert.deepEqual(await page.evaluate(()=>window.sends),[],cancel+' must not dispatch the queued send');
  }
  console.log('PASS: '+channel+' Enter stops and sends final text once, preserves modifiers, and cancels on target changes or failure');
+
+ // Yellow while starting and finishing; red only while speech is actually kept.
+ async function micState(live,status) {
+   await page.waitForFunction(([live,status])=>{
+     const button=document.querySelector('[data-voice-live]');
+     return button?.dataset.voiceLive===String(live) && document.querySelector('[data-status]').textContent===status;
+   },[live,status]);
+   assert.match(await mic.getAttribute('class'),live?/\bbg-destructive\b/:/\bbg-warning\b/);
+ }
+ for (const client of [false,true]) {
+   await reset(client);await page.evaluate(()=>{window.deferListening=true});await start();
+   await micState(false,'Starting microphone…');
+   // Client audio before the stream opens, or a stream without audio, is not live yet.
+   await page.evaluate(client=>client?window.audio():window.voiceEvent({type:'listening'}),client);
+   await page.waitForTimeout(100);await micState(false,'Starting microphone…');
+   await page.evaluate(client=>client?window.voiceEvent({type:'listening'}):window.voiceEvent({type:'level',value:0.2}),client);
+   await micState(true,'Recording');
+   await page.evaluate(()=>{window.holdFinal=true});await mic.click();
+   await page.waitForFunction(()=>window.stops===1);
+   await micState(false,'Finishing transcription…');
+   await page.evaluate(client=>client?window.audio():window.voiceEvent({type:'level',value:0.2}),client);
+   await page.waitForTimeout(100);await micState(false,'Finishing transcription…');
+   await page.evaluate(()=>{window.voiceEvent({type:'stopped',reason:'user-stop'});window.endStream({failure:false})});
+   await recording(false);
+   assert.equal(await mic.getAttribute('data-voice-live'),null);
+   // The next recording starts yellow again.
+   await page.evaluate(()=>{window.holdFinal=false});await start();
+   await micState(false,'Starting microphone…');await stop();
+ }
+ console.log('PASS: '+channel+' the mic is yellow while starting and finishing, and red only once the stream is open and audio arrives');
 
  // Recording must preserve focus so Ctrl+T can stop it before the first transcript.
  await reset();await page.evaluate(()=>window.focusEnd());
