@@ -39,6 +39,9 @@ ok("source transforms: stream PCM amplitude into a live mic-button level effect"
   /data-voice-level/.test(sourceRecipe) && /boxShadow/.test(sourceRecipe));
 // Auto-link (plan §4.12 "T3 Desktop topology"): the Desktop app links every VM with a T3
 // server on its own, through a hidden host script; the same in BOTH inventories.
+// The full client scope set each channel's upstream tag names (nightly folded the
+// administrative scopes into its standard set).
+const administrativeScopes = { release: "AuthAdministrativeScopes", nightly: "AuthStandardClientScopes" };
 for (const channel of ["release", "nightly"]) {
   const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, "patches", `t3code-${channel}`, "source-transforms.json"), "utf8"));
   const inserts = manifest.transforms.map((t) => (t.insert || t.replace || "")).join("\n");
@@ -83,7 +86,7 @@ for (const channel of ["release", "nightly"]) {
     /ConstructUpdates\.runConstructPairingLink\(planned\.plan\)/.test(inserts) &&
     /ConstructUpdates\.recordConstructInstanceT3Link\(/.test(inserts));
   ok(`auto-link (${channel}): \`t3 auth pairing create --scopes administrative\` exists in the patched build`,
-    /Flag\.[sS]tring\("scopes"\)/.test(inserts) && /\.value === "administrative"\n\s*\? AuthAdministrativeScopes\n/.test(inserts));
+    /Flag\.[sS]tring\("scopes"\)/.test(inserts) && new RegExp(`\\.value === "administrative"\\n\\s*\\? ${administrativeScopes[channel]}\\n`).test(inserts));
 }
 const autoLink = fs.readFileSync(path.join(repoRoot, "patches", "t3code-release", "overlays", "apps", "web", "src", "components", "ConstructAutoLink.tsx"), "utf8");
 ok("auto-link: the renderer links off the planner and never twice per session",
