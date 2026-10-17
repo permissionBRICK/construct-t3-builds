@@ -101,12 +101,16 @@ through re-indentation) and the list of `conflicts`.
   the service would transcribe it twice and repeat the words at the join. The
   text of each stream is joined in order; a stream that does not finalize within
   3 seconds keeps its last text.
-  The microphone control is yellow while voice input starts and while the final
-  transcript is pending. It turns red only once speech is kept: the
+  The microphone control shows a spinning amber ring while voice input starts and while
+  the final transcript is pending. It turns red only once speech is kept: the
   transcription stream is open and the microphone has delivered audio (for the
   host bridge, the first level event from the server).
+  Alt+Q starts and stops voice input: tap to toggle, or hold and release to
+  stop. It matches the physical Q key and requires that Ctrl is not held, so
+  AltGr+Q still types "@". Browsers keep Ctrl+T for a new tab; the old Ctrl+T
+  shortcut still works where it arrives (the desktop app) but is not shown.
   The composer stays editable while recording and finishing transcription, so
-  focus and Ctrl+T retain their normal behavior. Text edits do not cancel voice
+  focus and Alt+Q retain their normal behavior. Text edits do not cancel voice
   input. Transcript updates use the session's latest requested text rather than
   the editor's delayed rendered snapshot and may overwrite manual edits made
   during recording. Switching the target thread or question still cancels.
