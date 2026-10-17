@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useEnvironments } from "../state/environments";
@@ -8,7 +8,7 @@ import { constructEnvironmentConnected, constructLinkedRemotes } from "./constru
 import { isElectron } from "../env";
 import { useDismissedProviderUpdateNotificationKeys } from "../providerUpdateDismissal";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
-import { startConstructUpdate } from "./constructUpdate";
+import { setConstructLinkedRemotes, startConstructUpdate } from "./constructUpdate";
 import {
   getConstructDisabledReason,
   getConstructThreadUpdateInfo,
@@ -47,16 +47,22 @@ function ConstructUpdateNotificationContent() {
     routeTarget?.kind === "draft" ? store.getDraftSession(routeTarget.draftId) : null,
   );
   const threadRef = resolveActiveThreadRouteRef(routeTarget, draftThread);
-  const remote =
-    constructLinkedRemotes(
-      environments.map((environment) => ({
-        environmentId: String(environment.environmentId),
-        label: environment.label,
-        displayUrl: environment.displayUrl,
-        targetKind: environment.entry.target._tag,
-        connected: constructEnvironmentConnected(environment),
-      })),
-    ).find((candidate) => candidate.id === threadRef?.environmentId) ?? null;
+  const remotes = useMemo(
+    () =>
+      constructLinkedRemotes(
+        environments.map((environment) => ({
+          environmentId: String(environment.environmentId),
+          label: environment.label,
+          displayUrl: environment.displayUrl,
+          targetKind: environment.entry.target._tag,
+          connected: constructEnvironmentConnected(environment),
+        })),
+      ),
+    [environments],
+  );
+  // The app-wide T3 Code update targets the connected VMs; this component is always mounted.
+  useEffect(() => setConstructLinkedRemotes(remotes), [remotes]);
+  const remote = remotes.find((candidate) => candidate.id === threadRef?.environmentId) ?? null;
   const info = getConstructThreadUpdateInfo(getConstructUpdateInfo(state), remote);
   // Nothing to offer while updates are disabled: the facts stay visible in Settings.
   const notificationKey =

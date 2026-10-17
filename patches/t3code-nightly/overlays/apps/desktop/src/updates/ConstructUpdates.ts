@@ -1382,14 +1382,15 @@ export function runConstructPairingLink(
 }
 
 /**
- * The launch plan for ONE named instance's Reprovision or T3 Code update: Update-T3Code.ps1
- * aimed at it by name (B11's name-only targeting, through the same planConstructLaunch
- * every other launch uses — nothing here builds a second command line). Refuses a name
- * the registry does not hold, so a per-row button can never fall back to the default VM.
+ * The launch plan for named instances' Reprovision or T3 Code update: Update-T3Code.ps1
+ * aimed at each by name (B11's name-only targeting, through the same checks every other
+ * launch uses). Refuses a name the registry does not hold, so a per-row button can never
+ * fall back to the default VM. Several names (the app-wide T3 Code update of every
+ * connected VM) run one after another in one console, see planConstructSequenceLaunch.
  */
 export function planConstructInstanceLaunch(
   action: "reprovision" | "update-t3",
-  instanceName: string,
+  instanceNames: string | ReadonlyArray<string>,
   registry: ConstructRegistryView,
   info: Pick<ConstructUpdateInfo, "scriptsDir" | "repo" | "ref">,
   platform: NodeJS.Platform,
@@ -1397,28 +1398,37 @@ export function planConstructInstanceLaunch(
   joinPath: JoinPath = defaultJoinPath,
   tempDir: string = NodeOS.tmpdir(),
 ): ConstructLaunchPlanResult {
-  const instance = registry.instances.find((i) => i.name === instanceName);
-  if (instance === undefined) {
-    return {
-      ok: false,
-      error: `"${instanceName}" is not a Construct instance of this PC, so there is nothing to ${action === "reprovision" ? "reprovision" : "update"}.`,
-    };
+  const names = [...new Set(typeof instanceNames === "string" ? [instanceNames] : instanceNames)];
+  if (names.length === 0) {
+    return { ok: false, error: "No Construct instance was named, so there is nothing to update." };
   }
-  const target: ConstructVmTarget = {
-    name: instance.name,
-    vmHost: instance.vmHost,
-    hostAlias: instance.hostAlias,
-    sshPort: instance.sshPort,
-    keyName: instance.keyName,
-    scriptsDir: instance.scriptsDir,
-    // NEVER "the default target": even the registry's default instance is reprovisioned
-    // BY NAME from here, because this call names one machine out of several and an
-    // argument-less Update-T3Code.ps1 would reprovision whichever one the registry
-    // currently calls default.
-    isDefault: false,
-    problem: registry.problem,
-  };
-  return planConstructLaunch(action, info, target, platform, fs, joinPath, tempDir);
+  const targets: ConstructVmTarget[] = [];
+  for (const instanceName of names) {
+    const instance = registry.instances.find((i) => i.name === instanceName);
+    if (instance === undefined) {
+      return {
+        ok: false,
+        error: `"${instanceName}" is not a Construct instance of this PC, so there is nothing to ${action === "reprovision" ? "reprovision" : "update"}.`,
+      };
+    }
+    targets.push({
+      name: instance.name,
+      vmHost: instance.vmHost,
+      hostAlias: instance.hostAlias,
+      sshPort: instance.sshPort,
+      keyName: instance.keyName,
+      scriptsDir: instance.scriptsDir,
+      // NEVER "the default target": even the registry's default instance is reprovisioned
+      // BY NAME from here, because this call names machines out of several and an
+      // argument-less Update-T3Code.ps1 would reprovision whichever one the registry
+      // currently calls default.
+      isDefault: false,
+      problem: registry.problem,
+    });
+  }
+  return targets.length === 1
+    ? planConstructLaunch(action, info, targets[0]!, platform, fs, joinPath, tempDir)
+    : planConstructSequenceLaunch(action, info, targets, platform, fs, joinPath);
 }
 
 // ── Remote checks ───────────────────────────────────────────────────────────────
@@ -1891,25 +1901,27 @@ export function constructReprovisionIdentityArgs(
   ];
 }
 
-/**
- * Build the command that runs a Construct script in a VISIBLE console window.
- *
- * Electron's main process has no console. libuv gives a `detached` child
- * DETACHED_PROCESS (no console at all) and `stdio: "ignore"` points the std handles at
- * NUL, so spawning powershell.exe directly runs the multi-minute reprovision invisibly.
- * `cmd.exe /c start /wait` creates a fresh console for PowerShell with working
- * stdin/stdout, and cmd itself stays hidden and exits when PowerShell does — which is how
- * the caller learns the script finished.
- */
-export function planConstructLaunch(
+const CONSTRUCT_POWERSHELL = "powershell.exe -NoProfile -ExecutionPolicy Bypass";
+
+function constructLaunchTitle(action: ConstructUpdateAction): string {
+  return action === "update-construct"
+    ? "Construct update"
+    : action === "update-t3"
+      ? "T3 Code update"
+      : "Construct reprovision";
+}
+
+/** The checks for one script run and the arguments it gets. Pure. */
+function planConstructScript(
   action: ConstructUpdateAction,
   info: Pick<ConstructUpdateInfo, "scriptsDir" | "repo" | "ref">,
   target: ConstructVmTarget,
   platform: NodeJS.Platform,
   fs: ConstructFileSystem,
-  joinPath: JoinPath = defaultJoinPath,
-  tempDir: string = NodeOS.tmpdir(),
-): ConstructLaunchPlanResult {
+  joinPath: JoinPath,
+):
+  | { readonly ok: true; readonly scriptPath: string; readonly scriptArgs: ReadonlyArray<string> }
+  | { readonly ok: false; readonly error: string } {
   if (platform !== "win32") {
     return {
       ok: false,
@@ -1944,12 +1956,6 @@ export function planConstructLaunch(
       error: `${target.problem} Fix instances.json (or reprovision from the VS Code control panel) before reprovisioning from here.`,
     };
   }
-  const title =
-    action === "update-construct"
-      ? "Construct update"
-      : action === "update-t3"
-        ? "T3 Code update"
-        : "Construct reprovision";
   const scriptArgs =
     action === "update-construct"
       ? ["-Repo", `"${info.repo}"`, "-Ref", `"${info.ref}"`]
@@ -1963,23 +1969,39 @@ export function planConstructLaunch(
             constructReprovisionScriptDeclares(info.scriptsDir, "Mode", fs, joinPath),
           ),
         ];
-  const powershell = [
-    "powershell.exe",
-    "-NoProfile",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File",
-    `"${scriptPath}"`,
-    ...scriptArgs,
-  ].join(" ");
+  return { ok: true, scriptPath, scriptArgs };
+}
+
+/**
+ * Build the command that runs a Construct script in a VISIBLE console window.
+ *
+ * Electron's main process has no console. libuv gives a `detached` child
+ * DETACHED_PROCESS (no console at all) and `stdio: "ignore"` points the std handles at
+ * NUL, so spawning powershell.exe directly runs the multi-minute reprovision invisibly.
+ * `cmd.exe /c start /wait` creates a fresh console for PowerShell with working
+ * stdin/stdout, and cmd itself stays hidden and exits when PowerShell does — which is how
+ * the caller learns the script finished.
+ */
+export function planConstructLaunch(
+  action: ConstructUpdateAction,
+  info: Pick<ConstructUpdateInfo, "scriptsDir" | "repo" | "ref">,
+  target: ConstructVmTarget,
+  platform: NodeJS.Platform,
+  fs: ConstructFileSystem,
+  joinPath: JoinPath = defaultJoinPath,
+  tempDir: string = NodeOS.tmpdir(),
+): ConstructLaunchPlanResult {
+  const script = planConstructScript(action, info, target, platform, fs, joinPath);
+  if (!script.ok) return script;
+  const powershell = [CONSTRUCT_POWERSHELL, "-File", `"${script.scriptPath}"`, ...script.scriptArgs].join(" ");
   return {
     ok: true,
     plan: {
       action,
-      scriptPath,
+      scriptPath: script.scriptPath,
       command: "cmd.exe",
       // /d: no AutoRun; /s: strip the outer quotes and run the rest verbatim.
-      args: ["/d", "/s", "/c", `"start "${title}" /wait ${powershell}"`],
+      args: ["/d", "/s", "/c", `"start "${constructLaunchTitle(action)}" /wait ${powershell}"`],
       windowsVerbatimArguments: true,
       ...(action === "update-construct"
         ? {
@@ -1990,6 +2012,61 @@ export function planConstructLaunch(
             },
           }
         : {}),
+    },
+  };
+}
+
+/** A PowerShell single-quoted string. */
+function powershellQuote(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+/**
+ * Update-T3Code.ps1 for several instances, one after another in ONE console. The app
+ * cannot start the next one itself: the first T3 Code update installs the matching
+ * Desktop app, which closes this app (the later runs find that build installed and skip
+ * it). Each instance still runs in a PowerShell process of its own, because the
+ * provisioner keeps script and global state. The exit code is 1 when any run failed,
+ * otherwise the last other nonzero code (3: optional errors). Pure.
+ */
+export function planConstructSequenceLaunch(
+  action: "reprovision" | "update-t3",
+  info: Pick<ConstructUpdateInfo, "scriptsDir" | "repo" | "ref">,
+  targets: ReadonlyArray<ConstructVmTarget>,
+  platform: NodeJS.Platform,
+  fs: ConstructFileSystem,
+  joinPath: JoinPath = defaultJoinPath,
+): ConstructLaunchPlanResult {
+  const runs: string[] = [];
+  let scriptPath = "";
+  for (const target of targets) {
+    const script = planConstructScript(action, info, target, platform, fs, joinPath);
+    if (!script.ok) return script;
+    scriptPath = script.scriptPath;
+    // The whole sequence is ONE double-quoted -Command for cmd.exe, so its strings are
+    // PowerShell's single-quoted ones. The values passed the registry's format rules.
+    const args = script.scriptArgs.map((arg) =>
+      arg.startsWith('"') && arg.endsWith('"') ? powershellQuote(arg.slice(1, -1)) : arg,
+    );
+    runs.push(
+      `& ${CONSTRUCT_POWERSHELL} -File ${powershellQuote(script.scriptPath)} ${args.join(" ")}; ` +
+        "if ($LASTEXITCODE -ne 0 -and $code -ne 1) { $code = $LASTEXITCODE }",
+    );
+  }
+  const command = `$code = 0; ${runs.join("; ")}; exit $code`;
+  return {
+    ok: true,
+    plan: {
+      action,
+      scriptPath,
+      command: "cmd.exe",
+      args: [
+        "/d",
+        "/s",
+        "/c",
+        `"start "${constructLaunchTitle(action)}" /wait ${CONSTRUCT_POWERSHELL} -Command "${command}""`,
+      ],
+      windowsVerbatimArguments: true,
     },
   };
 }

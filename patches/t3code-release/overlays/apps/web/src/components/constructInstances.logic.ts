@@ -307,6 +307,21 @@ export function constructInstanceForRemote(
   return byMarker.length === 1 ? byMarker[0]! : null;
 }
 
+/** The instances of this PC whose remote the app is connected to, in name order: what the
+ *  app-wide T3 Code update updates. A stopped VM is not connected and is left alone. Pure. */
+export function constructConnectedInstanceNames(
+  remotes: ReadonlyArray<ConstructLinkedRemote>,
+  instances: ReadonlyArray<ConstructInstanceInfo>,
+): ReadonlyArray<string> {
+  const names = new Set<string>();
+  for (const remote of remotes) {
+    if (remote.connected === false) continue;
+    const instance = constructInstanceForRemote(remote, instances);
+    if (instance !== null) names.add(instance.name);
+  }
+  return [...names].sort();
+}
+
 /** The linked remotes Construct may pair again: the first remote of each instance of this
  *  PC (constructInstanceForRemote) — a server this PC does not manage is the user's to
  *  pair. `remotes` carry the PAIRED route's address (constructPairedRouteUrl), which is

@@ -123,11 +123,16 @@ through re-indentation) and the list of `conflicts`.
   quick`) when a newer build of this repository is published for the channel. The app
   reads the same release manifests the VM installs from and compares their
   `desktopVersion` with its own, so a release counts once its build is published and a
-  rebuild of the same release counts too. The VM popup resolves the active thread's
-  linked remote to a Construct instance, shows its name, and launches that exact
-  instance. Its offer uses that VM's provisioning marker and T3 channel. Without an
-  unambiguous match, no VM popup is offered. Switching threads replaces the offer; host
-  Construct updates remain available independently of the active thread.
+  rebuild of the same release counts too. **Update T3 Code** updates this app and every
+  Construct VM it is connected to (matched by address or by the link marker's environment
+  id); a stopped VM is left alone, and with none connected nothing is launched. Several
+  VMs run one after another in one console, each in its own PowerShell, because the first
+  run installs the Desktop app and closes it. A reprovision popup resolves the active
+  thread's linked remote to a Construct instance, shows its name, and launches that exact
+  instance, using that VM's provisioning marker and T3 channel. Without an unambiguous
+  match, no reprovision is offered, but the T3 Code update still is. Switching threads
+  replaces the offer; host Construct updates remain available independently of the
+  active thread.
 - **Auto-link** (`ConstructAutoLink`, Windows Desktop app): every Construct VM of the PC
   that runs T3 and is not yet a remote environment is linked on its own. The main process
   runs `Get-ConstructT3PairingLink.ps1` hidden to mint a link over SSH. A marker in the

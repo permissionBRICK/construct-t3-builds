@@ -121,14 +121,14 @@ describe("construct update presentation", () => {
     };
     expect(getConstructUpdateHeadline(t3)).toBe("T3 Code update available");
     expect(getConstructUpdateDetail(t3)).toBe(
-      'T3 Code 0.0.39 is available. Click to install it on "agent-vm" and in this app, without a reprovision. Threads that are running stop and are told to continue.',
+      "T3 Code 0.0.39 is available. Click to install it in this app and on the Construct VMs it is connected to, without a reprovision. Threads that are running stop and are told to continue.",
     );
     expect(getConstructUpdateButtonLabel(t3)).toBe("Update T3 Code");
     expect(getConstructUpdateTooltip(t3)).toBe(
-      "T3 Code update available — click to update T3 Code on the VM and in this app.",
+      "T3 Code update available — click to update T3 Code in this app and on the connected Construct VMs.",
     );
     expect(getConstructUpdateNotificationKey(t3)).toBe(
-      `construct:update-t3:agent-vm:agent-vm.mshome.net:${INSTALLED}:${INSTALLED}:0.0.39`,
+      `construct:update-t3:${INSTALLED}:${INSTALLED}:0.0.39`,
     );
     expect(getConstructUpdateHeadline({ ...t3, runningAction: "update-t3" })).toBe(
       "T3 Code update running",
@@ -315,6 +315,16 @@ describe("thread VM update offers", () => {
     expect(
       getConstructUpdateNotificationKey({ ...first, runningAction: "reprovision" }),
     ).toBeNull();
+  });
+
+  it("offers the app's T3 Code update without a matched thread VM, but never its reprovision", () => {
+    const t3 = { ...info, t3UpdateAvailable: true, t3LatestVersion: "0.0.39", action: "update-t3" as const };
+    expect(getConstructThreadUpdateInfo(t3, null)?.action).toBe("update-t3");
+    expect(
+      getConstructThreadUpdateInfo(t3, { ...remote, baseUrl: "https://unknown:5178" })?.action,
+    ).toBe("update-t3");
+    const staleDefault = { ...info, provisionStale: true, action: "reprovision" as const };
+    expect(getConstructThreadUpdateInfo(staleDefault, null)).toBeNull();
   });
 
   it("keeps the host Construct update available without a thread", () => {

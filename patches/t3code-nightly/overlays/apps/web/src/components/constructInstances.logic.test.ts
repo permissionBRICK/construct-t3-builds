@@ -3,6 +3,7 @@ import type { ConstructInstanceInfo, ConstructUpdateInfo } from "@t3tools/contra
 
 import {
   CONSTRUCT_AUTO_LINK_RETRY_MS,
+  constructConnectedInstanceNames,
   constructInstanceForRemote,
   constructInstanceHasT3,
   constructLinkedInstanceNames,
@@ -598,6 +599,28 @@ describe("planConstructRelink", () => {
     assert.deepEqual(planConstructRelink({ info: info({ instances: [work], runningAction: "reprovision" }), remotes, legacy, inFlight: none }), []);
     assert.deepEqual(planConstructRelink({ info: info({ instances: [work], scriptsDir: null }), remotes, legacy, inFlight: none }), []);
     assert.deepEqual(planConstructRelink({ info: null, remotes, legacy, inFlight: none }), []);
+  });
+});
+
+describe("constructConnectedInstanceNames", () => {
+  it("names each connected instance once, matched by address or link marker, never a stopped one", () => {
+    const work = instance({ name: "work-vm", t3BaseUrl: "https://work-vm.mshome.net:5178" });
+    const agent = instance({ name: "agent-vm" });
+    const haus = instance({
+      name: "haus-vm",
+      publicHost: "standpc.example.net",
+      t3Port: 2301,
+      t3Link: { status: "linked", at: "2026-10-16T15:43:00Z", environmentId: "env-haus", baseUrl: "https://t3haus.home.example.net:8443/", error: null },
+    });
+    const remotes = [
+      { id: "env-work", baseUrl: "https://work-vm.mshome.net:5178", connected: true },
+      { id: "env-work-again", baseUrl: "https://WORK-VM.mshome.net:5178/", connected: true },
+      { id: "env-agent", baseUrl: "https://agent-vm.mshome.net:5178", connected: false },
+      { id: "env-haus", baseUrl: "https://t3haus.home.example.net:8443", connected: true },
+      { id: "env-other", baseUrl: "https://elsewhere.example.com", connected: true },
+    ];
+    assert.deepEqual(constructConnectedInstanceNames(remotes, [work, agent, haus]), ["haus-vm", "work-vm"]);
+    assert.deepEqual(constructConnectedInstanceNames(remotes.slice(2, 3), [work, agent, haus]), []);
   });
 });
 
