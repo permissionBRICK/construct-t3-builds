@@ -101,6 +101,10 @@ through re-indentation) and the list of `conflicts`.
   the service would transcribe it twice and repeat the words at the join. The
   text of each stream is joined in order; a stream that does not finalize within
   3 seconds keeps its last text.
+  The microphone control is yellow while voice input starts and while the final
+  transcript is pending. It turns red only once speech is kept: the
+  transcription stream is open and the microphone has delivered audio (for the
+  host bridge, the first level event from the server).
   The composer stays editable while recording and finishing transcription, so
   focus and Ctrl+T retain their normal behavior. Text edits do not cancel voice
   input. Transcript updates use the session's latest requested text rather than
