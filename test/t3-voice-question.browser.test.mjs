@@ -286,13 +286,14 @@ try {
  }
  console.log('PASS: '+channel+' Enter stops and sends final text once, preserves modifiers, and cancels on target changes or failure');
 
- // Yellow while starting and finishing; red only while speech is actually kept.
+ // A spinning edge while starting and finishing; red only while speech is actually kept.
  async function micState(live,status) {
    await page.waitForFunction(([live,status])=>{
      const button=document.querySelector('[data-voice-live]');
      return button?.dataset.voiceLive===String(live) && document.querySelector('[data-status]').textContent===status;
    },[live,status]);
-   assert.match(await mic.getAttribute('class'),live?/\bbg-destructive\b/:/\bbg-warning\b/);
+   assert.match(await mic.getAttribute('class'),live?/\bbg-destructive\b/:/\bbg-secondary\b/);
+   assert.equal(await mic.locator('[data-voice-pending]').count(),live?0:1);
  }
  for (const client of [false,true]) {
    await reset(client);await page.evaluate(()=>{window.deferListening=true});await start();
@@ -314,7 +315,7 @@ try {
    await page.evaluate(()=>{window.holdFinal=false});await start();
    await micState(false,'Starting microphone…');await stop();
  }
- console.log('PASS: '+channel+' the mic is yellow while starting and finishing, and red only once the stream is open and audio arrives');
+ console.log('PASS: '+channel+' the mic spins while starting and finishing, and turns red only once the stream is open and audio arrives');
 
  // Recording must preserve focus so Alt+Q can stop it before the first transcript.
  await reset();await page.evaluate(()=>window.focusEnd());
