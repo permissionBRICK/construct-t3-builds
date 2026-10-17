@@ -1883,6 +1883,40 @@ describe("planConstructInstanceLaunch", () => {
     }
   });
 
+  it("updates several instances one after another in one console, each in its own PowerShell", () => {
+    const base = scriptsFs(true);
+    const withMode: ConstructFileSystem = {
+      ...base,
+      readTextFile: (path) =>
+        path === `${SCRIPTS_DIR}\\Update-T3Code.ps1`
+          ? 'param(\n  [string]$InstanceName = "",\n  [string]$Mode = "auto"\n)\n'
+          : base.readTextFile(path),
+    };
+    const names = ["work-vm", "agent-vm", "work-vm"];
+    const plan = planConstructInstanceLaunch("update-t3", names, view, info, "win32", withMode, join);
+    assert.isTrue(plan.ok);
+    if (!plan.ok) return;
+    const run = (name: string) =>
+      `& powershell.exe -NoProfile -ExecutionPolicy Bypass -File '${SCRIPTS_DIR}\\Update-T3Code.ps1' -InstanceName '${name}' -Mode quick; ` +
+      "if ($LASTEXITCODE -ne 0 -and $code -ne 1) { $code = $LASTEXITCODE }";
+    assert.equal(
+      plan.plan.args[3],
+      `"start "T3 Code update" /wait powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$code = 0; ${run("work-vm")}; ${run("agent-vm")}; exit $code""`,
+    );
+    assert.equal(plan.plan.action, "update-t3");
+    // One name in a list is the ordinary single launch.
+    const single = planConstructInstanceLaunch("update-t3", ["work-vm"], view, info, "win32", withMode, join);
+    const named = planConstructInstanceLaunch("update-t3", "work-vm", view, info, "win32", withMode, join);
+    assert.deepEqual(single, named);
+  });
+
+  it("refuses the whole list when one name is not an instance, and an empty list", () => {
+    const plan = planConstructInstanceLaunch("update-t3", ["work-vm", "nope"], view, info, "win32", scriptsFs(true), join);
+    assert.isFalse(plan.ok);
+    if (!plan.ok) assert.include(plan.error, '"nope" is not a Construct instance');
+    assert.isFalse(planConstructInstanceLaunch("update-t3", [], view, info, "win32", scriptsFs(true), join).ok);
+  });
+
   it("refuses a name the registry does not hold", () => {
     const plan = planConstructInstanceLaunch(
       "reprovision",

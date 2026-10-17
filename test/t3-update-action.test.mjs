@@ -10,9 +10,11 @@ for(const channel of ['release','nightly']) {
    b.onResolve({filter:/\/ui\/toast$/},()=>({path:'toast',namespace:'fixture'}));
    b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export const toastManager={add(){}}; export const stackedThreadToast=x=>x;'}));
   }}]});
- const {startConstructUpdate}=await import('data:text/javascript;base64,'+Buffer.from(result.outputFiles[0].text).toString('base64'));
+ const {startConstructUpdate,setConstructLinkedRemotes}=await import('data:text/javascript;base64,'+Buffer.from(result.outputFiles[0].text).toString('base64'));
  let calls=0;
- const info={action:'reprovision',runningAction:null,vmName:'thread-vm',
+ const vm=name=>({name,vmHost:`${name}.mshome.net`,publicHost:null,hostAlias:name,isDefault:false,provisionedCommit:null,
+  channel:'latest',t3Port:null,t3Enabled:true,t3BaseUrl:null,t3Link:null});
+ const info={action:'reprovision',runningAction:null,vmName:'thread-vm',instances:[vm('thread-vm'),vm('stopped-vm')],
   installedCommit:'d'.repeat(40),latestCommit:'f'.repeat(40),provisionedCommit:'d'.repeat(40),
   constructUpdateAvailable:true,t3LatestVersion:null};
  let hostCalls=0;
@@ -30,8 +32,14 @@ for(const channel of ['release','nightly']) {
  assert.deepEqual(targets,['thread-vm'],'reprovision must name the displayed thread VM');
  assert.equal(hostCalls,0,'reprovision must not use the host/default-VM launch');
  assert.deepEqual(actions,['reprovision'],'a reprovision must say so');
+ assert.equal(await startConstructUpdate(bridge,{...info,action:'update-t3'}),false);
+ assert.equal(calls,1,'a T3 Code update without a connected VM must not launch');
+ setConstructLinkedRemotes([
+  {id:'env-thread',baseUrl:'https://thread-vm.mshome.net:5178',connected:true},
+  {id:'env-stopped',baseUrl:'https://stopped-vm.mshome.net:5178',connected:false},
+ ]);
  assert.equal(await startConstructUpdate(bridge,{...info,action:'update-t3'}),true);
- assert.deepEqual([targets[1],actions[1]],['thread-vm','update-t3'],'a T3 Code update must name the VM and the action');
+ assert.deepEqual([targets[1],actions[1]],[['thread-vm'],'update-t3'],'a T3 Code update must name the connected VMs and the action');
  assert.equal(hostCalls,0,'a T3 Code update must not use the host/default-VM launch');
  calls=1;
  assert.equal(await startConstructUpdate(bridge,{...info,action:'update-construct'}),true);
@@ -48,5 +56,5 @@ for(const channel of ['release','nightly']) {
   getConstructUpdateNotificationKey({...hostInfo,latestCommit:'e'.repeat(40)}));
  assert.equal(await startConstructUpdate(bridge,{...info,action:null,constructUpdateAvailable:false,latestCommit:null}),false);
  assert.equal(hostCalls,1,'no published offer must not launch a host update');
- console.log(`PASS ${channel}: one click launches once; running/no-offer actions guarded; manifest detail and notification identity`);
+ console.log(`PASS ${channel}: one click launches once; T3 Code updates target the connected VMs; running/no-offer actions guarded; manifest detail and notification identity`);
 }
