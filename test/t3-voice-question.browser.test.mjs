@@ -316,21 +316,33 @@ try {
  }
  console.log('PASS: '+channel+' the mic is yellow while starting and finishing, and red only once the stream is open and audio arrives');
 
- // Recording must preserve focus so Ctrl+T can stop it before the first transcript.
+ // Recording must preserve focus so Alt+Q can stop it before the first transcript.
  await reset();await page.evaluate(()=>window.focusEnd());
- await page.keyboard.press('Control+t');await recording(true);await editable(true);
+ await page.keyboard.press('Alt+KeyQ');await recording(true);await editable(true);
  assert.equal(await editor.evaluate(el=>document.activeElement===el),true,'starting voice keeps editor focus');
- await page.keyboard.press('Control+t');await recording(false);
+ await page.keyboard.press('Alt+KeyQ');await recording(false);
  assert.equal(await page.evaluate(()=>window.stops),1);
  // A mic-button start can also be stopped by the shortcut after a transcript.
  await start();await page.evaluate(()=>window.transcript('shortcut test'));
  await textIs('answer prefix shortcut test');
- await page.keyboard.press('Control+t');await recording(false);
+ await page.keyboard.press('Alt+KeyQ');await recording(false);
  assert.equal(await page.evaluate(()=>window.stops),2);
- // Holding the shortcut still stops on release.
- await page.keyboard.down('Control');await page.keyboard.down('t');await recording(true);
- await page.waitForTimeout(450);await page.keyboard.up('t');await page.keyboard.up('Control');
+ // Holding the shortcut stops when either key goes up; its key repeats type nothing.
+ await page.evaluate(()=>{window.qKeys=[];window.addEventListener('keydown',e=>{if(e.code==='KeyQ')window.qKeys.push([e.repeat,e.defaultPrevented])})});
+ await page.keyboard.down('Alt');await page.keyboard.down('KeyQ');await recording(true);await page.keyboard.down('KeyQ');
+ await page.waitForTimeout(450);await page.keyboard.up('KeyQ');await page.keyboard.up('Alt');
  await recording(false);assert.equal(await page.evaluate(()=>window.stops),3);
+ await page.keyboard.down('Alt');await page.keyboard.down('KeyQ');await recording(true);
+ await page.waitForTimeout(450);await page.keyboard.up('Alt');await recording(false);await page.keyboard.up('KeyQ');
+ assert.equal(await page.evaluate(()=>window.stops),4);
+ assert.deepEqual(await page.evaluate(()=>window.qKeys),[[false,true],[true,true],[false,true]]);
+ // AltGr+Q (Ctrl+Alt+Q on Windows) still types "@". Ctrl+T works where the browser passes it on.
+ await page.keyboard.press('Control+Alt+KeyQ');await page.waitForTimeout(100);
+ assert.equal(await page.evaluate(()=>window.recording()),false);
+ assert.deepEqual(await page.evaluate(()=>window.qKeys.at(-1)),[false,false]);
+ await page.keyboard.press('Control+t');await recording(true);
+ await page.keyboard.press('Control+t');await recording(false);
+ assert.equal(await page.evaluate(()=>window.stops),5);
 
  // Real parent callback must not echo stale editor text when dictating before a suffix.
  await reset();await page.evaluate(()=>window.focusAt(6));await mic.click();await recording(true);
@@ -456,18 +468,18 @@ try {
      await textIs('spoken answer');await mic.click();await recording(false);
      assert.deepEqual(await page.evaluate(()=>window.answer()),{'question-1':'spoken answer'},shape.name+' '+layout);
      assert.equal(await page.locator('output').textContent(),'chat draft stays here');
-     // Ctrl+T works from question controls even when the editor is hidden.
+     // Alt+Q works from question controls even when the editor is hidden.
      await page.locator('[data-pending-user-input-toggle]').focus();
-     await page.keyboard.press('Control+t');await recording(true);
+     await page.keyboard.press('Alt+KeyQ');await recording(true);
      await page.evaluate(()=>window.transcript('more'));await textIs('spoken answer more');
      assert.equal(await page.evaluate(()=>Boolean(document.activeElement?.closest('[data-chat-composer-form]'))),true,'dictation must keep the stop shortcut reachable');
-     await page.keyboard.press('Control+t');await recording(false);
+     await page.keyboard.press('Alt+KeyQ');await recording(false);
    }
  }
  // Provider-enforced choices and approval controls have no writable answer target.
  await reset();await page.evaluate(()=>window.configureQuestion({allowCustomAnswer:false,options:[{label:'Yes'}]}));
  assert.equal(await mic.count(),0);await page.locator('[data-pending-user-input-toggle]').focus();
- await page.keyboard.press('Control+t');await recording(false);assert.deepEqual(await page.evaluate(()=>window.starts),[]);
+ await page.keyboard.press('Alt+KeyQ');await recording(false);assert.deepEqual(await page.evaluate(()=>window.starts),[]);
  await reset();await page.evaluate(()=>window.setApproval(true));assert.equal(await mic.count(),0);
  await reset();await page.evaluate(()=>window.setResponding(true));assert.equal(await mic.isDisabled(),true);
  // A replaced request can reuse the same question id; late speech must still be rejected.
