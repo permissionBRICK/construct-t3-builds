@@ -558,7 +558,7 @@
     },
     {
       "path": "apps/web/src/components/settings/SettingsPanels.tsx",
-      "after": "import { formatRelativeTimeLabel } from \"../../timestampFormat\";",
+      "after": "} from \"../../components/desktopUpdate.logic\";",
       "insert": "import { startConstructUpdate } from \"../constructUpdate\";\nimport {\n  getConstructUpdateButtonLabel,\n  getConstructUpdateDetail,\n  getConstructUpdateHeadline,\n  getConstructUpdateInfo,\n} from \"../constructUpdate.logic\";\n"
     },
     {

@@ -1,7 +1,8 @@
 import type { ConnectionCatalogEntry } from "@t3tools/client-runtime/connection";
 import { EnvironmentId, type ConstructInstanceInfo, type ConstructUpdateInfo } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
-import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 
 const LEGACY = { authenticated: true, permissions: ["orchestration:operate", "orchestration:read"] };
@@ -103,7 +104,18 @@ function environment(
   };
 }
 
-let renderer: ReactTestRenderer | undefined;
+// Both components render nothing, so React DOM only needs a container to attach to
+// (and `window.HTMLIFrameElement`, which its commit phase checks); the web unit tests
+// run in Node without a DOM.
+const container = {
+  nodeType: 1,
+  tagName: "DIV",
+  namespaceURI: "http://www.w3.org/1999/xhtml",
+  addEventListener() {},
+  removeEventListener() {},
+  ownerDocument: null,
+};
+let root: Root | undefined;
 beforeEach(() => {
   vi.clearAllMocks();
   state.store.clear();
@@ -111,18 +123,20 @@ beforeEach(() => {
   state.environments = [environment("env-haus", "https://standpc.example.net:2301/")];
   state.info = info([HAUS]);
   state.connectPairing.mockImplementation(async () => AsyncResult.success("env-haus"));
-  vi.stubGlobal("window", { desktopBridge: state.bridge });
+  vi.stubGlobal("window", { desktopBridge: state.bridge, HTMLIFrameElement: class {} });
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 });
 afterEach(async () => {
-  if (renderer) await act(async () => renderer!.unmount());
-  renderer = undefined;
+  if (root) await act(async () => root!.unmount());
+  root = undefined;
   vi.unstubAllGlobals();
 });
 
 // The order __root.tsx mounts them in.
 async function render() {
   await act(async () => {
-    renderer = create(
+    root = createRoot(container as never);
+    root.render(
       <>
         <PermissionUpdateNotice />
         <ConstructAutoLink />
@@ -169,7 +183,7 @@ it("finds the VM behind the user's own proxy by the environment its link recorde
 
 it("redeems the token at the paired route, not at a learned LAN route saved ahead of it", async () => {
   state.environments = [
-    environment("env-haus", "https://standpc.example.net:2301/", (entry) => withLearnedLanRoute(entry, "http://172.30.1.5:5177/")),
+    environment("env-haus", "https://standpc.example.net:2301/", (entry) => withLearnedLanRoute(entry, "https://172.30.1.5:5177/")),
   ];
   // Linked by the auto-link earlier, as such a VM is.
   state.info = info([
@@ -190,7 +204,7 @@ it("redeems the token at the paired route, not at a learned LAN route saved ahea
 it("tries once per app session and reports a failure", async () => {
   state.bridge.linkConstructInstance.mockResolvedValueOnce({ ok: false, error: "ssh failed." } as never);
   await render();
-  await act(async () => renderer!.update(
+  await act(async () => root!.render(
     <>
       <PermissionUpdateNotice />
       <ConstructAutoLink />
