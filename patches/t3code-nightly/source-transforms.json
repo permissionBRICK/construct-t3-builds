@@ -426,7 +426,7 @@
     },
     {
       "path": "apps/server/src/serverRuntimeStartup.ts",
-      "before": "const maybeOpenBrowser = (target: string) =>",
+      "before": "const maybeOpenBrowser",
       "insert": "/**\n * Resolves `T3CODE_PUBLIC_BASE_URL` for a served runtime, warning instead of\n * silently falling back when it is set to something unusable.\n */\nconst resolvePublicBaseUrlForServing = Effect.fn(\"server.startup.publicBaseUrl\")(function* (\n  mode: ServerConfig.RuntimeMode,\n) {\n  if (mode === \"desktop\") return undefined;\n  const setting = readPublicBaseUrl();\n  if (setting.kind === \"invalid\") {\n    yield* Effect.logWarning(\n      \"Ignoring T3CODE_PUBLIC_BASE_URL: it is not an http(s) URL. Using the bind address instead.\",\n    ).pipe(Effect.annotateLogs({ publicBaseUrl: setting.raw }));\n    return undefined;\n  }\n  return setting.kind === \"ok\" ? setting.origin : undefined;\n});\n\n"
     },
     {
@@ -452,7 +452,7 @@
     },
     {
       "path": "apps/server/src/ws.ts",
-      "before": "[WS_METHODS.serverUpsertKeybinding]: (rule) =>",
+      "before": "[WS_METHODS.serverUpsertKeybinding]:",
       "insert": "        [WS_METHODS.voiceInputStart]: (input) =>\n          startVoiceInput(input.sessionId, input.source, input.resume),\n        [WS_METHODS.voiceInputStop]: (input) => stopVoiceInput(input.sessionId),\n        [WS_METHODS.voiceInputAudio]: (input) =>\n          pushVoiceAudio(input.sessionId, input.chunk, input.sequence),\n"
     },
     {
@@ -467,12 +467,12 @@
     },
     {
       "path": "apps/server/src/ws.ts",
-      "before": "[WS_METHODS.serverUpsertKeybinding]: (rule) =>",
+      "before": "[WS_METHODS.serverUpsertKeybinding]:",
       "insert": "        [WS_METHODS.constructDiskSpace]: (_input) => readConstructDiskSpace(),\n"
     },
     {
       "path": "apps/server/src/ws.ts",
-      "before": "[WS_METHODS.serverUpsertKeybinding]: (rule) =>",
+      "before": "[WS_METHODS.serverUpsertKeybinding]:",
       "insert": "        [WS_METHODS.constructVaultPending]: (_input) => readConstructVaultPending(),\n"
     },
     {
@@ -482,7 +482,7 @@
     },
     {
       "path": "apps/server/src/ws.ts",
-      "before": "[WS_METHODS.serverUpsertKeybinding]: (rule) =>",
+      "before": "[WS_METHODS.serverUpsertKeybinding]:",
       "insert": "        [WS_METHODS.constructOmniloopStatus]: (_input) => readOmniloopStatus(),\n        [WS_METHODS.constructOmniloopTicket]: (_input) => issueOmniloopTicket(),\n        [WS_METHODS.constructOmniloopWorkflows]: (input) =>\n          readOmniloopWorkflows(input.workflowIds),\n"
     },
     {
@@ -964,7 +964,7 @@
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
-      "scope": "interruptTurn: (interruptInput) =>",
+      "scope": "interruptTurn:",
       "before": "yield* abortDescendants(sessionId);",
       "insert": "                if (state !== undefined && hasConstructOpenCodeMonitor(state.providerThread))\n                  yield* updateProviderThread(state, {\n                    pendingBackgroundTasks: withoutConstructOpenCodeMonitors(state.providerThread),\n                  });\n"
     },
