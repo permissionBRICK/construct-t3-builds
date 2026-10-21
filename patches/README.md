@@ -29,6 +29,13 @@ Concretely:
   tag, not by making one transform serve both.
 - Do not add context "for safety": every extra byte in an anchor is one more way for
   an unrelated upstream edit to break the patch.
+- Never anchor on a neighbour. An anchor is the thing the change integrates with: the
+  list, record, union or JSX element it adds to (its opening line), or the declaration
+  it changes. A sibling entry, an unrelated import or the function next door gets
+  renamed or moved by upstream without touching what Construct needs.
+- Anchor on names, not on shapes: `const handleAction`, not
+  `const handleAction = useCallback((event: Event) => {`; no parameter lists, values,
+  `export`/`async` modifiers or dependency arrays unless the change is about them.
 
 ## Transform format (manifest version 2)
 
@@ -36,7 +43,14 @@ Concretely:
 { "path": "a.ts", "after":  "<anchor line>", "insert": "<full lines>\n" }
 { "path": "a.ts", "before": "<anchor line>", "insert": "<full lines>\n" }
 { "path": "a.ts", "find":   "<exact text>",  "replace": "<text>" }
+{ "path": "a.ts", "import": "<import statement(s)>\n" }
 ```
+
+- **Imports without an anchor.** `import` places its text before the file's first
+  top-level `import` or `export *` line (a shebang or header comment stays above it).
+  Module imports and re-exports are hoisted, so their position does not matter, and
+  anchoring them after some upstream import only breaks when upstream reorders its
+  imports.
 
 - **Line-based inserts.** `after`/`before` name a line; the insert text (complete lines
   carrying their own indentation) goes after or before that line.
@@ -59,8 +73,8 @@ Guidelines when writing or repairing a transform:
 - Prefer an insert over a replace; prefer a whole-line anchor over a fragment; prefer
   an anchor line that names the thing we integrate with (an import, an RPC method, a
   schema field) over structural lines such as `});` or `}`.
-- Names only Construct uses get their **own** import statement (a duplicate module
-  import is fine for TypeScript). A name upstream might import itself is merged into
+- Names only Construct uses get their **own** import statement, as an `import`
+  transform (a duplicate module import is fine for TypeScript). A name upstream might import itself is merged into
   the upstream import line with `find`/`replace`, so that an upstream change surfaces
   as a conflict instead of a duplicate-identifier build error.
 - One import per transform; one union member or one record entry per transform.
