@@ -141,7 +141,7 @@ function Harness() {
  };
  ${submit}
  const planModeUiEnabled = false; const isSoftwareKeyboardOpen = layout === 'mobile';
- const phase = 'idle'; const isCompacting = false; const settings = {sendShortcut:'enter',followUpBehavior:'queue'}; const keybindings = DEFAULT_RESOLVED_KEYBINDINGS;
+ const phase = 'idle'; const isCompacting = false; const settings = {sendShortcut:'enter',followUpBehavior:'queue'}; const followUpBehavior = settings.followUpBehavior; const keybindings = DEFAULT_RESOLVED_KEYBINDINGS;
  const readEnvironmentScope = () => true; const AuthOrchestrationOperateScope = 'orchestration:operate'; const onTypingGuardSend = () => {};
  const listContinuationForEnter = () => null; const listIndentForTab = () => null;
  const routeKind = 'draft'; const composerMenuOpenRef = useRef(false);

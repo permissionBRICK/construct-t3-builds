@@ -78,7 +78,7 @@
   "transforms": [
     {
       "path": "apps/web/src/components/ChatView.tsx",
-      "after": "import { RightPanelTabs } from \"./RightPanelTabs\";",
+      "after": "import { ChatRightPanel } from \"./chat/ChatRightPanel\";",
       "insert": "import { useConstructOmniloopThread } from \"./omniloop/useConstructOmniloopThread\";\n"
     },
     {
@@ -494,6 +494,11 @@
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
       "after": "import { useAtomCommand } from \"../../state/use-atom-command\";",
       "insert": "import { AsyncResult } from \"effect/reactivity\";\n"
+    },
+    {
+      "path": "apps/web/src/components/chat/ChatComposer.tsx",
+      "after": "import { ComposerPromptLengthValidation } from \"./ComposerPromptLengthValidation\";",
+      "insert": "import { Tooltip, TooltipPopup, TooltipTrigger } from \"../ui/tooltip\";\n"
     },
     {
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
