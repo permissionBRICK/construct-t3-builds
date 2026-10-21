@@ -99,6 +99,23 @@ test("an insert already present upstream is a no-op, not a duplicate", () => {
   assert.equal(owned(f).match(/import \{ construct \}/g).length, 1)
 })
 
+test("an import goes before the first import, whatever upstream imports", () => {
+  const source = '#!/usr/bin/env node\n// header\n' + UPSTREAM.replace('import { a } from "./a";\n', 'import * as A from "./renamed";\n')
+  const f = fixture({ source, transforms: [{ path: "owned.ts", import: 'import { construct } from "./new/construct";\n' }] })
+  assert.equal(run(f).status, 0)
+  assert.ok(owned(f).startsWith('#!/usr/bin/env node\n// header\nimport { construct } from "./new/construct";\nimport * as A from "./renamed";\n'))
+  assert.equal(run(f).status, 0)
+  assert.equal(owned(f).match(/import \{ construct \}/g).length, 1)
+  assert.equal(status(f).alreadyApplied, 2)
+})
+
+test("an import into a file without imports is a conflict", () => {
+  const f = fixture({ source: "export const x = 1;\n", transforms: [{ path: "owned.ts", import: 'import { construct } from "./new/construct";\n' }] })
+  const s = status(f)
+  assert.equal(s.code, 2)
+  assert.match(s.conflicts[0], /no import statement/)
+})
+
 test("scope picks the spot when a single line is ambiguous", () => {
   const source = UPSTREAM + '\nexport function other(): string {\n  return "stock";\n}\n'
   const f = fixture({

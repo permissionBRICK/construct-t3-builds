@@ -7,6 +7,9 @@
 //   { "path": "a.ts", "after":  "<anchor>", "insert": "<lines>" }   insert after the anchor line
 //   { "path": "a.ts", "before": "<anchor>", "insert": "<lines>" }   insert before the anchor line
 //   { "path": "a.ts", "find":   "<text>",   "replace": "<text>" }   replace the text itself
+//   { "path": "a.ts", "import": "<lines>" }                         an import of names only
+//                                                                    Construct uses, placed before
+//                                                                    the file's first import
 //
 //   * An anchor is the smallest fragment that identifies the spot — usually one
 //     line. Leading whitespace on every anchor line is ignored, so reformatting or
@@ -120,6 +123,15 @@ function runTransform(operation, content) {
     return { state: "pending", content: content.slice(0, hits[0].start) + operation.new + content.slice(hits[0].end) }
   }
   const ambiguous = []
+  if (operation.import !== undefined) {
+    // Module imports are hoisted, so a Construct-only import needs no neighbour:
+    // it goes before the first top-level import, below any shebang or header.
+    const insert = asLines(operation.import)
+    if (content.includes(insert)) return { state: "applied" }
+    const first = /^import[ \t]/m.exec(content)
+    if (!first) return { state: operation.optional ? "skipped" : "conflict", detail: "no import statement to place the import before" }
+    return { state: "pending", content: content.slice(0, first.index) + insert + content.slice(first.index) }
+  }
   if (operation.insert !== undefined) {
     const insert = asLines(operation.insert)
     if (content.includes(insert)) return { state: "applied" }
@@ -150,7 +162,7 @@ function runTransform(operation, content) {
       detail: found.hit.how,
     }
   }
-  return { state: "conflict", detail: "transform has neither insert, find nor old" }
+  return { state: "conflict", detail: "transform has neither import, insert, find nor old" }
 }
 
 function describeMiss(kind, ambiguous) {
