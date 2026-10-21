@@ -1,79 +1,109 @@
-// Run the patched voice controls, real question panel, answer callbacks and composer
-// editor in Chromium. Only audio/STT transport and the surrounding store are mocked.
-// T3_TEST_SOURCE: matching upstream checkout; T3_TEST_TOOLS: package directory
-// providing playwright. Uses the checkout's Vite for browser imports, including
-// ?worker and import.meta.env. T3_TEST_CHANNEL defaults to release.
+// Run Construct's voice input hook through the patched composer's own wiring (its hook
+// call, submit interception and control placements), with the real question panel,
+// answer callbacks and composer editor in Chromium. Only audio/STT transport, the
+// stores and toasts are mocked.
+// T3_TEST_SOURCE: the matching upstream checkout with this inventory applied;
+// T3_TEST_TOOLS: package directory providing playwright. Uses the checkout's Vite
+// for browser imports, including ?worker and import.meta.env. T3_TEST_CHANNEL
+// defaults to release.
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
-import {execFileSync} from 'node:child_process';
 const root = path.resolve(import.meta.dirname, '..');
 const source = process.env.T3_TEST_SOURCE;
-if (!source) throw new Error('Set T3_TEST_SOURCE to the matching upstream checkout');
+if (!source) throw new Error('Set T3_TEST_SOURCE to the matching patched upstream checkout');
 const toolRequire = createRequire(path.resolve(process.env.T3_TEST_TOOLS || root, 'package.json'));
 const sourceRequire = createRequire(path.join(source, 'apps/web/package.json'));
 const {build} = sourceRequire('vite-plus');
 const {chromium} = toolRequire('playwright');
 const channel = process.env.T3_TEST_CHANNEL || 'release';
-const manifestPath = `patches/t3code-${channel}/source-transforms.json`;
-const manifest = JSON.parse(process.env.T3_TEST_BASELINE
-  ? execFileSync('git', ['show', `${process.env.T3_TEST_BASELINE}:${manifestPath}`], {cwd:root, encoding:'utf8'})
-  : fs.readFileSync(path.join(root, manifestPath), 'utf8'));
-const inserts = manifest.transforms.filter(t => t.path.endsWith('/ChatComposer.tsx')).map(t => t.insert || '');
-const types = inserts.find(s => s.includes('type VoiceInsertionState')).split('type VoiceInsertionState')[1];
-const voice = inserts.find(s => s.includes('const stopVoiceRecording = useStableCallback'));
-const readSource = file => process.env.T3_TEST_BASELINE
-  ? execFileSync('git', ['show', 'HEAD:'+file], {cwd:source, encoding:'utf8'})
-  : fs.readFileSync(path.join(source, file), 'utf8');
-const upstream = readSource('apps/web/src/components/chat/ChatComposer.tsx');
-let submit = upstream.slice(upstream.indexOf('  const submitComposer = ('), upstream.indexOf('  const submitCitationAndSend = () => {'));
-if (process.env.T3_TEST_BASELINE) {
-  const guard = manifest.transforms.find(t => t.scope === 'const submitComposer = (' && t.before === 'if (');
-  submit = submit.replace('    if (\n      noProviderAvailable ||', guard.insert+'    if (\n      noProviderAvailable ||');
-}
-const commandKey = upstream.slice(upstream.indexOf('  const onComposerCommandKey = ('), upstream.indexOf('  const stashQueue = usePromptStashStore('));
-const replacement = upstream.slice(upstream.indexOf('  const applyPromptReplacement = ('), upstream.indexOf('  const readComposerSnapshot = ('));
-const pendingRequests = readSource('apps/web/src/components/chat/usePendingThreadRequests.ts');
-const answerChange = pendingRequests.slice(pendingRequests.indexOf('  const writePrompt = useStableCallback('), pendingRequests.indexOf('  const onAdvanceActivePendingUserInput = () => {'));
-const answerSetter = pendingRequests.slice(pendingRequests.indexOf('function makePendingCustomAnswerSetter('), pendingRequests.indexOf('\n}\n', pendingRequests.indexOf('function makePendingCustomAnswerSetter(')) + 3);
+const manifest = JSON.parse(fs.readFileSync(path.join(root, `patches/t3code-${channel}/source-transforms.json`), 'utf8'));
+const composerTransforms = manifest.transforms.filter(t => t.path === 'apps/web/src/components/chat/ChatComposer.tsx');
+const transform = (description, match) => {
+  const found = composerTransforms.filter(match);
+  assert.equal(found.length, 1, `one ChatComposer transform ${description}`);
+  return found[0].insert;
+};
+const hookCall = transform('calls the voice hook', t => t.insert?.includes('useConstructVoiceInput('));
+const interception = transform('intercepts the submit', t => t.insert?.includes('.interceptSubmit('));
+const footerControl = transform('places the footer control', t => t.insert?.includes('.footerControl'));
+const questionControl = transform('places the question control', t => t.insert?.includes('.questionControl'));
+const composer = fs.readFileSync(path.join(source, 'apps/web/src/components/chat/ChatComposer.tsx'), 'utf8');
+const slice = (file, from, to) => {
+  const start = file.indexOf(from), end = file.indexOf(to, start);
+  assert.ok(start >= 0 && end > start, `upstream still has ${JSON.stringify(from)} before ${JSON.stringify(to)}`);
+  return file.slice(start, end);
+};
+// The hook call and the patched submitComposer, exactly as the inventory applied them.
+const submit = slice(composer, hookCall, '  const submitCitationAndSend = () => {');
+assert.ok(submit.includes(interception), 'the checkout carries this inventory: run bin/apply-t3code-source.mjs apply first');
+const commandKey = slice(composer, '  const onComposerCommandKey = (', '  const stashQueue = usePromptStashStore(');
+const replacement = slice(composer, '  const applyPromptReplacement = (', '  const readComposerSnapshot = (');
+const pendingRequests = fs.readFileSync(path.join(source, 'apps/web/src/components/chat/usePendingThreadRequests.ts'), 'utf8');
+const answerChange = slice(pendingRequests, '  const writePrompt = useStableCallback(', '  const onAdvanceActivePendingUserInput = () => {');
+const answerSetter = slice(pendingRequests, 'function makePendingCustomAnswerSetter(', '\n}\n') + '\n}\n';
 assert.ok(answerChange.includes('setPendingUserInputAnswersByRequestId'), 'exercise the real parent answer callback');
-const changeGuard = inserts.find(s => s.includes('Voice owns the draft')) ?? '';
-const footerControl = manifest.transforms.find(t => t.path.endsWith('/ChatComposer.tsx') && t.before === '<ComposerFooterPrimaryActions').insert;
-const questionControl = inserts.find(s => s.includes('data-question-voice-input')) ?? '';
+const overlayWeb = path.join(root, `patches/t3code-${channel}/overlays/apps/web`);
+const sourceWeb = path.join(source, 'apps/web');
+const hookFile = path.join(overlayWeb, 'src/voice/useConstructVoiceInput.tsx');
+// What the hook imports from upstream's stores and the Construct transport overlays.
+const hookMocks = {
+  '../state/voiceInput': `export const startVoiceInput = {label:'start'}; export const stopVoiceInput = {label:'stop'}; export const sendVoiceAudio = {label:'audio'};`,
+  '../state/use-atom-command': `export const useAtomCommand = command => window.voiceCommands[command.label];`,
+  '../state/entities': `const configs = new Map([['env',{environment:{capabilities:{voiceInput:true,voiceInputClientAudio:true}}}]]); export const useServerConfigs = () => configs;`,
+  '../hooks/useSettings': `export const useClientSettings = select => select({voiceInputSource: window.clientVoice ? 'client' : 'host'});`,
+  '../components/ui/toast': `export const toastManager = {add: toast => window.toasts.push(toast)};`,
+  './clientAudioCapture': `export {resolveVoiceInputSource} from ${JSON.stringify(path.join(overlayWeb, 'src/voice/clientAudioCapture.ts'))};
+export const canCaptureClientAudio = () => true; export const isSecureContext = () => true;
+export const startClientAudioCapture = ({onChunk}) => {
+ window.capturing=true;
+ window.audio=()=>{window.captured+=3200;onChunk(new Uint8Array(3200))};
+ return {stop:()=>{window.capturing=false},finish:async()=>{window.capturing=false}};
+};`,
+};
 const entry = `
 import React, {useState, useRef, useCallback, useEffect, useMemo} from ${JSON.stringify(sourceRequire.resolve('react'))};
 import {createRoot} from ${JSON.stringify(sourceRequire.resolve('react-dom/client'))};
+import {AsyncResult} from 'effect/reactivity';
 import {ComposerPromptEditor} from ${JSON.stringify(path.join(source,"apps/web/src/components/ComposerPromptEditor.tsx"))};
 import {ComposerPendingUserInputPanel} from ${JSON.stringify(path.join(source,'apps/web/src/components/chat/ComposerPendingUserInputPanel.tsx'))};
 import {derivePendingUserInputProgress, buildPendingUserInputAnswers, setPendingUserInputCustomAnswer, togglePendingUserInputOptionSelection} from ${JSON.stringify(path.join(source,'apps/web/src/pendingUserInput.ts'))};
-import {Tooltip, TooltipTrigger, TooltipPopup} from ${JSON.stringify(path.join(source,'apps/web/src/components/ui/tooltip.tsx'))};
-import {MicIcon, SquareIcon} from 'lucide-react';
-import {cn} from ${JSON.stringify(path.join(source,'apps/web/src/lib/utils.ts'))};
+import {useStableCallback} from ${JSON.stringify(path.join(source,'apps/web/src/hooks/useStableCallback.ts'))};
 import {submitComposerDraft} from ${JSON.stringify(path.join(source,'apps/web/src/components/chat/composerSubmission.ts'))};
 import {composerSubmissionIntentForKey} from ${JSON.stringify(path.join(source,'apps/web/src/composer-logic.ts'))};
 import {resolveComposerDispatchMode} from '@t3tools/client-runtime/state/composer-dispatch';
 import {DEFAULT_RESOLVED_KEYBINDINGS} from '@t3tools/shared/keybindings';
-type VoiceInsertionState${types}
+import {useConstructVoiceInput} from ${JSON.stringify(hookFile)};
 ${answerSetter}
-const useStableCallback = callback => callback;
-const voiceSourceHint = 'test microphone'; const isConnecting = false;
-const environmentId = 'env'; const environmentUnavailable = null; const supportsVoiceInput = true;
-const voiceInputSource = {source:window.clientVoice ? 'client' : 'host'}; const composerDraftTarget = 'thread';
-let nextSession = 0; const composerTargetKey = x => x; const randomUUID = () => String(++nextSession);
-const AsyncResult = {isFailure: r => r.failure, isSuccess: r => !r.failure}; const toastManager = {add: x => window.toasts.push(x)};
+const isConnecting = false; const environmentId = 'env'; const environmentUnavailable = null;
+const toastManager = {add: x => window.toasts.push(x)};
 const collapseExpandedComposerCursor = (v,c) => c; const expandCollapsedComposerCursor = (v,c) => c;
 const detectComposerTrigger = () => null;
 const replaceTextRange = (value,start,end,text) => ({text:value.slice(0,start)+text+value.slice(end),cursor:start+text.length});
-import {createVoiceAudioSender} from ${JSON.stringify(path.join(root, `patches/t3code-${channel}/overlays/apps/web/src/voice/voiceAudioSender.ts`))};
-import {recoverVoiceSubscription} from ${JSON.stringify(path.join(root, `patches/t3code-${channel}/overlays/apps/web/src/voice/voiceSessionRecovery.ts`))};
-const canReconnectVoiceInput = () => true;
-const startClientAudioCapture = ({onChunk}) => {
- window.capturing=true;
- window.audio=()=>{window.captured+=3200;onChunk(new Uint8Array(3200))};
- return {stop:()=>{window.capturing=false},finish:async()=>{window.capturing=false}};
+// A dropped connection fails the RPC the way the client runtime does; the hook retries those.
+const offline = () => AsyncResult.fail({_tag:'RpcClientError', message:'offline'});
+window.voiceCommands = {
+ start: ({onEvent,resume}) => {
+   window.starts.push(resume);
+   if(window.offline) return Promise.resolve(offline());
+   window.transcript=text=>onEvent({type:'transcript',text});
+   window.voiceEvent=onEvent;
+   if(!window.deferListening) queueMicrotask(()=>onEvent({type:'listening'}));
+   return new Promise(resolve=>{window.endStream=()=>resolve(AsyncResult.success(undefined));window.disconnect=()=>{window.offline=true;resolve(offline())}});
+ },
+ stop: async () => {
+   window.stops++;
+   if(window.offline) return offline();
+   if (!window.holdFinal) { window.voiceEvent?.({type:'stopped',reason:'user-stop'}); window.endStream?.(); }
+   return AsyncResult.success({stopped:true});
+ },
+ audio: async ({chunk,sequence}) => {
+   if(window.offline) return offline();
+   if(sequence===window.received) window.received+=chunk.length;
+   return AsyncResult.success({accepted:true,nextSequence:window.received});
+ },
 };
-const MAX_PENDING_VOICE_CHUNKS = 8; const describeVoiceInputFailure = () => 'failure';
 function Harness() {
  const [prompt,setPrompt] = useState('chat draft stays here');
  const [pending,setPending] = useState({requestId:'request',id:'question-1',customAnswer:'answer prefix',options:[],allowCustomAnswer:true});
@@ -85,12 +115,14 @@ function Harness() {
  const activePendingUserInput = pending && {...pending,questions};
  const activePendingProgress = pending && derivePendingUserInputProgress(questions,answers,0);
  const isChoiceOnlyPendingQuestion = activePendingProgress?.activeQuestion?.allowCustomAnswer === false;
+ const composerDraftTargetKey = 'thread';
  const promptRef = useRef(prompt);
  const [composerCursor,setComposerCursor] = useState(0);
  const setComposerTrigger = () => {};
  const isLiteralPendingAnswer = false; const onTypingGuardDraftChange = () => {};
  const composerEditorRef = useRef(null);
- const readComposerSnapshot = useCallback(() => window.snapshotOverride ?? composerEditorRef.current.readSnapshot(), []);
+ const readComposerSnapshot = () => window.snapshotOverride ?? composerEditorRef.current.readSnapshot();
+ const readComposerSnapshotStable = useStableCallback(readComposerSnapshot);
  const activePendingRequestKey = pending?.requestId ?? 'request';
  const composerRef = composerEditorRef;
  const setPendingUserInputAnswersByRequestId = update => setPending(previous => {
@@ -100,33 +132,7 @@ function Harness() {
  ${answerChange}
 
  useEffect(() => {promptRef.current = activePendingProgress?.customAnswer ?? prompt}, [pending,prompt]);
- const [isVoiceRecording,setIsVoiceRecording] = useState(false);
- const [voiceLevel,setVoiceLevel] = useState(0);
- const [voiceLive,setVoiceLive] = useState(false);
- const [voiceStatus,setVoiceStatus] = useState("Recording");
- const [voiceSubmission,setVoiceSubmission] = useState(null);
- const voiceInsertionRef = useRef(null); const voiceShortcutRef = useRef(null);
- const runStartVoiceInput = ({onEvent,resume}) => {
-   window.starts.push(resume);
-   if(window.offline) return Promise.resolve({failure:true,cause:{}});
-   window.transcript=text=>onEvent({type:'transcript',text});
-   window.voiceEvent=onEvent;
-   if(!window.deferListening) queueMicrotask(()=>onEvent({type:'listening'}));
-   return new Promise(resolve=>{window.endStream=resolve;window.disconnect=()=>{window.offline=true;resolve({failure:true,cause:{}})}});
- };
- const runStopVoiceInput = useCallback(async () => {
-   window.stops++;
-   if(window.offline) return {failure:true};
-   if (!window.holdFinal) { window.voiceEvent?.({type:'stopped',reason:'user-stop'}); window.endStream?.({failure:false}); }
-   return {failure:false,value:{stopped:true}};
- }, []);
- const runSendVoiceAudio = async ({chunk,sequence}) => {
-   if(window.offline) return {failure:true};
-   if(sequence===window.received) window.received+=chunk.length;
-   return {failure:false,value:{accepted:true,nextSequence:window.received}};
- };
  ${replacement}
- ${voice}
  const activeThreadId = 'thread'; const attachmentTargetKey = 'thread';
  const pendingImageCompressionsRef = useRef(new Map()); const pendingDraftWork = new Set();
  const providerInputRejectedRef = useRef(false);
@@ -139,10 +145,10 @@ function Harness() {
    window.sends.push({text:pending?.customAnswer ?? prompt, snapshot:composerEditorRef.current.readSnapshot().value,
      answers:pending ? buildPendingUserInputAnswers(questions,answers) : null, intent});
  };
- ${submit}
  const planModeUiEnabled = false; const isSoftwareKeyboardOpen = layout === 'mobile';
  const phase = 'idle'; const isCompacting = false; const settings = {sendShortcut:'enter',followUpBehavior:'queue'}; const followUpBehavior = settings.followUpBehavior; const keybindings = DEFAULT_RESOLVED_KEYBINDINGS;
  const readEnvironmentScope = () => true; const AuthOrchestrationOperateScope = 'orchestration:operate'; const onTypingGuardSend = () => {};
+ ${submit}
  const listContinuationForEnter = () => null; const listIndentForTab = () => null;
  const routeKind = 'draft'; const composerMenuOpenRef = useRef(false);
  const resolveActiveComposerTrigger = () => ({trigger:null});
@@ -158,7 +164,6 @@ function Harness() {
  window.setApproval=setApproval;
  window.answer=()=>buildPendingUserInputAnswers(questions,answers);
  window.pendingText=()=>pending?.customAnswer;
- window.recording=()=>isVoiceRecording;
  window.longDraft=()=>{setPending(null);setPrompt('A long existing draft. '.repeat(1000))};
  window.changeQuestion = () => setPending(p => ({...p, id:'question-2'}));
  window.leaveQuestion = () => setPending(null);
@@ -172,15 +177,17 @@ function Harness() {
    <div style={{display:layout==='collapsed'?'none':undefined}}>
      <ComposerPromptEditor editorRef={composerEditorRef} value={pending?.customAnswer ?? prompt} cursor={composerCursor}
        contextRecords={new Map()} terminalContexts={[]} skills={[]} disabled={isChoiceOnlyPendingQuestion || activePendingIsResponding}
-       placeholder="Compose" onCommandKeyDown={onComposerCommandKey} onChange={(text,cursor)=>{${changeGuard}setComposerCursor(cursor);pending?setPending(p=>({...p,customAnswer:text})):setPrompt(text)}} onPaste={()=>{}} />
+       placeholder="Compose" onCommandKeyDown={onComposerCommandKey} onChange={(text,cursor)=>{setComposerCursor(cursor);pending?setPending(p=>({...p,customAnswer:text})):setPrompt(text)}} onPaste={()=>{}} />
    </div>
    ${questionControl}
    <div data-chat-composer-footer="true" style={{display:layout==='desktop'?'flex':'none'}}>
      ${footerControl}
    </div>
-   <output>{prompt}</output><span data-status>{voiceStatus}</span>
+   <output>{prompt}</output>
  </form>;
 }
+// The pressed state of the mic is the hook's recording state.
+window.recording=()=>document.querySelector('button[aria-pressed="true"][aria-label="Stop voice input"]')!==null;
 window.holdFinal=false;window.deferListening=false;window.toasts=[];window.stops=0;window.starts=[];window.sends=[];window.offline=false;window.received=0;window.captured=0;
 createRoot(document.getElementById('root')).render(React.createElement(Harness));
 `;
@@ -188,13 +195,27 @@ const browser = await chromium.launch({headless:true, ...(process.env.T3_TEST_CH
 try {
  const entryId = path.join(source, 'apps/web/voice-question-test.tsx');
  const bundle = await build({
-   configFile:false, root:path.join(source,'apps/web'), envDir:false,
-   resolve:{alias:{'~':path.join(source,'apps/web/src')}},
+   configFile:false, root:sourceWeb, envDir:false,
+   resolve:{alias:{'~':path.join(sourceWeb,'src')}},
    define:{'process.env.NODE_ENV':'"development"'},
    plugins:[{
      name:'voice-question-entry',
-     resolveId(id){if(id===entryId) return entryId;},
-     load(id){if(id===entryId) return entry;},
+     // Ahead of Vite's resolver, which would find the transport overlays next to the hook.
+     enforce:'pre',
+     async resolveId(id, importer){
+       if(id===entryId) return entryId;
+       if(importer===hookFile && Object.hasOwn(hookMocks, id)) return '\0voice-mock:'+id;
+       // Overlay files resolve upstream modules and packages from the checkout they are applied to.
+       if(importer?.startsWith(overlayWeb+path.sep)) {
+         const local = path.resolve(path.dirname(importer), id);
+         if(id.startsWith('.') && ['.ts','.tsx'].some(ext=>fs.existsSync(local+ext))) return null;
+         return this.resolve(id, importer.replace(overlayWeb, sourceWeb), {skipSelf:true});
+       }
+     },
+     load(id){
+       if(id===entryId) return entry;
+       if(id.startsWith('\0voice-mock:')) return hookMocks[id.slice('\0voice-mock:'.length)];
+     },
    }],
    build:{write:false, minify:false, lib:{entry:entryId, name:'VoiceQuestionTest', formats:['iife']}},
  });
@@ -290,7 +311,7 @@ try {
  async function micState(live,status) {
    await page.waitForFunction(([live,status])=>{
      const button=document.querySelector('[data-voice-live]');
-     return button?.dataset.voiceLive===String(live) && document.querySelector('[data-status]').textContent===status;
+     return button?.dataset.voiceLive===String(live) && document.querySelector('[role="status"]')?.textContent===status;
    },[live,status]);
    assert.match(await mic.getAttribute('class'),live?/\bbg-destructive\b/:/\bbg-secondary\b/);
    assert.equal(await mic.locator('[data-voice-pending]').count(),live?0:1);
@@ -432,7 +453,7 @@ try {
  await page.evaluate(()=>{window.audio();window.transcript('first words')});
  await page.waitForFunction(()=>window.received===3200);
  await page.evaluate(()=>window.disconnect());
- await page.waitForFunction(()=>document.querySelector('[data-status]').textContent.includes('Reconnecting'));
+ await page.waitForFunction(()=>document.querySelector('[role="status"]')?.textContent.includes('Reconnecting'));
  for(let i=0;i<40;i++) {await page.evaluate(()=>window.audio());await page.waitForTimeout(100);}
  await recording(true);await editable(true);
  assert.equal(await page.evaluate(()=>window.capturing),true);
