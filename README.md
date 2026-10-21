@@ -18,9 +18,11 @@ validation or builds leave the last published pair available.
 
 The builder compiles shared JavaScript once, packages a Linux runtime with pinned
 Node and its native dependencies, and cross-compiles the Windows NSIS installer
-using Wine. It smoke-tests Linux CLI, native PTY and HTTP serving, checks Windows
-PE/NSIS structure, uploads to a draft, downloads and verifies every asset, and
-only then publishes. Windows installation UI is not exercised by Linux CI.
+using Wine. The installer's WSL runtime is upstream's Linux CLI archive (the single
+`t3` executable), built with upstream's own scripts from the patched source. It
+smoke-tests Linux CLI, native PTY and HTTP serving, checks Windows PE/NSIS
+structure, uploads to a draft, downloads and verifies every asset, and only then
+publishes. Windows installation UI is not exercised by Linux CI.
 
 Stable releases become GitHub's **latest**. Nightly releases are **prereleases**
 and never replace latest. Consumers select a complete published nightly release
@@ -85,6 +87,11 @@ Playwright, and `T3_TEST_CHANNEL=release|nightly`, for example
 `node test/t3-update-notification.browser.test.mjs`. Set `T3_TEST_CHROMIUM` to use
 an existing Chromium executable. The build itself verifies the patch application
 and runs the overlays' unit suites (`vp test run`) only.
+
+After a build, `node test/t3-wsl-runtime.test.mjs` extracts the WSL runtime from the
+installer, runs upstream's archive smoke test on it, installs it with upstream's WSL
+install script in a temporary HOME and checks that its `t3` carries the patched server.
+It needs `7z`, `T3_TEST_SOURCE` (the built checkout) and `T3_TEST_INSTALLER`.
 
 Plans and builds use isolated paths and never restart the live T3 service.
 Build with `bash scripts/build.sh <absolute work directory>` on Ubuntu 24.04
