@@ -78,7 +78,7 @@
   "transforms": [
     {
       "path": "apps/web/src/components/ChatView.tsx",
-      "after": "import { RightPanelTabs } from \"./RightPanelTabs\";",
+      "after": "import { ChatRightPanel } from \"./chat/ChatRightPanel\";",
       "insert": "import { useConstructOmniloopThread } from \"./omniloop/useConstructOmniloopThread\";\n"
     },
     {
