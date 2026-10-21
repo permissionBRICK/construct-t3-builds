@@ -52,7 +52,7 @@ describe("constructPairedRouteUrl", () => {
   it("is the paired route's address, also behind a learned LAN route that borrows its credential", () => {
     const paired = pairedEntry(ENV, "https://t3haus.example.net:8443/");
     assert.equal(constructPairedRouteUrl(paired), "https://t3haus.example.net:8443/");
-    const learned = withLearnedLanRoute(paired, "http://172.30.1.5:5177/");
+    const learned = withLearnedLanRoute(paired, "https://172.30.1.5:5177/");
     assert.isTrue(String(learned.target._tag === "BearerConnectionTarget" && learned.target.connectionId).startsWith("learned:"));
     assert.equal(constructPairedRouteUrl(learned), "https://t3haus.example.net:8443/");
   });
