@@ -87,6 +87,8 @@ through re-indentation) and the list of `conflicts`.
 ## What the inventories add to T3 Code
 
 - **Voice input** (`voiceInput.*` RPCs, composer mic button, client or host capture).
+  The composer side is the `useConstructVoiceInput` overlay hook; ChatComposer only
+  imports it, calls it once, lets it intercept submits and places its two controls.
   Desktop-managed backends enable it by default, using the desktop microphone
   and the Claude Code login in that backend's environment. Remote servers keep
   the `CONSTRUCT_T3_VOICE_INPUT=true` opt-in; an explicit `false` disables voice

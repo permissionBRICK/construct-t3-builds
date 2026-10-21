@@ -37,6 +37,26 @@ ok("source transforms: voice RPC, live cursor-safe insertion, mic UI, and Constr
 ok("source transforms: stream PCM amplitude into a live mic-button level effect",
   /readInt16LE/.test(sourceRecipe) && /Schema\.Literal\(\\?"level\\?"\)/.test(sourceRecipe) &&
   /data-voice-level/.test(sourceRecipe) && /boxShadow/.test(sourceRecipe));
+// Voice input lives in its own hook; upstream's ChatComposer changes almost daily, so it
+// only gets the import, one hook call, the submit interception and the two control spots.
+for (const channel of ["release", "nightly"]) {
+  const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, "patches", `t3code-${channel}`, "source-transforms.json"), "utf8"));
+  const composer = manifest.transforms.filter((t) => t.path === "apps/web/src/components/chat/ChatComposer.tsx");
+  const hook = fs.readFileSync(path.join(repoRoot, "patches", `t3code-${channel}`, "overlays", "apps", "web", "src", "voice", "useConstructVoiceInput.tsx"), "utf8");
+  ok(`voice input (${channel}): ChatComposer only imports the hook, calls it, lets it intercept submits and places its controls`,
+    manifest.overlays.includes("apps/web/src/voice/useConstructVoiceInput.tsx") && composer.length === 5 &&
+    composer.some((t) => /^import \{ useConstructVoiceInput \} from "\.\.\/\.\.\/voice\/useConstructVoiceInput";\n$/.test(t.import || "")) &&
+    composer.some((t) => t.before === "const submitComposer =" && /= useConstructVoiceInput\(\{[^]*getSubmitComposer: \(\) => submitComposerStable,\n {2}\}\);\n$/.test(t.insert)) &&
+    composer.some((t) => t.scope === "const submitComposer =" && t.after === ") => {" &&
+      /^ {4}if \(constructVoiceInput\.interceptSubmit\(event, dispatchMode, submissionIntent\)\) return;\n$/.test(t.insert)) &&
+    composer.some((t) => t.before === "<ComposerFooterPrimaryActions" && /^\s*\{constructVoiceInput\.footerControl\}\n$/.test(t.insert)) &&
+    composer.some((t) => t.before === "<ComposerPromptLengthValidation" && /^\s*\{constructVoiceInput\.questionControl\}\n$/.test(t.insert)));
+  ok(`voice input (${channel}): the hook keeps Alt+Q, the send after the final transcript and the pending ring`,
+    /event\.code === "KeyQ" && event\.altKey && !event\.ctrlKey/.test(hook) &&
+    /if \(!active\.submitArgs\) active\.submitArgs = args;/.test(hook) &&
+    /getSubmitComposer\(\)\(undefined, \.\.\.voiceSubmission\.args\)/.test(hook) &&
+    /data-voice-pending/.test(hook) && /border-t-warning/.test(hook) && /data-question-voice-input/.test(hook));
+}
 // Auto-link (plan §4.12 "T3 Desktop topology"): the Desktop app links every VM with a T3
 // server on its own, through a hidden host script; the same in BOTH inventories.
 for (const channel of ["release", "nightly"]) {
