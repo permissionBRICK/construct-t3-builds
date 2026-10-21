@@ -22,7 +22,7 @@ const manifest = JSON.parse(process.env.T3_TEST_BASELINE
   : fs.readFileSync(path.join(root, manifestPath), 'utf8'));
 const inserts = manifest.transforms.filter(t => t.path.endsWith('/ChatComposer.tsx')).map(t => t.insert || '');
 const types = inserts.find(s => s.includes('type VoiceInsertionState')).split('type VoiceInsertionState')[1];
-const voice = inserts.find(s => s.includes('const stopVoiceRecording = useCallback'));
+const voice = inserts.find(s => s.includes('const stopVoiceRecording = useStableCallback'));
 const readSource = file => process.env.T3_TEST_BASELINE
   ? execFileSync('git', ['show', 'HEAD:'+file], {cwd:source, encoding:'utf8'})
   : fs.readFileSync(path.join(source, file), 'utf8');
@@ -32,11 +32,11 @@ if (process.env.T3_TEST_BASELINE) {
   const guard = manifest.transforms.find(t => t.scope === 'const submitComposer = (' && t.before === 'if (');
   submit = submit.replace('    if (\n      noProviderAvailable ||', guard.insert+'    if (\n      noProviderAvailable ||');
 }
-const commandKey = upstream.slice(upstream.indexOf('  const onComposerCommandKey = ('), upstream.indexOf('  // Prompt stash ('));
+const commandKey = upstream.slice(upstream.indexOf('  const onComposerCommandKey = ('), upstream.indexOf('  const stashQueue = usePromptStashStore('));
 const replacement = upstream.slice(upstream.indexOf('  const applyPromptReplacement = ('), upstream.indexOf('  const readComposerSnapshot = ('));
-const chatView = readSource('apps/web/src/components/ChatView.tsx');
-const answerChange = chatView.slice(chatView.indexOf('  const onChangeActivePendingUserInputCustomAnswer = useMemo('), chatView.indexOf('  const onAdvanceActivePendingUserInput = () => {'));
-const answerSetter = chatView.slice(chatView.indexOf('function makePendingCustomAnswerSetter('), chatView.indexOf('\n}\n', chatView.indexOf('function makePendingCustomAnswerSetter(')) + 3);
+const pendingRequests = readSource('apps/web/src/components/chat/usePendingThreadRequests.ts');
+const answerChange = pendingRequests.slice(pendingRequests.indexOf('  const writePrompt = useStableCallback('), pendingRequests.indexOf('  const onAdvanceActivePendingUserInput = () => {'));
+const answerSetter = pendingRequests.slice(pendingRequests.indexOf('function makePendingCustomAnswerSetter('), pendingRequests.indexOf('\n}\n', pendingRequests.indexOf('function makePendingCustomAnswerSetter(')) + 3);
 assert.ok(answerChange.includes('setPendingUserInputAnswersByRequestId'), 'exercise the real parent answer callback');
 const changeGuard = inserts.find(s => s.includes('Voice owns the draft')) ?? '';
 const footerControl = manifest.transforms.find(t => t.path.endsWith('/ChatComposer.tsx') && t.before === '<ComposerFooterPrimaryActions').insert;
@@ -140,8 +140,8 @@ function Harness() {
      answers:pending ? buildPendingUserInputAnswers(questions,answers) : null, intent});
  };
  ${submit}
- const planModeUiEnabled = false; const isMobileViewport = layout === 'mobile';
- const phase = 'idle'; const settings = {sendShortcut:'enter',followUpBehavior:'queue'}; const keybindings = DEFAULT_RESOLVED_KEYBINDINGS;
+ const planModeUiEnabled = false; const isSoftwareKeyboardOpen = layout === 'mobile';
+ const phase = 'idle'; const isCompacting = false; const settings = {sendShortcut:'enter',followUpBehavior:'queue'}; const keybindings = DEFAULT_RESOLVED_KEYBINDINGS;
  const readEnvironmentScope = () => true; const AuthOrchestrationOperateScope = 'orchestration:operate'; const onTypingGuardSend = () => {};
  const listContinuationForEnter = () => null; const listIndentForTab = () => null;
  const routeKind = 'draft'; const composerMenuOpenRef = useRef(false);
