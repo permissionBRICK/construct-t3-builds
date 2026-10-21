@@ -20,23 +20,23 @@ const encodeAudio = Schema.encodeSync(VoiceInputAudioInput);
 
 describe("VoiceInputStartInput", () => {
   it("leaves the source absent for clients that only know the host bridge", () => {
-    expect(decodeStart({ sessionId: "session-1" }).source).toBeUndefined();
+    expect(decodeStart({ sessionId: "session-1", resume: false }).source).toBeUndefined();
   });
 
   it("carries an explicit source", () => {
-    expect(decodeStart({ sessionId: "session-1", source: "client" }).source).toBe("client");
-    expect(decodeStart({ sessionId: "session-1", source: "host" }).source).toBe("host");
+    expect(decodeStart({ sessionId: "session-1", resume: false, source: "client" }).source).toBe("client");
+    expect(decodeStart({ sessionId: "session-1", resume: false, source: "host" }).source).toBe("host");
   });
 
   it("rejects a source it does not know", () => {
-    expect(() => decodeStart({ sessionId: "session-1", source: "bluetooth" })).toThrow();
+    expect(() => decodeStart({ sessionId: "session-1", resume: false, source: "bluetooth" })).toThrow();
   });
 });
 
 describe("VoiceInputAudioInput", () => {
   it("round-trips a PCM chunk through base64", () => {
     const pcm = new Uint8Array([0, 1, 255, 128, 64, 32]);
-    const wire = encodeAudio({ sessionId: "session-1", chunk: pcm });
+    const wire = encodeAudio({ sessionId: "session-1", sequence: 0, chunk: pcm });
     expect(wire.chunk).toBe("AAH/gEAg");
 
     const decoded = decodeAudio(wire);
@@ -46,18 +46,18 @@ describe("VoiceInputAudioInput", () => {
 
   it("accepts a full 100 ms chunk of 16 kHz mono S16LE", () => {
     const chunk = new Uint8Array(3200);
-    expect(decodeAudio(encodeAudio({ sessionId: "session-1", chunk })).chunk.byteLength).toBe(3200);
+    expect(decodeAudio(encodeAudio({ sessionId: "session-1", sequence: 0, chunk })).chunk.byteLength).toBe(3200);
   });
 
   it("rejects chunks past the size bound in both directions", () => {
     const oversized = new Uint8Array(VOICE_INPUT_MAX_CHUNK_BYTES + 1);
-    expect(() => encodeAudio({ sessionId: "session-1", chunk: oversized })).toThrow();
+    expect(() => encodeAudio({ sessionId: "session-1", sequence: 0, chunk: oversized })).toThrow();
     expect(() =>
-      decodeAudio({ sessionId: "session-1", chunk: base64OfZeroBytes(oversized.byteLength) }),
+      decodeAudio({ sessionId: "session-1", sequence: 0, chunk: base64OfZeroBytes(oversized.byteLength) }),
     ).toThrow();
   });
 
   it("rejects a payload that is not base64", () => {
-    expect(() => decodeAudio({ sessionId: "session-1", chunk: "not base64!!" })).toThrow();
+    expect(() => decodeAudio({ sessionId: "session-1", sequence: 0, chunk: "not base64!!" })).toThrow();
   });
 });
