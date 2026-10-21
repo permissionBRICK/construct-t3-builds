@@ -74,20 +74,6 @@ fs.writeFileSync(bundle, '#!' + interpreter + source.slice(source.indexOf('\n'))
 NODE
 }
 
-# Use the native binary node-pty actually loads, whether installed from a
-# prebuild or compiled locally. Loading it also verifies the build Node ABI.
-t3_recipe_pty_prebuild() {
-  node - "$1" <<'NODE'
-const { createRequire } = require('node:module');
-const { resolve, basename } = require('node:path');
-const serverRequire = createRequire(resolve(process.argv[2], 'apps/server/package.json'));
-serverRequire('node-pty');
-const binaries = Object.keys(serverRequire.cache).filter(file => basename(file) === 'pty.node');
-if (binaries.length !== 1) throw new Error(`Expected one loaded node-pty binary, found ${binaries.length}`);
-console.log(binaries[0]);
-NODE
-}
-
 t3_recipe_package() {
   local desktop_version="$1" output_dir="$2"
   export DEBIAN_FRONTEND=noninteractive
@@ -100,16 +86,28 @@ t3_recipe_package() {
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
   fi
   export PATH="${HOME}/.cargo/bin:${PATH}"
-  rustup target add x86_64-pc-windows-gnu
+  rustup target add x86_64-pc-windows-gnu x86_64-unknown-linux-gnu
   note "Cross-building the Windows resource monitor (reusing the Cargo compiler cache)..."
   cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml \
     --target x86_64-pc-windows-gnu --target-dir "${COMPILER_CACHE}/resource-monitor"
   mkdir -p native/resource-monitor/target/x86_64-pc-windows-msvc/release
   cp "${COMPILER_CACHE}/resource-monitor/x86_64-pc-windows-gnu/release/t3-resource-monitor.exe" \
     native/resource-monitor/target/x86_64-pc-windows-msvc/release/t3-resource-monitor.exe
-  local pty_prebuild
-  pty_prebuild="$(t3_recipe_pty_prebuild "${SOURCE_DIR}")" || fail "Could not load the Linux node-pty binary"
-  [[ -s "${pty_prebuild}" ]] || fail "Linux node-pty prebuild was not produced: ${pty_prebuild}"
+  # The WSL backend runs upstream's Linux CLI archive (the single t3 executable).
+  # Build it the way upstream's release workflow does, from this patched source.
+  note "Building the Linux CLI archive for the WSL runtime..."
+  cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml \
+    --target x86_64-unknown-linux-gnu --target-dir "${COMPILER_CACHE}/resource-monitor"
+  local wsl_dir="${output_dir}/wsl-runtime" brand=production
+  mkdir -p "${wsl_dir}/resource-monitor/linux-x64"
+  cp "${COMPILER_CACHE}/resource-monitor/x86_64-unknown-linux-gnu/release/t3-resource-monitor" \
+    "${wsl_dir}/resource-monitor/linux-x64/t3-resource-monitor"
+  # The archive ships the web client; brand it as the Desktop build will.
+  if [[ "${desktop_version}" =~ -nightly\.[0-9]{8}\.[0-9]+$ ]]; then brand=nightly; fi
+  node scripts/apply-web-brand-assets.ts "${brand}" apps/server/dist/client
+  node apps/server/scripts/cli.ts build-exe --target linux-x64
+  node scripts/build-cli-archive.ts --platform linux --arch x64 --version "${desktop_version}" \
+    --resource-monitor-dir "${wsl_dir}/resource-monitor" --output-dir "${wsl_dir}"
   # Wine's tool setup is reusable across recipe/version changes, too.
   note "Packaging unsigned Windows x64 installer..."
   WINEPREFIX="${COMPILER_CACHE}/wine" WINEDEBUG=-all \
@@ -117,5 +115,5 @@ t3_recipe_package() {
     node scripts/build-desktop-artifact.ts \
       --platform win --target nsis --arch x64 --skip-build \
       --build-version "${desktop_version}" --output-dir "${output_dir}" \
-      --wsl-prebuild "${pty_prebuild}"
+      --wsl-runtime "${wsl_dir}/t3-${desktop_version}-linux-x64.tar.gz"
 }

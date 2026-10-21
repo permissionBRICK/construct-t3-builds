@@ -55,6 +55,7 @@ B="${TMP}/build with space"
 mkdir -p "${B}/.git" "${B}/node_modules/.pnpm/node-pty@1/node_modules/node-pty" "${B}/apps/server/dist/client" \
   "${B}/apps/server/node_modules" \
   "${B}/apps/web/dist" "${B}/apps/desktop/release" "${B}/apps/desktop/dist" "${B}/apps/mobile/dist" \
+  "${B}/apps/server/dist-exe" \
   "${B}/native/resource-monitor/target/x86_64-pc-windows-gnu/release" \
   "${B}/native/resource-monitor/target/x86_64-pc-windows-msvc" \
   "${B}/native/resource-monitor/target/release/deps" "${B}/native/resource-monitor/target/release/build" \
@@ -73,6 +74,7 @@ ok "prunes the web bundle (server serves dist/client, web/dist is only the dev f
 ok "prunes the desktop release output" "$(has "${B}/apps/desktop/release" && echo true || echo false)"
 ok "prunes the desktop dist" "$(has "${B}/apps/desktop/dist" && echo true || echo false)"
 ok "prunes the mobile dist" "$(has "${B}/apps/mobile/dist" && echo true || echo false)"
+ok "prunes the WSL CLI executable build" "$(has "${B}/apps/server/dist-exe" && echo true || echo false)"
 ok "prunes the Windows gnu cross target" "$(has "${B}/native/resource-monitor/target/x86_64-pc-windows-gnu" && echo true || echo false)"
 ok "prunes the Windows msvc cross target" "$(has "${B}/native/resource-monitor/target/x86_64-pc-windows-msvc" && echo true || echo false)"
 ok "prunes other native crates' Windows targets too" "$(has "${B}/native/libghostty-vt/target/x86_64-pc-windows-gnu" && echo true || echo false)"
@@ -91,7 +93,7 @@ ok "does not list the release dir itself" "$(has "${B}/native/resource-monitor/t
 ok "does not list the target dir itself" "$(has "${B}/native/resource-monitor/target" && echo false || echo true)"
 ok "every candidate exists on disk" "$(for v in "${victims[@]}"; do [[ -e "${v}" ]] || { echo false; exit; }; done; echo true)"
 ok "no candidate escapes the build dir (path with a space)" "$(for v in "${victims[@]}"; do [[ "${v}" == "${B}/"* ]] || { echo false; exit; }; done; echo true)"
-ok "candidate count is exactly the 12 regenerable fixture paths" "$([[ "${#victims[@]}" -eq 12 ]] && echo true || echo false)"
+ok "candidate count is exactly the 13 regenerable fixture paths" "$([[ "${#victims[@]}" -eq 13 ]] && echo true || echo false)"
 
 # Removing every candidate leaves the runtime set intact, including the node-pty link.
 for v in "${victims[@]}"; do rm -rf -- "${v}"; done

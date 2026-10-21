@@ -1,82 +1,51 @@
-// Run against the built, patched channel with T3_TEST_SOURCE=/path/to/upstream.
+// Run after a recipe build with T3_TEST_SOURCE=/path/to/the built patched upstream checkout
+// and T3_TEST_INSTALLER=/path/to/T3Code-Construct-Setup.exe (needs 7z).
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, renameSync, rmSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-assert.ok(process.env.T3_TEST_SOURCE, 'T3_TEST_SOURCE must name a built patched checkout');
+assert.ok(process.env.T3_TEST_SOURCE, 'T3_TEST_SOURCE must name the built patched checkout');
+assert.ok(process.env.T3_TEST_INSTALLER, 'T3_TEST_INSTALLER must name the Windows installer built from it');
 const source = resolve(process.env.T3_TEST_SOURCE);
-const require = createRequire(join(source, 'scripts/package.json'));
-const Effect = await import(require.resolve('effect/Effect'));
-const NodeServices = await import(require.resolve('@effect/platform-node/NodeServices'));
-const { createConstructWslRuntimeArchive } = await import(pathToFileURL(join(source, 'scripts/build-desktop-artifact.ts')));
+const installer = resolve(process.env.T3_TEST_INSTALLER);
 const { buildWslRuntimeInstallScript } = await import(pathToFileURL(join(source, 'apps/desktop/src/wsl/DesktopWslEnvironment.ts')));
-const recipe = resolve(import.meta.dirname, '../bin/t3code-build-recipe.sh');
-const prebuildPath = execFileSync('bash', ['-c', 'source "$1"; t3_recipe_pty_prebuild "$2"',
-  'pty-prebuild', recipe, source], { encoding: 'utf8' }).trim();
+const version = JSON.parse(readFileSync(join(source, 'apps/server/package.json'), 'utf8')).version;
 const temporary = mkdtempSync(join(tmpdir(), 'construct-wsl-test-'));
 const home = join(temporary, 'home with spaces');
 mkdirSync(home);
-const env = { ...process.env, HOME: home, T3CODE_HOME: join(home, 't3'), NODE_PATH: '' };
+const env = { ...process.env, HOME: home, T3CODE_HOME: join(home, 't3') };
 const run = (file, args, options = {}) => execFileSync(file, args, { env, encoding: 'utf8', timeout: 120_000, ...options });
 
 try {
-  await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
-    const archive = yield* createConstructWslRuntimeArchive({
-      repoRoot: source, serverDistDir: join(source, 'apps/server/dist'),
-      prebuildPath, version: '0.0.41-test', arch: 'x64',
-    });
-    const sha = createHash('sha256').update(readFileSync(archive)).digest('hex');
-    const install = buildWslRuntimeInstallScript(archive, sha, sha);
-    run('/bin/sh', ['-c', install]);
-    const runtime = join(home, '.t3/wsl-runtime', sha);
-    const bundledServer = join(runtime, 'apps/server/dist/bin.mjs');
-    const original = readFileSync(join(source, 'apps/server/dist/bin.mjs'));
-    assert.deepEqual(readFileSync(bundledServer), original);
-    // The release server carries the runtime patch; the nightly server builds it in from source.
-    assert.match(original.toString(), /\/\*__T3PARK v7\*\/|__T3PARK source__/);
-    assert.match(original.toString(), /__CONSTRUCT_T3_OPENCODE_MONITOR/);
-    assert.deepEqual(readFileSync(join(runtime, 'node')), readFileSync(process.execPath));
-    assert.match(run(join(runtime, 't3'), ['--version']), /t3 v/);
-    const finderPackage = join(runtime, 'node_modules/@ff-labs/fff-node');
-    renameSync(finderPackage, `${finderPackage}.hidden`);
-    try {
-      assert.match(run(join(runtime, 'node'), ['--no-global-search-paths', bundledServer, '--version']), /t3 v/);
-    } finally {
-      renameSync(`${finderPackage}.hidden`, finderPackage);
-    }
-    run(join(runtime, 'node'), ['-e', `
-      const p = require('node-pty').spawn('/bin/sh', ['-c', 'printf CONSTRUCT_PTY_OK'], {env:process.env});
-      let output = ''; const timer = setTimeout(() => process.exit(2), 10000);
-      p.onData(s => output += s);
-      p.onExit(() => { clearTimeout(timer); process.exit(output.includes('CONSTRUCT_PTY_OK') ? 0 : 1); });
-    `], { cwd: runtime });
-    run(join(runtime, 'node'), ['--input-type=module', '-e', `
-      import { FileFinder, closeLibrary } from '@ff-labs/fff-node';
-      const result = FileFinder.create({basePath:process.cwd()});
-      if (!result.ok) throw new Error(JSON.stringify(result.error));
-      result.value.destroy(); closeLibrary();
-    `], { cwd: runtime });
-    console.log('PASS WSL archive installs with the patched server, pinned Node, native PTY and file finder');
+  // The NSIS installer carries the packaged app as $PLUGINSDIR/app-64.7z.
+  run('7z', ['x', '-y', `-o${temporary}`, installer, '$PLUGINSDIR/app-64.7z']);
+  run('7z', ['x', '-y', `-o${join(temporary, 'app')}`, join(temporary, '$PLUGINSDIR/app-64.7z'),
+    'resources/wsl-runtime.tar.gz', 'resources/wsl-runtime.tar.gz.sha256']);
+  const archive = join(temporary, 'app/resources/wsl-runtime.tar.gz');
+  const sha = createHash('sha256').update(readFileSync(archive)).digest('hex');
+  assert.equal(readFileSync(`${archive}.sha256`, 'utf8').trim(), sha);
 
-    const marker = join(runtime, '.t3code-wsl-runtime-ready');
-    const digest = readFileSync(marker, 'utf8');
-    const sentinel = join(runtime, 'warm-cache-sentinel');
-    writeFileSync(sentinel, 'keep on warm reuse');
-    run('/bin/sh', ['-c', install]);
-    assert.equal(readFileSync(marker, 'utf8'), digest);
-    assert.equal(readFileSync(sentinel, 'utf8'), 'keep on warm reuse');
-    // A still-runnable edited bundle must invalidate the cached runtime too.
-    writeFileSync(bundledServer, Buffer.concat([original, Buffer.from('\n// changed after extraction\n')]));
-    run('/bin/sh', ['-c', install]);
-    assert.deepEqual(readFileSync(bundledServer), original);
-    assert.equal(existsSync(sentinel), false);
-    console.log('PASS WSL cache reuses the verified runtime and restores an altered server bundle');
-  })).pipe(Effect.provide(NodeServices.layer)));
+  // Upstream's own archive smoke test: `t3 --version` and `t3 serve` from the extracted archive.
+  run(process.execPath, ['scripts/smoke-cli-archive.ts', '--archive', archive, '--expect-version', version],
+    { cwd: source, stdio: 'inherit' });
+
+  // The Desktop app installs the archive in the distro with this script (runtime id as upstream names it).
+  const output = run('/bin/sh', ['-c', buildWslRuntimeInstallScript(archive, `sha256-${sha}`, sha)]);
+  const runtime = /^runtimeRoot:(.+)$/m.exec(output)?.[1];
+  assert.ok(runtime?.startsWith(join(home, '.t3/wsl-runtime/')), `unexpected install output: ${output}`);
+  assert.ok(run(join(runtime, 't3'), ['--version']).includes(version));
+  console.log('PASS the embedded WSL runtime installs with upstream\'s script and its t3 starts');
+
+  const executable = readFileSync(join(runtime, 't3'));
+  for (const code of ['__T3PARK source__', '__CONSTRUCT_T3_OPENCODE_MONITOR source__', '"voiceInput.start"',
+    '"voiceInput.audio"', '"voiceInput.stop"', '"construct.diskSpace"', '"construct.vaultPending"', '"/construct/session/renew"']) {
+    assert.ok(executable.includes(code), `the WSL t3 executable lacks Construct's ${code}`);
+  }
+  console.log('PASS the WSL t3 executable contains the patched Construct server');
 } finally {
   rmSync(temporary, { recursive: true, force: true });
 }

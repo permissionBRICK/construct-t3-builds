@@ -14,13 +14,14 @@
 #     as node-pty external and imports them at run time through apps/server/node_modules,
 #     which symlinks into the root tree) and any resource-monitor executable under
 #     native/*/target/{release,debug}. Only regenerable OUTPUT goes: the Windows
-#     cross-compile targets, cargo intermediates, the desktop output and apps/web/dist
-#     (the monorepo dev-server fallback; the server serves dist/client).
+#     cross-compile targets, cargo intermediates, the desktop output, the WSL CLI
+#     executable build (apps/server/dist-exe) and apps/web/dist (the monorepo
+#     dev-server fallback; the server serves dist/client).
 #   * the build being produced now is never touched.
 #   * any OTHER superseded build is removed entirely -- nothing runs from it.
 t3_build_prune_candidates() {
   local dir="$1" p
-  for p in apps/desktop/release apps/desktop/dist apps/web/dist apps/mobile/dist apps/marketing/dist; do
+  for p in apps/desktop/release apps/desktop/dist apps/server/dist-exe apps/web/dist apps/mobile/dist apps/marketing/dist; do
     [[ -e "${dir}/${p}" ]] && printf '%s\n' "${dir}/${p}"
   done
   for p in "${dir}"/native/*/target/*-pc-windows-* \
