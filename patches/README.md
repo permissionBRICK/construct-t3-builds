@@ -47,9 +47,10 @@ Concretely:
 ```
 
 - **Imports without an anchor.** `import` places its text before the file's first
-  top-level `import` line (a shebang or header comment stays above it). Module imports
-  are hoisted, so their position does not matter, and anchoring them after some
-  upstream import only breaks when upstream reorders its imports.
+  top-level `import` or `export *` line (a shebang or header comment stays above it).
+  Module imports and re-exports are hoisted, so their position does not matter, and
+  anchoring them after some upstream import only breaks when upstream reorders its
+  imports.
 
 - **Line-based inserts.** `after`/`before` name a line; the insert text (complete lines
   carrying their own indentation) goes after or before that line.

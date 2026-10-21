@@ -78,72 +78,63 @@
   "transforms": [
     {
       "path": "apps/web/src/components/ChatView.tsx",
-      "after": "import { RightPanelTabs } from \"./RightPanelTabs\";",
-      "insert": "import { useConstructOmniloopThread } from \"./omniloop/useConstructOmniloopThread\";\n"
+      "import": "import { useConstructOmniloopThread } from \"./omniloop/useConstructOmniloopThread\";\n"
     },
     {
       "path": "apps/web/src/components/ChatView.tsx",
-      "after": "const addPullRequestsSurfaceStable = useStableCallback(addPullRequestsSurface);",
+      "after": "const activeThreadRef =",
       "insert": "  const addOmniloopSurface = useStableCallback(() => {\n    if (!activeThreadRef) return;\n    useRightPanelStore.getState().open(activeThreadRef, \"omniloop\");\n  });\n  const constructOmniloop = useConstructOmniloopThread({\n    threadRef: activeThreadRef,\n    turnItems: serverProjection?.turnItems,\n    onOpen: addOmniloopSurface,\n  });\n"
     },
     {
       "path": "apps/web/src/components/ChatView.tsx",
-      "after": "const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];",
-      "insert": "    const omniloopItems = constructOmniloop.bannerItem === null ? [] : [constructOmniloop.bannerItem];\n"
-    },
-    {
-      "path": "apps/web/src/components/ChatView.tsx",
-      "after": "...limitRecoveryItems,",
-      "insert": "        ...omniloopItems,\n",
-      "every": true
+      "find": "bannerItems={composerBannerItems}",
+      "replace": "bannerItems={\n                                constructOmniloop.bannerItem === null\n                                  ? composerBannerItems\n                                  : [constructOmniloop.bannerItem, ...composerBannerItems]\n                              }"
     },
     {
       "path": "apps/web/src/components/chat/RightPanelSurfaceContent.tsx",
-      "after": "import { lazy, Suspense } from \"react\";",
-      "insert": "import { OmniloopPanel } from \"../omniloop/OmniloopPanel\";\n"
+      "import": "import { OmniloopPanel } from \"../omniloop/OmniloopPanel\";\n"
     },
     {
       "path": "apps/web/src/components/chat/RightPanelSurfaceContent.tsx",
-      "before": "case \"device\":",
+      "after": "switch (surface.kind) {",
       "insert": "    case \"omniloop\":\n      return <OmniloopPanel environmentId={threadRef.environmentId} />;\n"
     },
     {
       "path": "apps/web/src/components/ChatView.tsx",
-      "after": "deviceAvailable={activeThreadRef !== null}",
+      "after": "<RightPanelTabs",
       "insert": "          onAddOmniloop={addOmniloopSurface}\n          omniloopAvailable={constructOmniloop.available}\n          omniloopBadgeCount={constructOmniloop.liveCount}\n",
       "every": true
     },
     {
       "path": "apps/web/src/components/RightPanelTabs.tsx",
-      "after": "} from \"lucide-react\";",
-      "insert": "import {\n  OMNILOOP_DISABLED_REASON,\n  OMNILOOP_SURFACE_DESCRIPTION,\n  OMNILOOP_SURFACE_LABEL,\n  OMNILOOP_SURFACE_SHORTCUT,\n  OMNILOOP_UNAVAILABLE_HINT,\n  OmniloopIcon,\n} from \"./omniloop/omniloopSurface\";\n"
+      "import": "import {\n  OMNILOOP_DISABLED_REASON,\n  OMNILOOP_SURFACE_DESCRIPTION,\n  OMNILOOP_SURFACE_LABEL,\n  OMNILOOP_SURFACE_SHORTCUT,\n  OMNILOOP_UNAVAILABLE_HINT,\n  OmniloopIcon,\n} from \"./omniloop/omniloopSurface\";\n"
     },
     {
       "path": "apps/web/src/components/RightPanelTabs.tsx",
-      "scope": "interface RightPanelTabsProps",
-      "after": "deviceAvailable: boolean;",
+      "after": "interface RightPanelTabsProps {",
       "insert": "  /** Optional: only the thread view offers the Omniloop surface (see useConstructOmniloopThread). */\n  onAddOmniloop?: (() => void) | undefined;\n  /** The thread's VM runs omniloop right now. */\n  omniloopAvailable?: boolean | undefined;\n  /** Live omniloop workflows of the thread; badges the Omniloop card. */\n  omniloopBadgeCount?: number | undefined;\n"
     },
     {
       "path": "apps/web/src/components/RightPanelTabs.tsx",
-      "scope": "function RightPanelEmptyState",
-      "after": "deviceAvailable: boolean;",
+      "after": "RightPanelEmptyState(props: {",
       "insert": "  onAddOmniloop: () => void;\n  omniloopAvailable: boolean;\n  omniloopBadgeCount: number;\n"
     },
     {
       "path": "apps/web/src/components/RightPanelTabs.tsx",
-      "scope": "function RightPanelEmptyState",
-      "after": "onClick: props.onAddDevice,\n},",
+      "before": "] as const;",
+      "scope": "const actions = [",
       "insert": "    {\n      label: OMNILOOP_SURFACE_LABEL,\n      description: OMNILOOP_SURFACE_DESCRIPTION,\n      icon: OmniloopIcon,\n      shortcut: OMNILOOP_SURFACE_SHORTCUT,\n      available: props.omniloopAvailable,\n      disabledReason: OMNILOOP_UNAVAILABLE_HINT,\n      onClick: props.onAddOmniloop,\n      badgeCount: props.omniloopBadgeCount,\n    },\n"
     },
     {
       "path": "apps/web/src/components/RightPanelTabs.tsx",
-      "after": "return \"Pull requests\";",
+      "after": "switch (surface.kind) {",
+      "scope": "function surfaceTitle(",
       "insert": "    case \"omniloop\":\n      return OMNILOOP_SURFACE_LABEL;\n"
     },
     {
       "path": "apps/web/src/components/RightPanelTabs.tsx",
-      "after": "return <PullRequestGlyph.link className=\"size-3 shrink-0\" />;",
+      "after": "switch (surface.kind) {",
+      "scope": "function SurfaceIcon(",
       "insert": "    case \"omniloop\":\n      return <OmniloopIcon className=\"size-3 shrink-0\" />;\n"
     },
     {
@@ -158,55 +149,48 @@
     },
     {
       "path": "apps/web/src/components/RightPanelTabs.tsx",
-      "scope": "export function RightPanelTabs",
-      "after": "onClick: props.onAddDevice,\n},",
+      "before": "] as const;",
+      "scope": "const addSurfaceActions = [",
       "insert": "    {\n      label: OMNILOOP_SURFACE_LABEL,\n      icon: OmniloopIcon,\n      shortcut: OMNILOOP_SURFACE_SHORTCUT,\n      available: omniloopAvailable,\n      disabledReason: OMNILOOP_DISABLED_REASON,\n      onClick: onAddOmniloop,\n    },\n"
     },
     {
       "path": "apps/web/src/components/RightPanelTabs.tsx",
-      "after": "deviceAvailable={props.deviceAvailable}",
+      "after": "<RightPanelEmptyState",
       "insert": "            onAddOmniloop={onAddOmniloop}\n            omniloopAvailable={omniloopAvailable}\n            omniloopBadgeCount={props.omniloopBadgeCount ?? 0}\n"
     },
     {
       "path": "apps/web/src/rightPanelStore.ts",
-      "scope": "RIGHT_PANEL_KINDS",
-      "after": "\"pull-requests\",",
+      "after": "RIGHT_PANEL_KINDS = [",
       "insert": "  \"omniloop\",\n"
     },
     {
       "path": "apps/web/src/rightPanelStore.ts",
-      "before": "| { id: \"pull-requests\"; kind: \"pull-requests\" };",
+      "after": "export type RightPanelSurface =",
       "insert": "  | { id: \"omniloop\"; kind: \"omniloop\" }\n"
     },
     {
       "path": "apps/web/src/rightPanelStore.ts",
-      "after": "return { id: \"pull-requests\", kind };",
+      "after": "switch (kind) {",
+      "scope": "const singletonSurface =",
       "insert": "    case \"omniloop\":\n      return { id: \"omniloop\", kind };\n"
     },
     {
       "path": "apps/server/src/server.ts",
-      "after": "import * as McpHttpServer from \"./mcp/McpHttpServer.ts\";",
-      "insert": "import { constructOmniloopProxyRouteLayer } from \"./constructOmniloopProxy.ts\";\n"
+      "import": "import { constructOmniloopProxyRouteLayer } from \"./constructOmniloopProxy.ts\";\n"
     },
     {
       "path": "apps/server/src/server.ts",
-      "after": "ServerHttp.layerOtlpTracesProxyRoute,",
+      "after": "layerMakeRoutes = Layer.mergeAll(",
       "insert": "    constructOmniloopProxyRouteLayer,\n"
     },
     {
       "path": "apps/server/src/server.ts",
-      "after": "import * as McpHttpServer from \"./mcp/McpHttpServer.ts\";",
-      "insert": "import { constructSessionRenewalRouteLayer } from \"./constructSessionRenewal.ts\";\n"
+      "import": "import { constructSessionRenewalRouteLayer } from \"./constructSessionRenewal.ts\";\n"
     },
     {
       "path": "apps/server/src/server.ts",
-      "after": "ServerHttp.layerOtlpTracesProxyRoute,",
+      "after": "layerMakeRoutes = Layer.mergeAll(",
       "insert": "    constructSessionRenewalRouteLayer,\n"
-    },
-    {
-      "path": "packages/shared/src/devProxy.ts",
-      "find": "\"/mcp\"] as const",
-      "replace": "\"/mcp\", \"/construct\"] as const"
     },
     {
       "path": "apps/desktop/src/electron/ElectronProtocol.test.ts",
@@ -239,8 +223,7 @@
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.test.ts",
-      "after": "import * as TestClock from \"effect/testing/TestClock\";",
-      "insert": "import * as NodeFS from \"node:fs\";\nimport * as NodeOS from \"node:os\";\nimport * as NodePath from \"node:path\";\n",
+      "import": "import * as NodeFS from \"node:fs\";\nimport * as NodeOS from \"node:os\";\nimport * as NodePath from \"node:path\";\n",
       "optional": true
     },
     {
@@ -263,27 +246,24 @@
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "after": "import * as Cause from \"effect/Cause\";",
-      "insert": "import type {\n  ConstructPairingLinkResult,\n  ConstructT3LinkInfo,\n  ConstructUpdateAction,\n  ConstructUpdateInfo,\n} from \"@t3tools/contracts\";\n"
+      "import": "import type {\n  ConstructPairingLinkResult,\n  ConstructT3LinkInfo,\n  ConstructUpdateAction,\n  ConstructUpdateInfo,\n} from \"@t3tools/contracts\";\n"
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "after": "import * as Cause from \"effect/Cause\";",
-      "insert": "import * as Config from \"effect/Config\";\n"
+      "import": "import * as Config from \"effect/Config\";\n"
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "after": "import * as DesktopAppSettings from \"../settings/DesktopAppSettings.ts\";",
-      "insert": "import * as ConstructUpdates from \"./ConstructUpdates.ts\";\n"
+      "import": "import * as ConstructUpdates from \"./ConstructUpdates.ts\";\n"
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "after": "const AUTO_UPDATE_POLL_INTERVAL = \"4 minutes\";",
+      "after": "AUTO_UPDATE_POLL_INTERVAL =",
       "insert": "// Construct-built Desktop apps (see ConstructUpdates.ts) replace electron-updater with\n// checks against Construct's GitHub ref + its published T3 builds. GitHub allows 60\n// unauthenticated requests/hour per IP and the VS Code control panel polls too, so\n// the full check runs rarely; while a launched script runs only the local markers\n// are re-read, and the script's exit triggers the next full check.\nconst CONSTRUCT_POLL_INTERVAL = \"10 minutes\";\nconst CONSTRUCT_RUNNING_REFRESH_INTERVAL = \"15 seconds\";\nconst CONSTRUCT_DISABLED_BY_ENV_REASON =\n  \"Construct-managed updates are disabled by the T3CODE_DISABLE_AUTO_UPDATE setting.\";\n"
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "before": "const readAppUpdateYml = fileSystem.readFileString(environment.appUpdateYmlPath, \"utf-8\").pipe(",
+      "before": "const readAppUpdateYml =",
       "insert": "  // ── Construct-managed updates ──────────────────────────────────────────────\n  const constructManaged = ConstructUpdates.isConstructManagedBuild(environment.appVersion);\n  const constructDisabledReason = config.disableAutoUpdate\n    ? Option.some(CONSTRUCT_DISABLED_BY_ENV_REASON)\n    : Option.none<string>();\n  const constructEnabled = constructManaged && Option.isNone(constructDisabledReason);\n  const constructLocalAppData = yield* Config.String(\"LOCALAPPDATA\").pipe(\n    Config.option,\n    Effect.orElseSucceed(() => Option.none<string>()),\n    Effect.map(Option.getOrUndefined),\n  );\n  // The T3 channel of a Construct build is fixed by the VM's T3CODE_CHANNEL that built\n  // it, so the state reports the channel derived from the build version; the desktop\n  // updateChannel preference is not consulted (and setChannel is a no-op).\n  const constructChannel = ConstructUpdates.resolveConstructT3Channel(\n    ConstructUpdates.constructT3BaseVersion(environment.appVersion),\n  );\n  const constructInfoRef = yield* Ref.make<ConstructUpdateInfo | null>(null);\n  const constructRunningRef = yield* Ref.make<ConstructUpdateAction | null>(null);\n  // One refresh or launch at a time: a poll that read the markers before a launch must\n  // not publish its stale snapshot over the running state, and the script-exit refresh\n  // must not interleave with a scheduled one.\n  const constructMutex = yield* Semaphore.make(1);\n  const constructContext = yield* Effect.context<never>();\n  const runConstructEffect = (effect: Effect.Effect<void>) => {\n    void Effect.runPromiseWith(constructContext)(effect);\n  };\n\n  /** Re-read the Construct markers on this PC and (in \"full\" mode) ask GitHub + npm,\n   *  then fold the result into the broadcast state. Never fails. */\n  const refreshConstruct = Effect.fn(\"desktop.updates.construct.refresh\")(function* (\n    reason: string,\n    mode: \"full\" | \"local\",\n  ) {\n    yield* Effect.annotateCurrentSpan({ reason, mode });\n    return yield* constructMutex.withPermits(1)(refreshConstructLocked(reason, mode));\n  });\n\n  const refreshConstructLocked = Effect.fn(\"desktop.updates.construct.refreshLocked\")(function* (\n    reason: string,\n    mode: \"full\" | \"local\",\n  ) {\n    const previous = yield* Ref.get(constructInfoRef);\n    const runningAction = yield* Ref.get(constructRunningRef);\n    const checkedAt = yield* currentIsoTimestamp;\n    if (mode === \"full\") {\n      yield* updateState((current) => reduceDesktopUpdateStateOnCheckStart(current, checkedAt));\n    }\n    const info = yield* Effect.promise(() =>\n      ConstructUpdates.checkConstructUpdates({\n        appVersion: environment.appVersion,\n        platform: environment.platform,\n        ...(process.env.TEMP ? { temp: process.env.TEMP } : {}),\n        localAppData: constructLocalAppData,\n        fs: ConstructUpdates.nodeConstructFileSystem,\n        ...(mode === \"full\" ? { fetchJson: ConstructUpdates.fetchConstructJson } : {}),\n        previous,\n        runningAction,\n        now: () => checkedAt,\n      }),\n    );\n    // A script finished (or was launched) while the check was in flight: its own\n    // handler publishes the authoritative state; this snapshot is stale.\n    if ((yield* Ref.get(constructRunningRef)) !== runningAction) {\n      yield* logUpdaterInfo(\"construct update check superseded\", { reason, mode });\n      return previous ?? info;\n    }\n    yield* Ref.set(constructInfoRef, info);\n    // With T3CODE_DISABLE_AUTO_UPDATE the Construct facts are still published (the\n    // Providers entry and the read-only update track need them) but the control stays\n    // disabled and nothing is offered.\n    yield* updateState((current) => ({\n      ...ConstructUpdates.applyConstructInfoToState(current, info),\n      channel: constructChannel,\n      ...(constructEnabled ? {} : { enabled: false, status: \"disabled\" as const }),\n    }));\n    yield* logUpdaterInfo(\"construct update check\", {\n      reason,\n      mode,\n      action: info.action,\n      runningAction: info.runningAction,\n      installedCommit: info.installedCommit,\n      provisionedCommit: info.provisionedCommit,\n      latestCommit: info.latestCommit,\n      t3LatestVersion: info.t3LatestVersion,\n      error: info.error,\n    });\n    return info;\n  });\n\n  const handleConstructExit = Effect.fn(\"desktop.updates.construct.exit\")(function* (\n    action: ConstructUpdateAction,\n    result: { readonly code: number | null; readonly error: string | null },\n  ) {\n    yield* Ref.set(constructRunningRef, null);\n    yield* finishUpdateAction(\"download\");\n    yield* logUpdaterInfo(\"construct script finished\", {\n      action,\n      code: result.code,\n      error: result.error,\n    });\n    const info = yield* refreshConstruct(\"script-exit\", \"full\");\n    if (result.error === null && (result.code === null || result.code === 0)) return;\n    // Update-T3Code.ps1 exits 1 when provisioning failed and 3 when it finished with\n    // optional errors (the provisioner's own codes); Update-Construct.ps1 exits 1.\n    const message =\n      result.error ??\n      (result.code === 3\n        ? `${ConstructUpdates.constructScriptFileName(action)} finished with optional errors (exit code 3). See its console output for details.`\n        : `${ConstructUpdates.constructScriptFileName(action)} exited with code ${result.code}. See its console output for details.`);\n    const failed: ConstructUpdateInfo = {\n      ...info,\n      error: info.error === null ? message : `${message} ${info.error}`,\n    };\n    yield* Ref.set(constructInfoRef, failed);\n    yield* updateState((current) => ({\n      ...ConstructUpdates.applyConstructInfoToState(current, failed),\n      message,\n      errorContext: \"download\",\n      canRetry: true,\n    }));\n    yield* logUpdaterError(message, { action, code: result.code });\n  });\n\n  /** Re-read the local markers every few seconds while a script runs, so the state\n   *  follows Update-Construct.ps1 (installedCommit moves) / the provisioner\n   *  (provisionedCommit moves) without waiting for the console to close. */\n  const watchConstructRun = Effect.gen(function* () {\n    while (true) {\n      yield* Effect.sleep(CONSTRUCT_RUNNING_REFRESH_INTERVAL);\n      if ((yield* Ref.get(constructRunningRef)) === null) return;\n      yield* refreshConstruct(\"script-running\", \"local\");\n    }\n  }).pipe(\n    Effect.catchCause((cause) =>\n      Cause.hasInterruptsOnly(cause)\n        ? Effect.void\n        : logUpdaterWarning(\"construct run watcher failed\", { cause: Cause.pretty(cause) }),\n    ),\n    Effect.withSpan(\"desktop.updates.construct.watchRun\"),\n  );\n\n  /** The update control was clicked, or ONE Providers row's button (B14, plan §4.12):\n   *  `instanceName` names the VM that row is about, and `requested` says whether to\n   *  reprovision it (the default) or update its T3 Code. Without a name this is the\n   *  host-wide control and the action is whatever the last check offered. */\n  const launchConstruct = Effect.fn(\"desktop.updates.construct.launch\")(function* (\n    instanceName?: string | ReadonlyArray<string>,\n    requested?: \"reprovision\" | \"update-t3\",\n  ) {\n    return yield* constructMutex.withPermits(1)(launchConstructLocked(instanceName, requested));\n  });\n\n  const launchConstructLocked = Effect.fn(\"desktop.updates.construct.launchLocked\")(function* (\n    instanceName?: string | ReadonlyArray<string>,\n    requested?: \"reprovision\" | \"update-t3\",\n  ) {\n    const info = yield* Ref.get(constructInfoRef);\n    // A NAMED launch reprovisions that instance, or updates its T3 Code when asked to: a\n    // row can be stale (or simply chosen) while the host-wide control has nothing to\n    // offer, so `info.action` must not gate it. A launch already running still blocks both.\n    const named = instanceName !== undefined && instanceName.length > 0;\n    if (info === null || info.runningAction !== null) {\n      return { accepted: false, completed: false };\n    }\n    if (!named && info.action === null) {\n      return { accepted: false, completed: false };\n    }\n    if (!constructEnabled) {\n      // The renderer gates its controls on `enabled`; a call that still gets here\n      // (an older web client) is answered with the reason, never with a launch.\n      yield* updateState((current) => ({\n        ...current,\n        message: CONSTRUCT_DISABLED_BY_ENV_REASON,\n        errorContext: \"download\",\n      }));\n      return { accepted: true, completed: false };\n    }\n    if (!(yield* tryStartUpdateAction(\"download\"))) {\n      return { accepted: false, completed: false };\n    }\n    const instanceAction = requested ?? \"reprovision\";\n    const action: ConstructUpdateAction = named ? instanceAction : info.action!;\n    // Re-read the registry now: the target VM is what Update-T3Code.ps1 is told to\n    // update, and it must match what the check displayed a moment ago.\n    const planned = named\n      ? ConstructUpdates.planConstructInstanceLaunch(\n          instanceAction,\n          instanceName!,\n          ConstructUpdates.readConstructInstancesFromRegistry(\n            constructLocalAppData,\n            ConstructUpdates.nodeConstructFileSystem,\n          ),\n          info,\n          environment.platform,\n          ConstructUpdates.nodeConstructFileSystem,\n        )\n      : ConstructUpdates.planConstructLaunch(\n          action,\n          info,\n          ConstructUpdates.readConstructVmTargetFromRegistry(\n            constructLocalAppData,\n            ConstructUpdates.nodeConstructFileSystem,\n          ),\n          environment.platform,\n          ConstructUpdates.nodeConstructFileSystem,\n        );\n    if (!planned.ok) {\n      yield* finishUpdateAction(\"download\");\n      const failed: ConstructUpdateInfo = { ...info, error: planned.error };\n      yield* Ref.set(constructInfoRef, failed);\n      yield* updateState((current) => ({\n        ...ConstructUpdates.applyConstructInfoToState(current, failed),\n        message: planned.error,\n        errorContext: \"download\",\n        canRetry: true,\n      }));\n      yield* logUpdaterError(planned.error, { action });\n      return { accepted: true, completed: false };\n    }\n    yield* Ref.set(constructRunningRef, action);\n    const running: ConstructUpdateInfo = { ...info, runningAction: action, error: null };\n    yield* Ref.set(constructInfoRef, running);\n    yield* updateState((current) => ConstructUpdates.applyConstructInfoToState(current, running));\n    const handle = ConstructUpdates.spawnConstructLaunch(planned.plan, (result) => {\n      runConstructEffect(\n        handleConstructExit(action, result).pipe(\n          Effect.catchCause((cause) =>\n            Cause.hasInterruptsOnly(cause)\n              ? Effect.void\n              : logUpdaterError(\"construct script exit handling failed\", {\n                  cause: Cause.pretty(cause),\n                }),\n          ),\n        ),\n      );\n    });\n    if (handle !== null) {\n      yield* logUpdaterInfo(\"launched construct script\", {\n        action,\n        scriptPath: planned.plan.scriptPath,\n        target: named ? String(instanceName) : \"default\",\n        pid: handle.pid ?? null,\n      });\n      runConstructEffect(watchConstructRun);\n    }\n    return { accepted: true, completed: false };\n  });\n\n  const startConstructPollers: Effect.Effect<void, never, Scope.Scope> = Effect.gen(function* () {\n    const poll = (reason: string) =>\n      Ref.get(constructRunningRef).pipe(\n        Effect.flatMap((running) => refreshConstruct(reason, running === null ? \"full\" : \"local\")),\n        Effect.asVoid,\n      );\n    yield* Effect.sleep(AUTO_UPDATE_STARTUP_DELAY).pipe(\n      Effect.andThen(poll(\"startup\")),\n      Effect.catchCause((cause) => {\n        if (Cause.hasInterruptsOnly(cause)) {\n          return Effect.void;\n        }\n        const error = new DesktopUpdatePollerError({ poller: \"startup\", cause });\n        return logUpdaterError(error.message, { errorTag: error._tag, poller: error.poller });\n      }),\n      Effect.forkScoped,\n    );\n    yield* Effect.sleep(CONSTRUCT_POLL_INTERVAL).pipe(\n      Effect.andThen(poll(\"poll\")),\n      Effect.forever,\n      Effect.catchCause((cause) => {\n        if (Cause.hasInterruptsOnly(cause)) {\n          return Effect.void;\n        }\n        const error = new DesktopUpdatePollerError({ poller: \"poll\", cause });\n        return logUpdaterError(error.message, { errorTag: error._tag, poller: error.poller });\n      }),\n      Effect.forkScoped,\n    );\n  }).pipe(Effect.withSpan(\"desktop.updates.construct.startPollers\"));\n\n"
     },
     {
@@ -303,7 +283,7 @@
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "after": "check: Effect.fn(\"desktop.updates.check\")(function* (reason: string) {\nyield* Effect.annotateCurrentSpan({ reason });",
+      "after": "check: Effect.fn(\"desktop.updates.check\")",
       "insert": "      if (constructManaged) {\n        if (!constructEnabled) {\n          return { checked: false, state: yield* Ref.get(updateStateRef) };\n        }\n        if ((yield* Ref.get(constructRunningRef)) !== null) {\n          // A launched script is running: its exit triggers the full check.\n          yield* refreshConstruct(reason, \"local\");\n          return { checked: true, state: yield* Ref.get(updateStateRef) };\n        }\n        if (yield* tryStartUpdateAction(\"check\")) {\n          yield* refreshConstruct(reason, \"full\").pipe(\n            Effect.ensuring(finishUpdateAction(\"check\")),\n          );\n        }\n        return { checked: true, state: yield* Ref.get(updateStateRef) };\n      }\n"
     },
     {
@@ -323,43 +303,47 @@
     },
     {
       "path": "apps/server/package.json",
-      "after": "\"@types/node\": \"catalog:\",",
+      "after": "\"devDependencies\": {",
       "insert": "    \"@types/ws\": \"^8.18.1\",\n"
     },
     {
       "path": "apps/server/src/auth/RpcAuthorization.ts",
-      "after": "[WS_METHODS.serverUpdateServerWithProgress]:",
+      "after": "RPC_REQUIRED_SCOPES = {",
       "insert": "  [WS_METHODS.voiceInputStart]: AuthOrchestrationOperateScope,\n  [WS_METHODS.voiceInputStop]: AuthOrchestrationOperateScope,\n  [WS_METHODS.voiceInputAudio]: AuthOrchestrationOperateScope,\n"
     },
     {
       "path": "apps/server/src/auth/RpcAuthorization.ts",
-      "after": "[WS_METHODS.serverUpdateServerWithProgress]:",
+      "after": "RPC_REQUIRED_SCOPES = {",
       "insert": "  [WS_METHODS.constructDiskSpace]: AuthOrchestrationReadScope,\n"
     },
     {
       "path": "apps/server/src/auth/RpcAuthorization.ts",
-      "after": "[WS_METHODS.serverUpdateServerWithProgress]:",
+      "after": "RPC_REQUIRED_SCOPES = {",
       "insert": "  [WS_METHODS.constructVaultPending]: AuthOrchestrationReadScope,\n"
     },
     {
       "path": "apps/server/src/auth/RpcAuthorization.ts",
-      "after": "[WS_METHODS.serverUpdateServerWithProgress]:",
+      "after": "RPC_REQUIRED_SCOPES = {",
       "insert": "  [WS_METHODS.constructOmniloopStatus]: AuthOrchestrationReadScope,\n  [WS_METHODS.constructOmniloopTicket]: AuthOrchestrationReadScope,\n  [WS_METHODS.constructOmniloopWorkflows]: AuthOrchestrationReadScope,\n"
     },
     {
       "path": "apps/server/src/cli/auth.ts",
-      "after": "import * as ServerConfig from \"../config.ts\";",
-      "insert": "import { publicBaseUrlOrigin } from \"../publicBaseUrl.ts\";\n"
+      "import": "import { publicBaseUrlOrigin } from \"../publicBaseUrl.ts\";\n"
     },
     {
       "path": "apps/server/src/cli/auth.ts",
-      "find": "          const output = formatIssuedPairingCredential(issued, {\n            json: flags.json,\n            ...(Option.isSome(flags.baseUrl) ? { baseUrl: flags.baseUrl.value } : {}),",
-      "replace": "          // An explicit --base-url still wins; otherwise fall back to the\n          // public origin Construct's TLS proxy publishes, when it set one.\n          const baseUrl = Option.isSome(flags.baseUrl)\n            ? flags.baseUrl.value\n            : publicBaseUrlOrigin();\n          const output = formatIssuedPairingCredential(issued, {\n            json: flags.json,\n            ...(baseUrl === undefined ? {} : { baseUrl }),"
+      "before": "const output = formatIssuedPairingCredential(issued, {",
+      "insert": "          // An explicit --base-url still wins; otherwise fall back to the\n          // public origin Construct's TLS proxy publishes, when it set one.\n          const baseUrl = Option.isSome(flags.baseUrl)\n            ? flags.baseUrl.value\n            : publicBaseUrlOrigin();\n"
+    },
+    {
+      "path": "apps/server/src/cli/auth.ts",
+      "find": "...(Option.isSome(flags.baseUrl) ? { baseUrl: flags.baseUrl.value } : {}),",
+      "scope": "const output = formatIssuedPairingCredential(issued, {",
+      "replace": "...(baseUrl === undefined ? {} : { baseUrl }),"
     },
     {
       "path": "apps/server/src/cli/pair.ts",
-      "after": "} from \"../startupAccess.ts\";",
-      "insert": "import { publicBaseUrlOrigin } from \"../publicBaseUrl.ts\";\n"
+      "import": "import { publicBaseUrlOrigin } from \"../publicBaseUrl.ts\";\n"
     },
     {
       "path": "apps/server/src/cli/pair.ts",
@@ -373,37 +357,41 @@
     },
     {
       "path": "apps/server/src/environment/ServerEnvironment.ts",
-      "after": "threadTitleRegeneration: true,",
+      "after": "capabilities: {",
+      "scope": "const descriptor",
       "insert": "      voiceInput:\n        process.env.CONSTRUCT_T3_VOICE_INPUT === \"true\" ||\n        (serverConfig.mode === \"desktop\" && process.env.CONSTRUCT_T3_VOICE_INPUT !== \"false\"),\n      voiceInputClientAudio: true,\n"
     },
     {
       "path": "apps/server/src/environment/ServerEnvironment.ts",
-      "after": "threadTitleRegeneration: true,",
+      "after": "capabilities: {",
+      "scope": "const descriptor",
       "insert": "      constructDiskSpace: true,\n"
     },
     {
       "path": "apps/server/src/environment/ServerEnvironment.ts",
-      "after": "threadTitleRegeneration: true,",
+      "after": "capabilities: {",
+      "scope": "const descriptor",
       "insert": "      constructVaultPending: true,\n"
     },
     {
       "path": "apps/server/src/environment/ServerEnvironment.ts",
-      "after": "threadTitleRegeneration: true,",
+      "after": "capabilities: {",
+      "scope": "const descriptor",
       "insert": "      constructOmniloop: true,\n"
     },
     {
       "path": "apps/server/src/observability/RpcInstrumentation.ts",
-      "after": "[WS_METHODS.serverUpdateServerWithProgress]:",
+      "after": "RPC_AGGREGATES = {",
       "insert": "  [WS_METHODS.voiceInputStart]: \"voice-input\",\n  [WS_METHODS.voiceInputStop]: \"voice-input\",\n  [WS_METHODS.voiceInputAudio]: \"voice-input\",\n"
     },
     {
       "path": "apps/server/src/observability/RpcInstrumentation.ts",
-      "after": "[WS_METHODS.serverUpdateServerWithProgress]:",
+      "after": "RPC_AGGREGATES = {",
       "insert": "  [WS_METHODS.constructDiskSpace]: \"construct-disk-space\",\n"
     },
     {
       "path": "apps/server/src/observability/RpcInstrumentation.ts",
-      "after": "[WS_METHODS.serverUpdateServerWithProgress]:",
+      "after": "RPC_AGGREGATES = {",
       "insert": "  [WS_METHODS.constructVaultPending]: \"construct-vault-pending\",\n"
     },
     {
@@ -413,13 +401,12 @@
     },
     {
       "path": "apps/server/src/observability/RpcInstrumentation.ts",
-      "after": "[WS_METHODS.serverUpdateServerWithProgress]:",
+      "after": "RPC_AGGREGATES = {",
       "insert": "  [WS_METHODS.constructOmniloopStatus]: \"construct-omniloop\",\n  [WS_METHODS.constructOmniloopTicket]: \"construct-omniloop\",\n  [WS_METHODS.constructOmniloopWorkflows]: \"construct-omniloop\",\n"
     },
     {
       "path": "apps/server/src/serverRuntimeStartup.ts",
-      "after": "} from \"./startupAccess.ts\";",
-      "insert": "import { readPublicBaseUrl } from \"./publicBaseUrl.ts\";\n"
+      "import": "import { readPublicBaseUrl } from \"./publicBaseUrl.ts\";\n"
     },
     {
       "path": "apps/server/src/serverRuntimeStartup.ts",
@@ -428,13 +415,12 @@
     },
     {
       "path": "apps/server/src/serverRuntimeStartup.ts",
-      "before": "const maybeOpenBrowser",
+      "before": "const resolveStartupBrowserTarget =",
       "insert": "/**\n * Resolves `T3CODE_PUBLIC_BASE_URL` for a served runtime, warning instead of\n * silently falling back when it is set to something unusable.\n */\nconst resolvePublicBaseUrlForServing = Effect.fn(\"server.startup.publicBaseUrl\")(function* (\n  mode: ServerConfig.RuntimeMode,\n) {\n  if (mode === \"desktop\") return undefined;\n  const setting = readPublicBaseUrl();\n  if (setting.kind === \"invalid\") {\n    yield* Effect.logWarning(\n      \"Ignoring T3CODE_PUBLIC_BASE_URL: it is not an http(s) URL. Using the bind address instead.\",\n    ).pipe(Effect.annotateLogs({ publicBaseUrl: setting.raw }));\n    return undefined;\n  }\n  return setting.kind === \"ok\" ? setting.origin : undefined;\n});\n\n"
     },
     {
       "path": "apps/server/src/startupAccess.ts",
-      "after": "import * as EnvironmentAuth from \"./auth/EnvironmentAuth.ts\";",
-      "insert": "import { publicBaseUrlOrigin } from \"./publicBaseUrl.ts\";\n"
+      "import": "import { publicBaseUrlOrigin } from \"./publicBaseUrl.ts\";\n"
     },
     {
       "path": "apps/server/src/startupAccess.ts",
@@ -449,8 +435,7 @@
     },
     {
       "path": "apps/server/src/ws.ts",
-      "after": "import * as SessionStore from \"./auth/SessionStore.ts\";",
-      "insert": "import { pushVoiceAudio, startVoiceInput, stopVoiceInput } from \"./voiceInput.ts\";\n"
+      "import": "import { pushVoiceAudio, startVoiceInput, stopVoiceInput } from \"./voiceInput.ts\";\n"
     },
     {
       "path": "apps/server/src/ws.ts",
@@ -474,18 +459,15 @@
     },
     {
       "path": "apps/server/src/ws.ts",
-      "after": "import * as SessionStore from \"./auth/SessionStore.ts\";",
-      "insert": "import { readConstructDiskSpace } from \"./constructDiskSpace.ts\";\n"
+      "import": "import { readConstructDiskSpace } from \"./constructDiskSpace.ts\";\n"
     },
     {
       "path": "apps/server/src/ws.ts",
-      "after": "import * as SessionStore from \"./auth/SessionStore.ts\";",
-      "insert": "import { readConstructVaultPending } from \"./constructVaultPending.ts\";\n"
+      "import": "import { readConstructVaultPending } from \"./constructVaultPending.ts\";\n"
     },
     {
       "path": "apps/server/src/ws.ts",
-      "after": "import * as SessionStore from \"./auth/SessionStore.ts\";",
-      "insert": "import { issueOmniloopTicket, readOmniloopStatus, readOmniloopWorkflows } from \"./constructOmniloop.ts\";\n"
+      "import": "import { issueOmniloopTicket, readOmniloopStatus, readOmniloopWorkflows } from \"./constructOmniloop.ts\";\n"
     },
     {
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
@@ -529,8 +511,7 @@
     },
     {
       "path": "apps/web/src/components/desktopUpdate.logic.ts",
-      "after": "import type { DesktopUpdateActionResult, DesktopUpdateState } from \"@t3tools/contracts\";",
-      "insert": "import { getConstructUpdateInfo, getConstructUpdateTooltip } from \"./constructUpdate.logic\";\n\n"
+      "import": "import { getConstructUpdateInfo, getConstructUpdateTooltip } from \"./constructUpdate.logic\";\n\n"
     },
     {
       "path": "apps/web/src/components/desktopUpdate.logic.ts",
@@ -539,8 +520,7 @@
     },
     {
       "path": "apps/web/src/components/settings/ProviderSettingsPanel.tsx",
-      "after": "import { AddProviderInstanceDialog } from \"./AddProviderInstanceDialog\";",
-      "insert": "import { ConstructProviderSection } from \"./ConstructProviderRow\";\n"
+      "import": "import { ConstructProviderSection } from \"./ConstructProviderRow\";\n"
     },
     {
       "path": "apps/web/src/components/settings/ProviderSettingsPanel.tsx",
@@ -550,18 +530,15 @@
     },
     {
       "path": "apps/web/src/components/settings/SettingsPanels.tsx",
-      "after": "type QuitConfirmationMode,",
-      "insert": "  VoiceInputSourcePreference,\n"
+      "import": "import { VoiceInputSourcePreference } from \"@t3tools/contracts/settings\";\n"
     },
     {
       "path": "apps/web/src/components/settings/SettingsPanels.tsx",
-      "after": "import { EMPTY_SERVER_PROVIDERS } from \"../../state/server\";",
-      "insert": "import { useServerConfigs } from \"../../state/entities\";\n"
+      "import": "import { useServerConfigs } from \"../../state/entities\";\n"
     },
     {
       "path": "apps/web/src/components/settings/SettingsPanels.tsx",
-      "after": "} from \"../../components/desktopUpdate.logic\";",
-      "insert": "import { startConstructUpdate } from \"../constructUpdate\";\nimport {\n  getConstructUpdateButtonLabel,\n  getConstructUpdateDetail,\n  getConstructUpdateHeadline,\n  getConstructUpdateInfo,\n} from \"../constructUpdate.logic\";\n"
+      "import": "import { startConstructUpdate } from \"../constructUpdate\";\nimport {\n  getConstructUpdateButtonLabel,\n  getConstructUpdateDetail,\n  getConstructUpdateHeadline,\n  getConstructUpdateInfo,\n} from \"../constructUpdate.logic\";\n"
     },
     {
       "path": "apps/web/src/components/settings/SettingsPanels.tsx",
@@ -605,13 +582,12 @@
     },
     {
       "path": "apps/web/src/components/settings/settingsSearch.ts",
-      "before": "{\nid: \"provider-update-checks\",",
+      "after": "SETTINGS_SEARCH_ITEMS = [",
       "insert": "  {\n    id: \"voice-input-source\",\n    title: \"Voice input source\",\n    to: \"/settings/general\",\n  },\n"
     },
     {
       "path": "apps/web/src/components/sidebar/SidebarUpdatePill.tsx",
-      "after": "import { useDesktopUpdateState } from \"../../state/desktopUpdate\";",
-      "insert": "import { startConstructUpdate } from \"../constructUpdate\";\nimport { getConstructUpdateInfo } from \"../constructUpdate.logic\";\n"
+      "import": "import { startConstructUpdate } from \"../constructUpdate\";\nimport { getConstructUpdateInfo } from \"../constructUpdate.logic\";\n"
     },
     {
       "path": "apps/web/src/components/sidebar/SidebarUpdatePill.tsx",
@@ -626,32 +602,29 @@
     },
     {
       "path": "apps/web/src/routes/__root.tsx",
-      "after": "import { ConnectOnboardingDialog } from \"../components/cloud/ConnectOnboardingDialog\";",
-      "insert": "import { ConstructUpdateNotification } from \"../components/ConstructUpdateNotification\";\n"
+      "import": "import { ConstructUpdateNotification } from \"../components/ConstructUpdateNotification\";\n"
     },
     {
       "path": "apps/web/src/routes/__root.tsx",
-      "after": "{primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}",
+      "before": "{appShell}",
       "insert": "        <ConstructUpdateNotification />\n"
     },
     {
       "path": "apps/web/src/routes/__root.tsx",
-      "after": "import { ConnectOnboardingDialog } from \"../components/cloud/ConnectOnboardingDialog\";",
-      "insert": "import { ConstructDiskSpaceNotification } from \"../components/ConstructDiskSpaceNotification\";\n"
+      "import": "import { ConstructDiskSpaceNotification } from \"../components/ConstructDiskSpaceNotification\";\n"
     },
     {
       "path": "apps/web/src/routes/__root.tsx",
-      "after": "import { ConnectOnboardingDialog } from \"../components/cloud/ConnectOnboardingDialog\";",
-      "insert": "import { ConstructVaultPendingNotification } from \"../components/ConstructVaultPendingNotification\";\n"
+      "import": "import { ConstructVaultPendingNotification } from \"../components/ConstructVaultPendingNotification\";\n"
     },
     {
       "path": "apps/web/src/routes/__root.tsx",
-      "after": "{primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}",
+      "before": "{appShell}",
       "insert": "        <ConstructDiskSpaceNotification />\n"
     },
     {
       "path": "apps/web/src/routes/__root.tsx",
-      "after": "{primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}",
+      "before": "{appShell}",
       "insert": "        <ConstructVaultPendingNotification />\n"
     },
     {
@@ -661,43 +634,39 @@
     },
     {
       "path": "packages/contracts/src/environment.ts",
-      "after": "serverSelfUpdateProgress: Schema.optionalKey(Schema.Boolean),",
+      "after": "ExecutionEnvironmentCapabilities = Schema.Struct({",
       "insert": "  /** Construct-patched servers can capture host audio through the recorder shim and\n      stream Claude's live speech transcript into a connected composer. */\n  voiceInput: Schema.optionalKey(Schema.Boolean),\n  /** Server accepts microphone audio pushed by the client over\n      `voiceInput.audio`. Absent on servers that can only record through the\n      host bridge, so clients fall back to the host source. */\n  voiceInputClientAudio: Schema.optionalKey(Schema.Boolean),\n"
     },
     {
       "path": "packages/contracts/src/environment.ts",
-      "after": "serverSelfUpdateProgress: Schema.optionalKey(Schema.Boolean),",
+      "after": "ExecutionEnvironmentCapabilities = Schema.Struct({",
       "insert": "  /** Construct-patched servers answer `construct.diskSpace` (free space on the VM disk). */\n  constructDiskSpace: Schema.optionalKey(Schema.Boolean),\n"
     },
     {
       "path": "packages/contracts/src/environment.ts",
-      "after": "serverSelfUpdateProgress: Schema.optionalKey(Schema.Boolean),",
+      "after": "ExecutionEnvironmentCapabilities = Schema.Struct({",
       "insert": "  /** Construct-patched servers answer `construct.vaultPending` (key vault requests awaiting approval). */\n  constructVaultPending: Schema.optionalKey(Schema.Boolean),\n"
     },
     {
       "path": "packages/contracts/src/environment.ts",
-      "after": "serverSelfUpdateProgress: Schema.optionalKey(Schema.Boolean),",
+      "after": "ExecutionEnvironmentCapabilities = Schema.Struct({",
       "insert": "  /** Construct-patched servers proxy the VM's omniloop dashboard and answer `construct.omniloop*`. */\n  constructOmniloop: Schema.optionalKey(Schema.Boolean),\n"
     },
     {
       "path": "packages/contracts/src/index.ts",
-      "after": "export * from \"./vcs.ts\";",
-      "insert": "export * from \"./voiceInput.ts\";\n"
+      "import": "export * from \"./voiceInput.ts\";\n"
     },
     {
       "path": "packages/contracts/src/index.ts",
-      "after": "export * from \"./vcs.ts\";",
-      "insert": "export * from \"./constructDiskSpace.ts\";\n"
+      "import": "export * from \"./constructDiskSpace.ts\";\n"
     },
     {
       "path": "packages/contracts/src/index.ts",
-      "after": "export * from \"./vcs.ts\";",
-      "insert": "export * from \"./constructVaultPending.ts\";\n"
+      "import": "export * from \"./constructVaultPending.ts\";\n"
     },
     {
       "path": "packages/contracts/src/index.ts",
-      "after": "export * from \"./vcs.ts\";",
-      "insert": "export * from \"./constructOmniloop.ts\";\n"
+      "import": "export * from \"./constructOmniloop.ts\";\n"
     },
     {
       "path": "packages/contracts/src/ipc.ts",
@@ -706,112 +675,108 @@
     },
     {
       "path": "packages/contracts/src/ipc.ts",
-      "after": "canRetry: boolean;",
+      "after": "interface DesktopUpdateState {",
       "insert": "  /** Construct-managed update details; absent in stock (electron-updater) builds. */\n  construct?: ConstructUpdateInfo;\n"
     },
     {
       "path": "packages/contracts/src/ipc.ts",
-      "after": "canRetry: Schema.Boolean,",
+      "after": "DesktopUpdateStateSchema = Schema.Struct({",
       "insert": "  construct: Schema.optionalKey(ConstructUpdateInfoSchema),\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "after": "import { VcsError } from \"./vcs.ts\";",
-      "insert": "import {\n  VoiceInputAudioInput,\n  VoiceInputAudioResult,\n  VoiceInputError,\n  VoiceInputStartInput,\n  VoiceInputStopInput,\n  VoiceInputStopResult,\n  VoiceInputStreamEvent,\n} from \"./voiceInput.ts\";\n"
+      "import": "import {\n  VoiceInputAudioInput,\n  VoiceInputAudioResult,\n  VoiceInputError,\n  VoiceInputStartInput,\n  VoiceInputStopInput,\n  VoiceInputStopResult,\n  VoiceInputStreamEvent,\n} from \"./voiceInput.ts\";\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "after": "serverUpdateServerWithProgress: \"server.updateServerWithProgress\",",
+      "after": "WS_METHODS = {",
       "insert": "  voiceInputStart: \"voiceInput.start\",\n  voiceInputStop: \"voiceInput.stop\",\n  voiceInputAudio: \"voiceInput.audio\",\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "before": "const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {",
+      "before": "WsRpcGroup = RpcGroup.make(",
       "insert": "export const WsVoiceInputStartRpc = Rpc.make(WS_METHODS.voiceInputStart, {\n  payload: VoiceInputStartInput,\n  success: VoiceInputStreamEvent,\n  error: Schema.Union([VoiceInputError, EnvironmentAuthorizationError]),\n  stream: true,\n});\n\nexport const WsVoiceInputStopRpc = Rpc.make(WS_METHODS.voiceInputStop, {\n  payload: VoiceInputStopInput,\n  success: VoiceInputStopResult,\n  error: EnvironmentAuthorizationError,\n});\n\n// Effect RPC has no client-to-server streams, so client-captured microphone\n// audio arrives as one unary call per ~100 ms chunk.\nexport const WsVoiceInputAudioRpc = Rpc.make(WS_METHODS.voiceInputAudio, {\n  payload: VoiceInputAudioInput,\n  success: VoiceInputAudioResult,\n  error: EnvironmentAuthorizationError,\n});\n\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "after": "WsServerUpdateServerWithProgressRpc,",
+      "after": "WsRpcGroup = RpcGroup.make(",
       "insert": "  WsVoiceInputStartRpc,\n  WsVoiceInputStopRpc,\n  WsVoiceInputAudioRpc,\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "after": "import { VcsError } from \"./vcs.ts\";",
-      "insert": "import { ConstructDiskSpace, ConstructDiskSpaceError } from \"./constructDiskSpace.ts\";\n"
+      "import": "import { ConstructDiskSpace, ConstructDiskSpaceError } from \"./constructDiskSpace.ts\";\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "after": "import { VcsError } from \"./vcs.ts\";",
-      "insert": "import { ConstructVaultPending } from \"./constructVaultPending.ts\";\n"
+      "import": "import { ConstructVaultPending } from \"./constructVaultPending.ts\";\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "after": "serverUpdateServerWithProgress: \"server.updateServerWithProgress\",",
+      "after": "WS_METHODS = {",
       "insert": "  constructDiskSpace: \"construct.diskSpace\",\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "after": "serverUpdateServerWithProgress: \"server.updateServerWithProgress\",",
+      "after": "WS_METHODS = {",
       "insert": "  constructVaultPending: \"construct.vaultPending\",\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "before": "const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {",
+      "before": "WsRpcGroup = RpcGroup.make(",
       "insert": "export const WsConstructDiskSpaceRpc = Rpc.make(WS_METHODS.constructDiskSpace, {\n  payload: Schema.Struct({}),\n  success: ConstructDiskSpace,\n  error: Schema.Union([ConstructDiskSpaceError, EnvironmentAuthorizationError]),\n});\n\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "before": "const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {",
+      "before": "WsRpcGroup = RpcGroup.make(",
       "insert": "export const WsConstructVaultPendingRpc = Rpc.make(WS_METHODS.constructVaultPending, {\n  payload: Schema.Struct({}),\n  success: ConstructVaultPending,\n  error: EnvironmentAuthorizationError,\n});\n\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "after": "WsServerUpdateServerWithProgressRpc,",
+      "after": "WsRpcGroup = RpcGroup.make(",
       "insert": "  WsConstructDiskSpaceRpc,\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "after": "WsServerUpdateServerWithProgressRpc,",
+      "after": "WsRpcGroup = RpcGroup.make(",
       "insert": "  WsConstructVaultPendingRpc,\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "after": "import { VcsError } from \"./vcs.ts\";",
-      "insert": "import {\n  ConstructOmniloopError,\n  ConstructOmniloopStatus,\n  ConstructOmniloopTicket,\n  ConstructOmniloopWorkflowsInput,\n  ConstructOmniloopWorkflowsResult,\n} from \"./constructOmniloop.ts\";\n"
+      "import": "import {\n  ConstructOmniloopError,\n  ConstructOmniloopStatus,\n  ConstructOmniloopTicket,\n  ConstructOmniloopWorkflowsInput,\n  ConstructOmniloopWorkflowsResult,\n} from \"./constructOmniloop.ts\";\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "after": "serverUpdateServerWithProgress: \"server.updateServerWithProgress\",",
+      "after": "WS_METHODS = {",
       "insert": "  constructOmniloopStatus: \"construct.omniloopStatus\",\n  constructOmniloopTicket: \"construct.omniloopTicket\",\n  constructOmniloopWorkflows: \"construct.omniloopWorkflows\",\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "before": "const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {",
+      "before": "WsRpcGroup = RpcGroup.make(",
       "insert": "export const WsConstructOmniloopStatusRpc = Rpc.make(WS_METHODS.constructOmniloopStatus, {\n  payload: Schema.Struct({}),\n  success: ConstructOmniloopStatus,\n  error: Schema.Union([ConstructOmniloopError, EnvironmentAuthorizationError]),\n});\n\nexport const WsConstructOmniloopTicketRpc = Rpc.make(WS_METHODS.constructOmniloopTicket, {\n  payload: Schema.Struct({}),\n  success: ConstructOmniloopTicket,\n  error: Schema.Union([ConstructOmniloopError, EnvironmentAuthorizationError]),\n});\n\nexport const WsConstructOmniloopWorkflowsRpc = Rpc.make(WS_METHODS.constructOmniloopWorkflows, {\n  payload: ConstructOmniloopWorkflowsInput,\n  success: ConstructOmniloopWorkflowsResult,\n  error: Schema.Union([ConstructOmniloopError, EnvironmentAuthorizationError]),\n});\n\n"
     },
     {
       "path": "packages/contracts/src/rpc.ts",
-      "after": "WsServerUpdateServerWithProgressRpc,",
+      "after": "WsRpcGroup = RpcGroup.make(",
       "insert": "  WsConstructOmniloopStatusRpc,\n  WsConstructOmniloopTicketRpc,\n  WsConstructOmniloopWorkflowsRpc,\n"
     },
     {
       "path": "packages/contracts/src/settings.ts",
-      "after": "export type TerminalFontSize = typeof TerminalFontSize.Type;",
+      "before": "ClientSettingsSchema = Schema.Struct(",
       "insert": "/**\n * Where voice input records. `auto` captures on this device when the browser\n * or desktop app can reach a microphone and the server accepts pushed audio,\n * and otherwise falls back to the host recorder bridge. Client-local because\n * the microphone it picks is this device's.\n */\nexport const VoiceInputSourcePreference = Schema.Literals([\"auto\", \"client\", \"host\"]);\nexport type VoiceInputSourcePreference = typeof VoiceInputSourcePreference.Type;\nexport const DEFAULT_VOICE_INPUT_SOURCE_PREFERENCE: VoiceInputSourcePreference = \"auto\";\n\n"
     },
     {
       "path": "packages/contracts/src/settings.ts",
-      "before": "wordWrap: Schema.Boolean.pipe(",
+      "after": "ClientSettingsSchema = Schema.Struct({",
       "insert": "  voiceInputSource: VoiceInputSourcePreference.pipe(\n    Schema.withDecodingDefault(Effect.succeed(DEFAULT_VOICE_INPUT_SOURCE_PREFERENCE)),\n  ),\n"
     },
     {
       "path": "packages/contracts/src/settings.ts",
-      "after": "timestampFormat: Schema.optionalKey(TimestampFormat),",
+      "after": "ClientSettingsPatch = Schema.Struct({",
       "insert": "  voiceInputSource: Schema.optionalKey(VoiceInputSourcePreference),\n"
     },
     {
       "path": "apps/desktop/src/ipc/channels.ts",
-      "after": "export const UPDATE_CHECK_CHANNEL = \"desktop:update-check\";",
+      "after": "UPDATE_CHECK_CHANNEL =",
       "insert": "// Construct-built builds only (B14, plan section 4.12): reprovision ONE named\n// instance, for the Providers row that is about it. The host-wide download/update\n// channel stays exactly what it was.\nexport const CONSTRUCT_REPROVISION_INSTANCE_CHANNEL = \"desktop:construct-reprovision-instance\";\n"
     },
     {
@@ -821,12 +786,11 @@
     },
     {
       "path": "apps/desktop/src/ipc/DesktopIpcHandlers.ts",
-      "after": "  installUpdate,",
-      "insert": "  reprovisionConstructInstance,\n"
+      "import": "import { reprovisionConstructInstance } from \"./methods/updates.ts\";\n"
     },
     {
       "path": "apps/desktop/src/ipc/DesktopIpcHandlers.ts",
-      "after": "  yield* ipc.handle(checkForUpdate);",
+      "after": "const ipc = yield*",
       "insert": "  yield* ipc.handle(reprovisionConstructInstance);\n"
     },
     {
@@ -836,17 +800,17 @@
     },
     {
       "path": "packages/contracts/src/ipc.ts",
-      "after": "  downloadUpdate: () => Promise<DesktopUpdateActionResult>;",
+      "after": "interface DesktopBridge {",
       "insert": "  /** Construct-built builds (B14, plan section 4.12): reprovision the instance one\n   *  Providers row is about, or update T3 Code (`update-t3`) on it or on several, one\n   *  after another. Stock builds answer `accepted: false`. */\n  reprovisionConstructInstance: (name: string | ReadonlyArray<string>, action?: \"reprovision\" | \"update-t3\") => Promise<DesktopUpdateActionResult>;\n"
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "after": "    readonly download: Effect.Effect<DesktopUpdateActionResult>;",
+      "after": "readonly download:",
       "insert": "    /** Construct-managed builds: reprovision ONE named instance, or update its T3 Code\n     *  (B14). OPTIONAL on the service interface so a test double that predates it still\n     *  satisfies the shape; the real implementation always provides it, and a stock build\n     *  answers `accepted: false` -- there is nothing to reprovision. */\n    readonly reprovisionConstructInstance?: (\n      name: string | ReadonlyArray<string>,\n      action?: \"reprovision\" | \"update-t3\",\n    ) => Effect.Effect<DesktopUpdateActionResult>;\n"
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "after": "    }).pipe(Effect.withSpan(\"desktop.updates.download\")),",
+      "after": "return DesktopUpdates.of({",
       "insert": "    reprovisionConstructInstance: Effect.fn(\"desktop.updates.constructReprovisionInstance\")(\n      function* (name: string | ReadonlyArray<string>, action?: \"reprovision\" | \"update-t3\") {\n        if (!constructManaged) {\n          return {\n            accepted: false,\n            completed: false,\n            state: yield* Ref.get(updateStateRef),\n          };\n        }\n        const result = yield* launchConstruct(name, action);\n        return {\n          accepted: result.accepted,\n          completed: result.completed,\n          state: yield* Ref.get(updateStateRef),\n        };\n      },\n    ),\n"
     },
     {
@@ -861,8 +825,7 @@
     },
     {
       "path": "apps/desktop/src/ipc/methods/updates.ts",
-      "after": "import {",
-      "insert": "  ConstructPairingLinkResultSchema,\n  ConstructT3LinkInfoSchema,\n"
+      "import": "import { ConstructPairingLinkResultSchema, ConstructT3LinkInfoSchema } from \"@t3tools/contracts\";\n"
     },
     {
       "path": "apps/desktop/src/ipc/methods/updates.ts",
@@ -871,8 +834,7 @@
     },
     {
       "path": "apps/desktop/src/ipc/DesktopIpcHandlers.ts",
-      "after": "  reprovisionConstructInstance,",
-      "insert": "  linkConstructInstance,\n  recordConstructInstanceT3Link,\n"
+      "import": "import { linkConstructInstance, recordConstructInstanceT3Link } from \"./methods/updates.ts\";\n"
     },
     {
       "path": "apps/desktop/src/ipc/DesktopIpcHandlers.ts",
@@ -891,13 +853,12 @@
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "after": "}).pipe(Effect.withSpan(\"desktop.updates.download\")),",
+      "after": "return DesktopUpdates.of({",
       "insert": "    linkConstructInstance: Effect.fn(\"desktop.updates.constructLinkInstance\")(function* (\n      name: string,\n    ) {\n      if (!constructManaged) {\n        return { ok: false as const, error: \"Not a Construct-built Desktop app.\" };\n      }\n      const info = yield* Ref.get(constructInfoRef);\n      const planned = ConstructUpdates.planConstructPairingLink(\n        name,\n        info,\n        environment.platform,\n        ConstructUpdates.nodeConstructFileSystem,\n      );\n      if (!planned.ok) return { ok: false as const, error: planned.error };\n      yield* logUpdaterInfo(\"minting a T3 pairing link\", { instance: name });\n      const result = yield* Effect.promise(() =>\n        ConstructUpdates.runConstructPairingLink(planned.plan),\n      );\n      if (!result.ok) {\n        yield* logUpdaterWarning(\"T3 pairing link failed\", { instance: name, error: result.error });\n      }\n      return result;\n    }),\n    recordConstructInstanceT3Link: Effect.fn(\"desktop.updates.constructRecordT3Link\")(\n      function* (name: string, link: ConstructT3LinkInfo) {\n        if (!constructManaged) return false;\n        const info = yield* Ref.get(constructInfoRef);\n        const written = ConstructUpdates.recordConstructInstanceT3Link(\n          constructLocalAppData,\n          name,\n          info?.scriptsDir ?? null,\n          link,\n          ConstructUpdates.nodeConstructFileSystem,\n        );\n        if (!written.ok) {\n          yield* logUpdaterWarning(\"could not record the T3 link\", { instance: name, error: written.error });\n          return false;\n        }\n        yield* logUpdaterInfo(\"recorded the T3 link\", { instance: name, status: link.status });\n        // Re-read the markers so the published instances carry the new marker at once.\n        yield* refreshConstruct(\"t3-link\", \"local\");\n        return true;\n      },\n    ),\n"
     },
     {
       "path": "apps/web/src/routes/__root.tsx",
-      "after": "import { ConstructUpdateNotification } from \"../components/ConstructUpdateNotification\";",
-      "insert": "import { ConstructAutoLink } from \"../components/ConstructAutoLink\";\n"
+      "import": "import { ConstructAutoLink } from \"../components/ConstructAutoLink\";\n"
     },
     {
       "path": "apps/web/src/routes/__root.tsx",
@@ -906,12 +867,12 @@
     },
     {
       "path": "apps/server/src/cli/auth.ts",
-      "before": "const tokenOnlyFlag = Flag.Boolean(\"token-only\").pipe(",
+      "before": "pairingCreateCommand = Command.make(",
       "insert": "// Construct: a pairing link with the ADMINISTRATIVE scope set, for the Desktop app's\n// automatic link of a VM (Get-ConstructT3PairingLink.ps1 asks for it when the flag exists).\nconst scopesFlag = Flag.String(\"scopes\").pipe(\n  Flag.withDescription(\"Scope set of the token: `standard` (default) or `administrative`.\"),\n  Flag.optional,\n);\n\n"
     },
     {
       "path": "apps/server/src/cli/auth.ts",
-      "after": "  baseUrl: baseUrlFlag,",
+      "after": "pairingCreateCommand = Command.make(\"create\", {",
       "insert": "  constructScopes: scopesFlag,\n"
     },
     {
@@ -921,8 +882,7 @@
     },
     {
       "path": "apps/server/src/orchestration-v2/ProviderEventIngestor.ts",
-      "after": "import { makeProviderFailureTurnItem } from \"@t3tools/provider-core/server/failure\";",
-      "insert": "import { constructCapacityFailure } from \"../constructCapacityRetry.ts\";\n"
+      "import": "import { constructCapacityFailure } from \"../constructCapacityRetry.ts\";\n"
     },
     {
       "path": "apps/server/src/orchestration-v2/ProviderEventIngestor.ts",
@@ -931,22 +891,20 @@
     },
     {
       "path": "apps/server/src/orchestration-v2/runtimeLayer.ts",
-      "after": "import * as UsageLimitRecoveryWorker from \"./UsageLimitRecoveryWorker.ts\";",
-      "insert": "import { constructCapacityRetryWorkerLive } from \"../constructCapacityRetry.ts\";\n"
+      "import": "import { constructCapacityRetryWorkerLive } from \"../constructCapacityRetry.ts\";\n"
     },
     {
       "path": "apps/server/src/orchestration-v2/runtimeLayer.ts",
-      "before": "layerProviderContinuationWorkerProvided,",
+      "after": "layerProduction = Layer.mergeAll(",
       "insert": "  constructCapacityRetryWorkerLive.pipe(\n    Layer.provide(Layer.mergeAll(layerThreadManagementProvided, layerEventSinkProvided)),\n  ),\n"
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
-      "after": "import { openCodeToolTurnItem } from \"./toolItems.ts\";",
-      "insert": "import {\n  constructOpenCodeMonitorRoster,\n  hasConstructOpenCodeMonitor,\n  withoutConstructOpenCodeMonitors,\n} from \"./constructOpenCodeMonitor.ts\";\n"
+      "import": "import {\n  constructOpenCodeMonitorRoster,\n  hasConstructOpenCodeMonitor,\n  withoutConstructOpenCodeMonitors,\n} from \"./constructOpenCodeMonitor.ts\";\n"
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
-      "before": "const itemOrdinal = (turn: ActiveOpenCodeTurn, nativeItemId: string): number => {",
+      "before": "const itemOrdinal =",
       "insert": "        // Construct: the background plugin's armed watchers are monitors of the root thread.\n        const trackConstructOpenCodeMonitor = (state: OpenCodeThreadState, part: OpenCodePart) =>\n          Effect.gen(function* () {\n            let owner = state;\n            while (owner.parentSubagent !== null) owner = owner.parentSubagent.parentState;\n            const roster = constructOpenCodeMonitorRoster(\n              owner.providerThread.pendingBackgroundTasks ?? [],\n              part,\n              state.messageRoles.get(part.messageID) === \"user\",\n            );\n            if (roster !== null) yield* updateProviderThread(owner, { pendingBackgroundTasks: roster });\n          });\n\n"
     },
     {
@@ -999,8 +957,7 @@
     },
     {
       "path": "apps/server/src/http.ts",
-      "before": "import * as Mime from \"effect/http/Mime\";",
-      "insert": "import { hostname as constructPwaHostname } from \"node:os\";\n"
+      "import": "import { hostname as constructPwaHostname } from \"node:os\";\n"
     },
     {
       "path": "apps/server/src/http.ts",
@@ -1020,17 +977,17 @@
     },
     {
       "path": "packages/contracts/src/ipc.ts",
-      "after": "downloadUpdate: () => Promise<DesktopUpdateActionResult>;",
+      "after": "interface DesktopBridge {",
       "insert": "  /** Activate Companion settings for a named instance, or the host panel for null. */\n  openConstructCompanion: (instanceName: string | null) => Promise<boolean>;\n"
     },
     {
       "path": "apps/desktop/src/ipc/channels.ts",
-      "after": "export const UPDATE_CHECK_CHANNEL = \"desktop:update-check\";",
+      "after": "UPDATE_CHECK_CHANNEL =",
       "insert": "export const CONSTRUCT_OPEN_COMPANION_CHANNEL = \"desktop:construct-open-companion\";\n"
     },
     {
       "path": "apps/desktop/src/preload.ts",
-      "after": "downloadUpdate: () => ipcRenderer.invoke(IpcChannels.UPDATE_DOWNLOAD_CHANNEL),",
+      "after": "exposeInMainWorld(\"desktopBridge\", {",
       "insert": "  openConstructCompanion: (instanceName) =>\n    ipcRenderer.invoke(IpcChannels.CONSTRUCT_OPEN_COMPANION_CHANNEL, instanceName),\n"
     },
     {
@@ -1040,22 +997,21 @@
     },
     {
       "path": "apps/desktop/src/ipc/DesktopIpcHandlers.ts",
-      "after": "  installUpdate,",
-      "insert": "  openConstructCompanion,\n"
+      "import": "import { openConstructCompanion } from \"./methods/updates.ts\";\n"
     },
     {
       "path": "apps/desktop/src/ipc/DesktopIpcHandlers.ts",
-      "after": "yield* ipc.handle(checkForUpdate);",
+      "after": "const ipc = yield*",
       "insert": "  yield* ipc.handle(openConstructCompanion);\n"
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "after": "readonly download: Effect.Effect<DesktopUpdateActionResult>;",
+      "after": "readonly download:",
       "insert": "    /** Optional for stock updater test doubles. */\n    readonly openConstructCompanion?: (instanceName: string | null) => Effect.Effect<boolean>;\n"
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "after": "}).pipe(Effect.withSpan(\"desktop.updates.download\")),",
+      "after": "return DesktopUpdates.of({",
       "insert": "    openConstructCompanion: (instanceName: string | null) => Effect.sync(() => {\n      if (!constructManaged) return false;\n      return ConstructUpdates.openConstructCompanion(instanceName, {\n        localAppData: constructLocalAppData,\n        temp: process.env.TEMP,\n        platform: environment.platform,\n        fs: ConstructUpdates.nodeConstructFileSystem,\n        onError: (error) => runConstructEffect(\n          logUpdaterWarning(\"could not open Construct Companion\", { error: error.message }),\n        ),\n      });\n    }),\n"
     },
     {
@@ -1132,73 +1088,69 @@
     },
     {
       "path": "apps/desktop/src/ipc/channels.ts",
-      "after": "export const UPDATE_CHECK_CHANNEL = \"desktop:update-check\";",
+      "after": "UPDATE_CHECK_CHANNEL =",
       "insert": "// Construct builds: key vault approvals through the Construct Companion on this PC.\nexport const CONSTRUCT_VAULT_APPROVALS_CHANNEL = \"desktop:construct-vault-approvals\";\nexport const CONSTRUCT_VAULT_DECIDE_CHANNEL = \"desktop:construct-vault-decide\";\nexport const CONSTRUCT_VAULT_DISPLAYED_CHANNEL = \"desktop:construct-vault-displayed\";\n"
     },
     {
       "path": "apps/desktop/src/ipc/DesktopIpcHandlers.ts",
-      "after": "import * as DesktopIpc from \"./DesktopIpc.ts\";",
-      "insert": "import {\n  constructVaultApprovals,\n  constructVaultDecide,\n  constructVaultDisplayed,\n} from \"./methods/constructVault.ts\";\n"
+      "import": "import {\n  constructVaultApprovals,\n  constructVaultDecide,\n  constructVaultDisplayed,\n} from \"./methods/constructVault.ts\";\n"
     },
     {
       "path": "apps/desktop/src/ipc/DesktopIpcHandlers.ts",
-      "after": "yield* ipc.handle(checkForUpdate);",
+      "after": "const ipc = yield*",
       "insert": "  yield* ipc.handle(constructVaultApprovals);\n"
     },
     {
       "path": "apps/desktop/src/ipc/DesktopIpcHandlers.ts",
-      "after": "yield* ipc.handle(checkForUpdate);",
+      "after": "const ipc = yield*",
       "insert": "  yield* ipc.handle(constructVaultDecide);\n"
     },
     {
       "path": "apps/desktop/src/ipc/DesktopIpcHandlers.ts",
-      "after": "yield* ipc.handle(checkForUpdate);",
+      "after": "const ipc = yield*",
       "insert": "  yield* ipc.handle(constructVaultDisplayed);\n"
     },
     {
       "path": "apps/desktop/src/preload.ts",
-      "after": "downloadUpdate: () => ipcRenderer.invoke(IpcChannels.UPDATE_DOWNLOAD_CHANNEL),",
+      "after": "exposeInMainWorld(\"desktopBridge\", {",
       "insert": "  constructVaultApprovals: () => ipcRenderer.invoke(IpcChannels.CONSTRUCT_VAULT_APPROVALS_CHANNEL),\n"
     },
     {
       "path": "apps/desktop/src/preload.ts",
-      "after": "downloadUpdate: () => ipcRenderer.invoke(IpcChannels.UPDATE_DOWNLOAD_CHANNEL),",
+      "after": "exposeInMainWorld(\"desktopBridge\", {",
       "insert": "  constructVaultDecide: (id, decision) =>\n    ipcRenderer.invoke(IpcChannels.CONSTRUCT_VAULT_DECIDE_CHANNEL, { id, decision }),\n"
     },
     {
       "path": "apps/desktop/src/preload.ts",
-      "after": "downloadUpdate: () => ipcRenderer.invoke(IpcChannels.UPDATE_DOWNLOAD_CHANNEL),",
+      "after": "exposeInMainWorld(\"desktopBridge\", {",
       "insert": "  constructVaultDisplayed: (ids) =>\n    ipcRenderer.invoke(IpcChannels.CONSTRUCT_VAULT_DISPLAYED_CHANNEL, { ids }),\n"
     },
     {
       "path": "packages/contracts/src/ipc.ts",
-      "after": "import type { EditorId } from \"./editor.ts\";",
-      "insert": "import type {\n  ConstructVaultApprovalsResult,\n  ConstructVaultDecideResult,\n  ConstructVaultDecision,\n} from \"./constructVaultPending.ts\";\n"
+      "import": "import type {\n  ConstructVaultApprovalsResult,\n  ConstructVaultDecideResult,\n  ConstructVaultDecision,\n} from \"./constructVaultPending.ts\";\n"
     },
     {
       "path": "packages/contracts/src/ipc.ts",
-      "after": "downloadUpdate: () => Promise<DesktopUpdateActionResult>;",
+      "after": "interface DesktopBridge {",
       "insert": "  /** Construct builds: the key vault approvals the Construct Companion on this PC waits on\n   *  (`available: false` without a running Companion). The Companion's token stays in\n   *  the main process. */\n  constructVaultApprovals: () => Promise<ConstructVaultApprovalsResult>;\n"
     },
     {
       "path": "packages/contracts/src/ipc.ts",
-      "after": "downloadUpdate: () => Promise<DesktopUpdateActionResult>;",
+      "after": "interface DesktopBridge {",
       "insert": "  /** Construct builds: approve or deny one Companion key vault approval by its id. */\n  constructVaultDecide: (\n    id: string,\n    decision: ConstructVaultDecision,\n  ) => Promise<ConstructVaultDecideResult>;\n"
     },
     {
       "path": "packages/contracts/src/ipc.ts",
-      "after": "downloadUpdate: () => Promise<DesktopUpdateActionResult>;",
+      "after": "interface DesktopBridge {",
       "insert": "  /** Construct builds: the ids of the Companion approvals the key vault banner shows\n   *  inline (none: the window is visible and shows none), so that the Companion's own\n   *  pop-out waits for them. Failures are ignored. */\n  constructVaultDisplayed: (ids: ReadonlyArray<string>) => Promise<void>;\n"
     },
     {
       "path": "packages/client-runtime/src/connection/index.ts",
-      "after": "export * as CredentialStore from \"./credentialStore.ts\";",
-      "insert": "export * as ConstructSessionRenewal from \"./constructSessionRenewal.ts\";\n"
+      "import": "export * as ConstructSessionRenewal from \"./constructSessionRenewal.ts\";\n"
     },
     {
       "path": "packages/client-runtime/src/connection/resolver.ts",
-      "after": "import * as ConnectionCredentialStore from \"./credentialStore.ts\";",
-      "insert": "import { renewBearerCredential } from \"./constructSessionRenewal.ts\";\n"
+      "import": "import { renewBearerCredential } from \"./constructSessionRenewal.ts\";\n"
     },
     {
       "path": "packages/client-runtime/src/connection/resolver.ts",
@@ -1213,12 +1165,11 @@
     },
     {
       "path": "apps/web/src/routes/__root.tsx",
-      "after": "import { ConnectOnboardingDialog } from \"../components/cloud/ConnectOnboardingDialog\";",
-      "insert": "import { ConstructSessionRenewal } from \"../components/ConstructSessionRenewal\";\n"
+      "import": "import { ConstructSessionRenewal } from \"../components/ConstructSessionRenewal\";\n"
     },
     {
       "path": "apps/web/src/routes/__root.tsx",
-      "after": "{primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}",
+      "before": "{appShell}",
       "insert": "        <ConstructSessionRenewal />\n"
     }
   ]

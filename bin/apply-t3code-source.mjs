@@ -7,9 +7,10 @@
 //   { "path": "a.ts", "after":  "<anchor>", "insert": "<lines>" }   insert after the anchor line
 //   { "path": "a.ts", "before": "<anchor>", "insert": "<lines>" }   insert before the anchor line
 //   { "path": "a.ts", "find":   "<text>",   "replace": "<text>" }   replace the text itself
-//   { "path": "a.ts", "import": "<lines>" }                         an import of names only
-//                                                                    Construct uses, placed before
-//                                                                    the file's first import
+//   { "path": "a.ts", "import": "<lines>" }                         an import (or re-export) of
+//                                                                    names only Construct uses,
+//                                                                    placed before the file's first
+//                                                                    import or `export *` line
 //
 //   * An anchor is the smallest fragment that identifies the spot — usually one
 //     line. Leading whitespace on every anchor line is ignored, so reformatting or
@@ -124,11 +125,12 @@ function runTransform(operation, content) {
   }
   const ambiguous = []
   if (operation.import !== undefined) {
-    // Module imports are hoisted, so a Construct-only import needs no neighbour:
-    // it goes before the first top-level import, below any shebang or header.
+    // Module imports and re-exports are hoisted, so a Construct-only one needs no
+    // neighbour: it goes before the first top-level import or `export *` line,
+    // below any shebang or header.
     const insert = asLines(operation.import)
     if (content.includes(insert)) return { state: "applied" }
-    const first = /^import[ \t]/m.exec(content)
+    const first = /^(?:import|export \*)[ \t]/m.exec(content)
     if (!first) return { state: operation.optional ? "skipped" : "conflict", detail: "no import statement to place the import before" }
     return { state: "pending", content: content.slice(0, first.index) + insert + content.slice(first.index) }
   }

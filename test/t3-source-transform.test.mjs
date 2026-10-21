@@ -109,6 +109,12 @@ test("an import goes before the first import, whatever upstream imports", () => 
   assert.equal(status(f).alreadyApplied, 2)
 })
 
+test("a re-export goes before the first export * line of a barrel file", () => {
+  const f = fixture({ source: 'export * from "./a";\nexport * from "./b";\n', transforms: [{ path: "owned.ts", import: 'export * from "./new/construct";\n' }] })
+  assert.equal(run(f).status, 0)
+  assert.equal(owned(f), 'export * from "./new/construct";\nexport * from "./a";\nexport * from "./b";\n')
+})
+
 test("an import into a file without imports is a conflict", () => {
   const f = fixture({ source: "export const x = 1;\n", transforms: [{ path: "owned.ts", import: 'import { construct } from "./new/construct";\n' }] })
   const s = status(f)
