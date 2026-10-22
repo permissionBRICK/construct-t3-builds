@@ -1,8 +1,5 @@
-import type {
-  ConstructOmniloopWorkflow,
-  EnvironmentId,
-  OrchestrationV2TurnItem,
-} from "@t3tools/contracts";
+import type { ThreadStructureTurnItem } from "@t3tools/client-runtime/state/shell";
+import type { ConstructOmniloopWorkflow, EnvironmentId } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { useEffect, useMemo, useState } from "react";
 
@@ -40,7 +37,7 @@ export interface ConstructOmniloopThreadState {
  */
 export function useConstructOmniloopThread(options: {
   readonly threadRef: { readonly environmentId: EnvironmentId; readonly threadId: string } | null;
-  readonly turnItems: ReadonlyArray<OrchestrationV2TurnItem> | undefined;
+  readonly turnItems: ReadonlyArray<ThreadStructureTurnItem> | undefined;
   readonly onOpen: (workflowId: string | null) => void;
 }): ConstructOmniloopThreadState {
   const { threadRef, turnItems, onOpen } = options;
