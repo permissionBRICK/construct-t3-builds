@@ -102,9 +102,8 @@
     },
     {
       "path": "apps/web/src/components/ChatView.tsx",
-      "after": "<RightPanelTabs",
-      "insert": "          onAddOmniloop={addOmniloopSurface}\n          omniloopAvailable={constructOmniloop.available}\n          omniloopBadgeCount={constructOmniloop.liveCount}\n",
-      "every": true
+      "after": "<ChatRightPanel",
+      "insert": "          onAddOmniloop={addOmniloopSurface}\n          omniloopAvailable={constructOmniloop.available}\n          omniloopBadgeCount={constructOmniloop.liveCount}\n"
     },
     {
       "path": "apps/web/src/components/RightPanelTabs.tsx",
@@ -348,8 +347,13 @@
     },
     {
       "path": "apps/server/src/cli/pair.ts",
-      "find": "export const resolveDirectPairingBaseUrl = (state: PersistedServerRuntimeState): string =>\n  state.devUrl ?? resolveHeadlessConnectionString(state.host, state.port);",
-      "replace": "export const resolveDirectPairingBaseUrl = (\n  state: PersistedServerRuntimeState,\n  /** The origin a TLS proxy publishes for this server, when Construct set one. */\n  publicBaseUrl?: string | undefined,\n): string =>\n  state.devUrl ?? publicBaseUrl ?? resolveHeadlessConnectionString(state.host, state.port);"
+      "find": "resolveDirectPairingBaseUrl = (state: PersistedServerRuntimeState)",
+      "replace": "resolveDirectPairingBaseUrl = (\n  state: PersistedServerRuntimeState,\n  /** The origin a TLS proxy publishes for this server, when Construct set one. */\n  publicBaseUrl?: string | undefined,\n)"
+    },
+    {
+      "path": "apps/server/src/cli/pair.ts",
+      "find": "state.devUrl ?? resolveHeadlessConnectionString(state.host, state.port)",
+      "replace": "state.devUrl ?? publicBaseUrl ?? resolveHeadlessConnectionString(state.host, state.port)"
     },
     {
       "path": "apps/server/src/cli/pair.ts",

@@ -1,12 +1,13 @@
 import { useNavigate, useParams } from "@tanstack/react-router";
+import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
+import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useEnvironments } from "../state/environments";
 import { resolveActiveThreadRouteRef, resolveThreadRouteTarget } from "../threadRoutes";
 import { constructEnvironmentConnected, constructLinkedRemotes } from "./constructInstances.logic";
 import { isElectron } from "../env";
-import { useDismissedProviderUpdateNotificationKeys } from "../providerUpdateDismissal";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
 import { setConstructLinkedRemotes, startConstructUpdate } from "./constructUpdate";
 import {
@@ -20,6 +21,26 @@ import {
 } from "./constructUpdate.logic";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
+// The key of upstream's former provider-update dismissal store, which this popup shared:
+// offers users already closed stay dismissed.
+const CONSTRUCT_UPDATE_DISMISSALS_STORAGE_KEY = "t3code:provider-update-dismissals:v1";
+const ConstructUpdateDismissalsSchema = Schema.Struct({ keys: Schema.Array(Schema.String) });
+
+function useDismissedConstructUpdateNotificationKeys() {
+  const [dismissals, setDismissals] = useLocalStorage(
+    CONSTRUCT_UPDATE_DISMISSALS_STORAGE_KEY,
+    { keys: [] },
+    ConstructUpdateDismissalsSchema,
+  );
+  const dismissedNotificationKeys = new Set(dismissals.keys);
+  const dismissNotificationKey = (key: string) => {
+    const trimmedKey = key.trim();
+    if (trimmedKey.length === 0 || dismissedNotificationKeys.has(trimmedKey)) return;
+    setDismissals({ keys: [...dismissals.keys, trimmedKey] });
+  };
+  return { dismissedNotificationKeys, dismissNotificationKey };
+}
+
 const seenConstructUpdateNotificationKeys = new Set<string>();
 type ConstructToastId = ReturnType<typeof toastManager.add>;
 
@@ -27,9 +48,9 @@ type ConstructToastId = ReturnType<typeof toastManager.add>;
  * The Construct update popup: when the Desktop app starts offering an action (a Construct
  * update for this PC, or a VM reprovision because the VM is behind the installed Construct
  * or a newer upstream T3 Code exists), raise one prompt per distinct offer with the action
- * as its primary button. Closing it dismisses that offer for good (same persisted
- * dismissal store as the provider update prompts); the sidebar pill and the Providers
- * entry keep showing it. Nothing renders in browsers or stock Desktop builds.
+ * as its primary button. Closing it dismisses that offer for good (persisted below); the
+ * sidebar pill and the Providers entry keep showing it. Nothing renders in browsers or
+ * stock Desktop builds.
  */
 export function ConstructUpdateNotification() {
   return isElectron ? <ConstructUpdateNotificationContent /> : null;
@@ -70,7 +91,7 @@ function ConstructUpdateNotificationContent() {
       ? null
       : getConstructUpdateNotificationKey(info);
   const { dismissedNotificationKeys, dismissNotificationKey } =
-    useDismissedProviderUpdateNotificationKeys();
+    useDismissedConstructUpdateNotificationKeys();
   const activeToastRef = useRef<{
     readonly key: string;
     readonly toastId: ConstructToastId;

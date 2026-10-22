@@ -26,6 +26,7 @@ const mocks = {
   '../state/environments': 'export const useEnvironments=()=>({environments:window.environments});',
   '../state/desktopUpdate': 'export const useDesktopUpdateState=()=>window.updateState;',
   '../providerUpdateDismissal': 'export const useDismissedProviderUpdateNotificationKeys=()=>({dismissedNotificationKeys:window.dismissed,dismissNotificationKey:key=>window.dismissed.add(key)});',
+  '../hooks/useLocalStorage': 'export const useLocalStorage=()=>[{keys:[...window.dismissed]},value=>value.keys.forEach(key=>window.dismissed.add(key))];',
   './ui/toast': `export const stackedThreadToast=x=>x; export const toastManager={
     add(x){const id=++window.nextToast;window.toasts.set(id,x);return id;},
     close(id){window.toasts.delete(id);}
@@ -43,7 +44,7 @@ const result = await build({
     b.onResolve({filter:/.*/}, args=>{
       if(mocks[args.path]) return {path:args.path,namespace:'fixture'};
       if(args.path==='../threadRoutes') return {path:resolve(source,'apps/web/src/threadRoutes.ts')};
-      if(/^react(?:-dom)?(?:\/|$)/.test(args.path)) return {path:sourceRequire.resolve(args.path)};
+      if(/^(?:react(?:-dom)?|effect)(?:\/|$)/.test(args.path)) return {path:sourceRequire.resolve(args.path)};
     });
     b.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:mocks[args.path]}));
   }}],
