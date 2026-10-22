@@ -1,4 +1,5 @@
-import type { ConstructOmniloopWorkflow, OrchestrationV2TurnItem } from "@t3tools/contracts";
+import type { ThreadStructureTurnItem } from "@t3tools/client-runtime/state/shell";
+import type { ConstructOmniloopWorkflow } from "@t3tools/contracts";
 
 const WORKFLOW_ID = /\bwf_[A-Za-z0-9_-]{6,}\b/g;
 const LIVE_STATUSES: ReadonlySet<ConstructOmniloopWorkflow["status"]> = new Set([
@@ -7,10 +8,10 @@ const LIVE_STATUSES: ReadonlySet<ConstructOmniloopWorkflow["status"]> = new Set(
   "paused",
 ]);
 
-type ToolTurnItem = Extract<OrchestrationV2TurnItem, { readonly type: "dynamic_tool" }>;
+type ToolTurnItem = Extract<ThreadStructureTurnItem, { readonly type: "dynamic_tool" }>;
 
 /** An MCP tool call that went to the omniloop server (`mcp__omniloop__submit`, `omniloop.submit`). */
-export function isOmniloopToolItem(item: OrchestrationV2TurnItem): item is ToolTurnItem {
+export function isOmniloopToolItem(item: ThreadStructureTurnItem): item is ToolTurnItem {
   if (item.type !== "dynamic_tool") return false;
   return [item.toolName, item.title].some(
     (name) => typeof name === "string" && /omniloop/i.test(name),
@@ -24,7 +25,7 @@ export function isOmniloopToolItem(item: OrchestrationV2TurnItem): item is ToolT
  * the agent dealt with without knowing each tool's shape.
  */
 export function extractOmniloopWorkflowIds(
-  items: ReadonlyArray<OrchestrationV2TurnItem>,
+  items: ReadonlyArray<ThreadStructureTurnItem>,
 ): ReadonlyArray<string> {
   const ids = new Set<string>();
   for (const item of items) {
