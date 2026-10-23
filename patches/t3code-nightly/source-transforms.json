@@ -449,8 +449,13 @@
     },
     {
       "path": "apps/server/src/ws.ts",
-      "find": "ServerWsRpcGroup.toLayer(",
-      "replace": "ServerWsRpcGroup.omit(...constructWsRpcMethods).toLayer("
+      "find": "RpcGroup.Rpcs<typeof ServerWsRpcGroup>",
+      "replace": "Exclude<RpcGroup.Rpcs<typeof ServerWsRpcGroup>, { readonly _tag: (typeof constructWsRpcMethods)[number] }>"
+    },
+    {
+      "path": "apps/server/src/ws.ts",
+      "find": "ServerWsRpcGroup.requests",
+      "replace": "ServerWsRpcGroup.omit(...constructWsRpcMethods).requests"
     },
     {
       "path": "apps/server/src/ws.ts",
