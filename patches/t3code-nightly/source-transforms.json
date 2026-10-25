@@ -352,8 +352,8 @@
     },
     {
       "path": "apps/server/src/cli/pair.ts",
-      "find": "state.devUrl ?? resolveHeadlessConnectionString(state.host, state.port)",
-      "replace": "state.devUrl ?? publicBaseUrl ?? resolveHeadlessConnectionString(state.host, state.port)"
+      "after": "state.devUrl ??",
+      "insert": "  publicBaseUrl ??\n"
     },
     {
       "path": "apps/server/src/cli/pair.ts",
@@ -435,8 +435,8 @@
     },
     {
       "path": "apps/server/src/startupAccess.ts",
-      "after": "resolveListeningPort(httpServer.address, serverConfig.port),",
-      "insert": "    NodeOS.networkInterfaces(),\n    publicBaseUrlOrigin(),\n"
+      "after": "{ privateNetworkOnly: serverConfig.privateNetworkOnly },",
+      "insert": "    publicBaseUrlOrigin(),\n"
     },
     {
       "path": "apps/server/src/ws.ts",
