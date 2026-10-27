@@ -95,7 +95,6 @@ export function useConstructOmniloopThread(options: {
         : {
             id: `construct-omniloop:${threadRef.threadId}`,
             variant: "default",
-            priority: "activity",
             icon: (
               <span
                 className={cn("size-1.5 rounded-full bg-foreground", "animate-status-pulse")}

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";
-import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
 
 import { BearerConnectionCredential, type ConnectionCredential } from "./catalog.ts";
@@ -24,7 +23,7 @@ function memoryStore(options?: { readonly failPut?: boolean }) {
   const puts: Array<{ readonly connectionId: string; readonly credential: ConnectionCredential }> =
     [];
   const store = CredentialStore.make({
-    get: () => Effect.succeed(Option.none()),
+    get: () => Effect.succeedNone,
     put: (connectionId, credential) =>
       options?.failPut
         ? Effect.fail(new ConnectionBlockedError({ reason: "configuration", detail: "read-only" }))

@@ -165,7 +165,7 @@ through re-indentation) and the list of `conflicts`.
   paired route that owns the saved credential, never at a LAN route T3 learned on its own,
   so the credential is replaced in place. For those VMs a layout effect stores upstream's
   dismissal of its "Permissions have changed … pair again" notice before the notice asks
-  (nightly's notice asks outside React as soon as a session settles, so the dismissal is
+  (the notice asks outside React as soon as a session settles, so the dismissal is
   stored once the VM is known; a notice shown before the VM list loaded stays). A
   failure shows an error and is retried on the next app start. Servers that are not
   Construct VMs of this PC keep upstream's notice.
