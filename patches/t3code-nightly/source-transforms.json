@@ -567,18 +567,18 @@
     },
     {
       "path": "apps/web/src/components/settings/SettingsPanels.tsx",
-      "after": "export function GeneralSettingsPanel() {",
+      "after": "export function ChatSettingsPanel() {",
       "insert": "  const serverConfigs = useServerConfigs();\n  // Stock T3 servers have no voice input at all, so the row would be a dead\n  // control there.\n  const showVoiceInputSource = [...serverConfigs.values()].some(\n    (config) => config.environment.capabilities.voiceInput === true,\n  );\n"
     },
     {
       "path": "apps/web/src/components/settings/SettingsPanels.tsx",
-      "after": "<SettingsSection id=\"behavior\" title=\"Behavior\">",
+      "after": "<SettingsSection id=\"composer\" title=\"Composer\">",
       "insert": "        {showVoiceInputSource ? (\n          <SettingsRow\n            {...searchableSetting(\"voice-input-source\")}\n            description=\"Choose where voice input records. Automatic uses this device's microphone when it is available, and the Construct host bridge otherwise.\"\n            resetAction={\n              settings.voiceInputSource !== DEFAULT_UNIFIED_SETTINGS.voiceInputSource ? (\n                <SettingResetButton\n                  label=\"voice input source\"\n                  onClick={() =>\n                    updateSettings({\n                      voiceInputSource: DEFAULT_UNIFIED_SETTINGS.voiceInputSource,\n                    })\n                  }\n                />\n              ) : null\n            }\n            control={\n              <Select\n                value={settings.voiceInputSource}\n                onValueChange={(value) => {\n                  if (isVoiceInputSourcePreference(value)) {\n                    updateSettings({ voiceInputSource: value });\n                  }\n                }}\n              >\n                <SelectTrigger className=\"w-full sm:w-52\" aria-label=\"Voice input source\">\n                  <SelectValue>{VOICE_INPUT_SOURCE_LABELS[settings.voiceInputSource]}</SelectValue>\n                </SelectTrigger>\n                <SelectPopup align=\"end\" alignItemWithTrigger={false}>\n                  {Object.entries(VOICE_INPUT_SOURCE_LABELS).map(([value, label]) => (\n                    <SelectItem hideIndicator key={value} value={value}>\n                      {label}\n                    </SelectItem>\n                  ))}\n                </SelectPopup>\n              </Select>\n            }\n          />\n        ) : null}\n\n"
     },
     {
       "path": "apps/web/src/components/settings/settingsSearch.ts",
       "after": "SETTINGS_SEARCH_ITEMS = [",
-      "insert": "  {\n    id: \"voice-input-source\",\n    title: \"Voice input source\",\n    to: \"/settings/general\",\n  },\n"
+      "insert": "  {\n    id: \"voice-input-source\",\n    title: \"Voice input source\",\n    to: \"/settings/chat\",\n  },\n"
     },
     {
       "path": "apps/web/src/components/sidebar/SidebarUpdatePill.tsx",
@@ -1001,7 +1001,7 @@
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
       "after": "return DesktopUpdates.of({",
-      "insert": "    openConstructCompanion: (instanceName: string | null) => Effect.sync(() => {\n      if (!constructManaged) return false;\n      return ConstructUpdates.openConstructCompanion(instanceName, {\n        localAppData: constructLocalAppData,\n        temp: process.env.TEMP,\n        platform: environment.platform,\n        fs: ConstructUpdates.nodeConstructFileSystem,\n        onError: (error) => runConstructEffect(\n          logUpdaterWarning(\"could not open Construct Companion\", { error: error.message }),\n        ),\n      });\n    }),\n"
+      "insert": "    openConstructCompanion: Effect.fn(\"desktop.updates.constructOpenCompanion\")(\n      (instanceName: string | null) =>\n        Effect.sync(() => {\n          if (!constructManaged) return false;\n          return ConstructUpdates.openConstructCompanion(instanceName, {\n            localAppData: constructLocalAppData,\n            temp: process.env.TEMP,\n            platform: environment.platform,\n            fs: ConstructUpdates.nodeConstructFileSystem,\n            onError: (error) => runConstructEffect(\n              logUpdaterWarning(\"could not open Construct Companion\", { error: error.message }),\n            ),\n          });\n        }),\n    ),\n"
     },
     {
       "path": "apps/server/src/environment/ServerEnvironment.test.ts",

@@ -117,5 +117,5 @@ for (const channel of ["release", "nightly"]) {
     /relinkAttemptedRef\.current\.add\(plan\.name\)/.test(relink) &&
     /host: input\.baseUrl,\n\s*pairingCode: token,\n\s*expectedEnvironmentId: input\.environmentId,/.test(relinkLink));
   ok(`auto-link (${channel}): upstream's pair-again notice is dismissed by a layout effect for the VMs Construct re-links`,
-    /useLayoutEffect\(\(\) => \{\n\s*if \(legacy\) \{/.test(relink) && /`t3code:permission-update:v1:\$\{environmentId\}`/.test(relink));
+    /useLayoutEffect\(\(\) => \{[^}]*setLocalStorageItem\(`t3code:permission-update:v1:\$\{environmentId\}`/.test(relink));
 }
