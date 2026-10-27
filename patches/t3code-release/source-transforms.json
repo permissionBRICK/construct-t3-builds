@@ -352,8 +352,8 @@
     },
     {
       "path": "apps/server/src/cli/pair.ts",
-      "find": "state.devUrl ?? resolveHeadlessConnectionString(state.host, state.port)",
-      "replace": "state.devUrl ?? publicBaseUrl ?? resolveHeadlessConnectionString(state.host, state.port)"
+      "after": "state.devUrl ??",
+      "insert": "  publicBaseUrl ??\n"
     },
     {
       "path": "apps/server/src/cli/pair.ts",
@@ -435,8 +435,8 @@
     },
     {
       "path": "apps/server/src/startupAccess.ts",
-      "after": "resolveListeningPort(httpServer.address, serverConfig.port),",
-      "insert": "    NodeOS.networkInterfaces(),\n    publicBaseUrlOrigin(),\n"
+      "after": "{ privateNetworkOnly: serverConfig.privateNetworkOnly },",
+      "insert": "    publicBaseUrlOrigin(),\n"
     },
     {
       "path": "apps/server/src/ws.ts",
@@ -449,8 +449,13 @@
     },
     {
       "path": "apps/server/src/ws.ts",
-      "find": "ServerWsRpcGroup.toLayer(",
-      "replace": "ServerWsRpcGroup.omit(...constructWsRpcMethods).toLayer("
+      "find": "RpcGroup.Rpcs<typeof ServerWsRpcGroup>",
+      "replace": "Exclude<RpcGroup.Rpcs<typeof ServerWsRpcGroup>, { readonly _tag: (typeof constructWsRpcMethods)[number] }>"
+    },
+    {
+      "path": "apps/server/src/ws.ts",
+      "find": "ServerWsRpcGroup.requests",
+      "replace": "ServerWsRpcGroup.omit(...constructWsRpcMethods).requests"
     },
     {
       "path": "apps/server/src/ws.ts",
@@ -562,18 +567,18 @@
     },
     {
       "path": "apps/web/src/components/settings/SettingsPanels.tsx",
-      "after": "export function GeneralSettingsPanel() {",
+      "after": "export function ChatSettingsPanel() {",
       "insert": "  const serverConfigs = useServerConfigs();\n  // Stock T3 servers have no voice input at all, so the row would be a dead\n  // control there.\n  const showVoiceInputSource = [...serverConfigs.values()].some(\n    (config) => config.environment.capabilities.voiceInput === true,\n  );\n"
     },
     {
       "path": "apps/web/src/components/settings/SettingsPanels.tsx",
-      "after": "<SettingsSection id=\"behavior\" title=\"Behavior\">",
+      "after": "<SettingsSection id=\"composer\" title=\"Composer\">",
       "insert": "        {showVoiceInputSource ? (\n          <SettingsRow\n            {...searchableSetting(\"voice-input-source\")}\n            description=\"Choose where voice input records. Automatic uses this device's microphone when it is available, and the Construct host bridge otherwise.\"\n            resetAction={\n              settings.voiceInputSource !== DEFAULT_UNIFIED_SETTINGS.voiceInputSource ? (\n                <SettingResetButton\n                  label=\"voice input source\"\n                  onClick={() =>\n                    updateSettings({\n                      voiceInputSource: DEFAULT_UNIFIED_SETTINGS.voiceInputSource,\n                    })\n                  }\n                />\n              ) : null\n            }\n            control={\n              <Select\n                value={settings.voiceInputSource}\n                onValueChange={(value) => {\n                  if (isVoiceInputSourcePreference(value)) {\n                    updateSettings({ voiceInputSource: value });\n                  }\n                }}\n              >\n                <SelectTrigger className=\"w-full sm:w-52\" aria-label=\"Voice input source\">\n                  <SelectValue>{VOICE_INPUT_SOURCE_LABELS[settings.voiceInputSource]}</SelectValue>\n                </SelectTrigger>\n                <SelectPopup align=\"end\" alignItemWithTrigger={false}>\n                  {Object.entries(VOICE_INPUT_SOURCE_LABELS).map(([value, label]) => (\n                    <SelectItem hideIndicator key={value} value={value}>\n                      {label}\n                    </SelectItem>\n                  ))}\n                </SelectPopup>\n              </Select>\n            }\n          />\n        ) : null}\n\n"
     },
     {
       "path": "apps/web/src/components/settings/settingsSearch.ts",
       "after": "SETTINGS_SEARCH_ITEMS = [",
-      "insert": "  {\n    id: \"voice-input-source\",\n    title: \"Voice input source\",\n    to: \"/settings/general\",\n  },\n"
+      "insert": "  {\n    id: \"voice-input-source\",\n    title: \"Voice input source\",\n    to: \"/settings/chat\",\n  },\n"
     },
     {
       "path": "apps/web/src/components/sidebar/SidebarUpdatePill.tsx",
@@ -895,7 +900,7 @@
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
       "before": "const itemOrdinal =",
-      "insert": "        // Construct: the background plugin's armed watchers are monitors of the root thread.\n        const trackConstructOpenCodeMonitor = (state: OpenCodeThreadState, part: OpenCodePart) =>\n          Effect.gen(function* () {\n            let owner = state;\n            while (owner.parentSubagent !== null) owner = owner.parentSubagent.parentState;\n            const roster = constructOpenCodeMonitorRoster(\n              owner.providerThread.pendingBackgroundTasks ?? [],\n              part,\n              state.messageRoles.get(part.messageID) === \"user\",\n            );\n            if (roster !== null) yield* updateProviderThread(owner, { pendingBackgroundTasks: roster });\n          });\n\n"
+      "insert": "        // Construct: the background plugin's armed watchers are monitors of the root thread.\n        const trackConstructOpenCodeMonitor = Effect.fnUntraced(function* (\n          state: OpenCodeThreadState,\n          part: OpenCodePart,\n        ) {\n          let owner = state;\n          while (owner.parentSubagent !== null) owner = owner.parentSubagent.parentState;\n          const roster = constructOpenCodeMonitorRoster(\n            owner.providerThread.pendingBackgroundTasks ?? [],\n            part,\n            state.messageRoles.get(part.messageID) === \"user\",\n          );\n          if (roster !== null) yield* updateProviderThread(owner, { pendingBackgroundTasks: roster });\n        });\n\n"
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
@@ -996,7 +1001,7 @@
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
       "after": "return DesktopUpdates.of({",
-      "insert": "    openConstructCompanion: (instanceName: string | null) => Effect.sync(() => {\n      if (!constructManaged) return false;\n      return ConstructUpdates.openConstructCompanion(instanceName, {\n        localAppData: constructLocalAppData,\n        temp: process.env.TEMP,\n        platform: environment.platform,\n        fs: ConstructUpdates.nodeConstructFileSystem,\n        onError: (error) => runConstructEffect(\n          logUpdaterWarning(\"could not open Construct Companion\", { error: error.message }),\n        ),\n      });\n    }),\n"
+      "insert": "    openConstructCompanion: Effect.fn(\"desktop.updates.constructOpenCompanion\")(\n      (instanceName: string | null) =>\n        Effect.sync(() => {\n          if (!constructManaged) return false;\n          return ConstructUpdates.openConstructCompanion(instanceName, {\n            localAppData: constructLocalAppData,\n            temp: process.env.TEMP,\n            platform: environment.platform,\n            fs: ConstructUpdates.nodeConstructFileSystem,\n            onError: (error) => runConstructEffect(\n              logUpdaterWarning(\"could not open Construct Companion\", { error: error.message }),\n            ),\n          });\n        }),\n    ),\n"
     },
     {
       "path": "apps/server/src/environment/ServerEnvironment.test.ts",
@@ -1089,11 +1094,6 @@
       "path": "apps/web/src/routes/__root.tsx",
       "before": "{appShell}",
       "insert": "        <ConstructSessionRenewal />\n"
-    },
-    {
-      "path": "pnpm-workspace.yaml",
-      "after": "overrides:",
-      "insert": "  # Keep on the patched version: the CLI archive's lockfile-free install would\n  # otherwise take a newer beta and fail on the unused node-pty patch.\n  node-pty: 1.2.0-beta.15\n"
     }
   ]
 }

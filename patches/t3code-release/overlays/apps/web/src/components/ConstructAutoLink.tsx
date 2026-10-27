@@ -199,9 +199,10 @@ function ConstructAutoLinkContent() {
 
 /**
  * Reports whether one Construct-managed remote's session still has T3's old permission
- * set — the same test upstream's PermissionUpdateNotice makes. A layout effect, so it
- * runs before that notice's passive effect in the same commit: the dismissal it writes
- * (upstream's own key) keeps the notice from asking the user to pair by hand.
+ * set — the same test upstream's PermissionUpdateNotice makes. That notice subscribes to
+ * the session atoms outside React and asks as soon as a session settles, so the
+ * dismissal (upstream's own key) is written as soon as the remote mounts here, ahead of
+ * its session: the notice does not ask the user to pair a Construct VM by hand.
  */
 function ConstructLegacySessionProbe({
   environmentId,
@@ -214,13 +215,13 @@ function ConstructLegacySessionProbe({
   const legacy =
     session._tag === "Success" && !session.waiting && sessionHasLegacyPermissions(session.value);
   useLayoutEffect(() => {
-    if (legacy) {
-      try {
-        setLocalStorageItem(`t3code:permission-update:v1:${environmentId}`, true, Schema.Boolean);
-      } catch {
-        // Then upstream's notice shows as well; the re-link does not depend on it.
-      }
+    try {
+      setLocalStorageItem(`t3code:permission-update:v1:${environmentId}`, true, Schema.Boolean);
+    } catch {
+      // Then upstream's notice shows as well; the re-link does not depend on it.
     }
+  }, [environmentId]);
+  useLayoutEffect(() => {
     onReport(String(environmentId), legacy);
   }, [environmentId, legacy, onReport]);
   return null;

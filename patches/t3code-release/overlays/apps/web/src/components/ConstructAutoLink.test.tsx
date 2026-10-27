@@ -1,5 +1,10 @@
 import type { ConnectionCatalogEntry } from "@t3tools/client-runtime/connection";
-import { EnvironmentId, type ConstructInstanceInfo, type ConstructUpdateInfo } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  sessionHasLegacyPermissions,
+  type ConstructInstanceInfo,
+  type ConstructUpdateInfo,
+} from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -13,6 +18,8 @@ const state = vi.hoisted(() => ({
   environments: [] as unknown[],
   info: null as unknown,
   store: new Set<string>(),
+  // Upstream's permission notices, subscribed to the legacy-session environments.
+  notices: null as null | ((environments: ReadonlyArray<{ environmentId: string; label: string }>) => void),
   add: vi.fn((_toast: { title: string }) => "toast"),
   close: vi.fn(),
   connectPairing: vi.fn(async (_input: unknown): Promise<unknown> => null),
@@ -26,8 +33,17 @@ const state = vi.hoisted(() => ({
   },
 }));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => state.session }));
-vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
 vi.mock("../state/session", () => ({ environmentSession: { sessionStateAtom: () => null } }));
+vi.mock("../state/presentation", () => ({ environmentSummaries: { identitiesAtom: null } }));
+vi.mock("../rpc/atomRegistry", () => ({
+  appAtomRegistry: {
+    subscribe: (_atom: unknown, listener: NonNullable<typeof state.notices>, options?: { immediate?: boolean }) => {
+      state.notices = listener;
+      if (options?.immediate) listener([]);
+      return () => void (state.notices = null);
+    },
+  },
+}));
 vi.mock("../state/environments", () => ({
   useEnvironments: () => ({ environments: state.environments }),
 }));
@@ -46,7 +62,7 @@ vi.mock("./ui/toast", () => ({
 }));
 import { ConstructAutoLink } from "./ConstructAutoLink";
 import { pairedEntry, withLearnedLanRoute } from "./constructInstances.test-fixtures";
-import { PermissionUpdateNotice } from "./PermissionUpdateNotice";
+import { startPermissionUpdateNotices } from "./PermissionUpdateNotice";
 
 const HAUS: ConstructInstanceInfo = {
   name: "haus-vm",
@@ -104,7 +120,7 @@ function environment(
   };
 }
 
-// Both components render nothing, so React DOM only needs a container to attach to
+// The component renders nothing, so React DOM only needs a container to attach to
 // (and `window.HTMLIFrameElement`, which its commit phase checks); the web unit tests
 // run in Node without a DOM.
 const container = {
@@ -116,6 +132,7 @@ const container = {
   ownerDocument: null,
 };
 let root: Root | undefined;
+let stopNotices: (() => void) | undefined;
 beforeEach(() => {
   vi.clearAllMocks();
   state.store.clear();
@@ -129,20 +146,32 @@ beforeEach(() => {
 afterEach(async () => {
   if (root) await act(async () => root!.unmount());
   root = undefined;
+  stopNotices?.();
+  stopNotices = undefined;
   vi.unstubAllGlobals();
 });
 
-// The order __root.tsx mounts them in.
+// The app's order: upstream's notices start with the router, the root mounts
+// ConstructAutoLink, then the sessions settle. Upstream's subscription asks at once,
+// before React renders the settled session.
 async function render() {
+  const settled = state.session;
+  state.session = { ...settled, waiting: true };
+  stopNotices = startPermissionUpdateNotices({ navigate: vi.fn() } as never);
   await act(async () => {
     root = createRoot(container as never);
-    root.render(
-      <>
-        <PermissionUpdateNotice />
-        <ConstructAutoLink />
-      </>,
-    );
+    root.render(<ConstructAutoLink />);
   });
+  state.session = settled;
+  state.notices?.(
+    sessionHasLegacyPermissions(settled.value as never)
+      ? state.environments.map((entry) => {
+          const { environmentId, label } = entry as { environmentId: string; label: string };
+          return { environmentId, label };
+        })
+      : [],
+  );
+  await act(async () => root!.render(<ConstructAutoLink />));
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
@@ -204,12 +233,7 @@ it("redeems the token at the paired route, not at a learned LAN route saved ahea
 it("tries once per app session and reports a failure", async () => {
   state.bridge.linkConstructInstance.mockResolvedValueOnce({ ok: false, error: "ssh failed." } as never);
   await render();
-  await act(async () => root!.render(
-    <>
-      <PermissionUpdateNotice />
-      <ConstructAutoLink />
-    </>,
-  ));
+  await act(async () => root!.render(<ConstructAutoLink />));
   expect(state.bridge.linkConstructInstance).toHaveBeenCalledTimes(1);
   expect(state.connectPairing).not.toHaveBeenCalled();
   expect(titles()).toEqual(["Could not update permissions for haus-vm"]);

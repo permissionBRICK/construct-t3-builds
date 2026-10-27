@@ -8,11 +8,12 @@ import { renewSessions } from "./constructSessionRenewal.logic";
 /** Renew this client's paired sessions that are in the last week of their lease. */
 export const renewConstructSessions = createRuntimeCommand(connectionAtomRuntime, {
   label: "construct-session-renewal",
-  execute: (input: { readonly savedConnections: boolean }) =>
-    Effect.gen(function* () {
-      const desktopToken = yield* Effect.promise(() =>
-        readDesktopPrimaryBearerToken().catch(() => "unavailable"),
-      );
-      yield* renewSessions({ ...input, browserCookie: desktopToken === null });
-    }),
+  execute: Effect.fn("ConstructSessionRenewal.renew")(function* (input: {
+    readonly savedConnections: boolean;
+  }) {
+    const desktopToken = yield* Effect.promise(() =>
+      readDesktopPrimaryBearerToken().catch(() => "unavailable"),
+    );
+    yield* renewSessions({ ...input, browserCookie: desktopToken === null });
+  }),
 });
