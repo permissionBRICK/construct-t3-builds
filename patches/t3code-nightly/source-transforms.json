@@ -896,7 +896,7 @@
     {
       "path": "apps/server/src/orchestration-v2/runtimeLayer.ts",
       "after": "layerProduction = Layer.mergeAll(",
-      "insert": "  constructCapacityRetryWorkerLive.pipe(\n    Layer.provide(Layer.mergeAll(layerThreadManagementProvided, layerEventSinkProvided)),\n  ),\n"
+      "insert": "  constructCapacityRetryWorkerLive.pipe(\n    Layer.provide(Layer.mergeAll(layerThreadManagementProvided, layerEventSink)),\n  ),\n"
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
