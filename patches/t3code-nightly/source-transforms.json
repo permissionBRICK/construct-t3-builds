@@ -233,18 +233,6 @@
       "optional": true
     },
     {
-      "path": "apps/desktop/src/updates/updatesTestHarness.ts",
-      "after": "readonly env?: Record<string, string | undefined>;",
-      "insert": "  /** Construct builds carry `<t3 version>-construct.<hash>`; the default is a stock build. */\n  readonly appVersion?: string;\n",
-      "optional": true
-    },
-    {
-      "path": "apps/desktop/src/updates/updatesTestHarness.ts",
-      "find": "    appVersion: \"1.2.3\",",
-      "replace": "    appVersion: options.appVersion ?? \"1.2.3\",",
-      "optional": true
-    },
-    {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
       "import": "import type {\n  ConstructPairingLinkResult,\n  ConstructT3LinkInfo,\n  ConstructUpdateAction,\n  ConstructUpdateInfo,\n} from \"@t3tools/contracts\";\n"
     },
@@ -283,7 +271,8 @@
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "after": "check: Effect.fn(\"desktop.updates.check\")",
+      "scope": "check: Effect.fn(\"desktop.updates.check\")",
+      "before": "if (!(yield* Ref.get(updaterConfiguredRef))) {",
       "insert": "      if (constructManaged) {\n        if (!constructEnabled) {\n          return { checked: false, state: yield* Ref.get(updateStateRef) };\n        }\n        if ((yield* Ref.get(constructRunningRef)) !== null) {\n          // A launched script is running: its exit triggers the full check.\n          yield* refreshConstruct(reason, \"local\");\n          return { checked: true, state: yield* Ref.get(updateStateRef) };\n        }\n        if (yield* tryStartUpdateAction(\"check\")) {\n          yield* refreshConstruct(reason, \"full\").pipe(\n            Effect.ensuring(finishUpdateAction(\"check\")),\n          );\n        }\n        return { checked: true, state: yield* Ref.get(updateStateRef) };\n      }\n"
     },
     {
