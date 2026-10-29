@@ -486,7 +486,7 @@
     {
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
       "before": "const submitComposer =",
-      "insert": "  const constructVoiceInput = useConstructVoiceInput({\n    environmentId,\n    environmentUnavailable,\n    isConnecting,\n    composerDraftTargetKey,\n    isComposerApprovalState,\n    isChoiceOnlyPendingQuestion,\n    activePendingUserInput,\n    activePendingProgress,\n    activePendingIsResponding,\n    promptRef,\n    readComposerSnapshot: readComposerSnapshotStable,\n    applyPromptReplacement: applyPromptReplacementStable,\n    getSubmitComposer: () => submitComposerStable,\n  });\n"
+      "insert": "  const constructVoiceInput = useConstructVoiceInput({\n    environmentId,\n    environmentUnavailable,\n    composerDraftTargetKey,\n    isComposerApprovalState,\n    isChoiceOnlyPendingQuestion,\n    activePendingUserInput,\n    activePendingProgress,\n    activePendingIsResponding,\n    promptRef,\n    readComposerSnapshot: readComposerSnapshotStable,\n    applyPromptReplacement: applyPromptReplacementStable,\n    getSubmitComposer: () => submitComposerStable,\n  });\n"
     },
     {
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
@@ -891,7 +891,7 @@
     {
       "path": "apps/server/src/orchestration-v2/runtimeLayer.ts",
       "after": "layerProduction = Layer.mergeAll(",
-      "insert": "  constructCapacityRetryWorkerLive.pipe(\n    Layer.provide(Layer.mergeAll(layerThreadManagementProvided, layerEventSinkProvided)),\n  ),\n"
+      "insert": "  constructCapacityRetryWorkerLive.pipe(\n    Layer.provide(Layer.mergeAll(layerThreadManagementProvided, layerEventSink)),\n  ),\n"
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
