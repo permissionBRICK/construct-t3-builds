@@ -40,7 +40,6 @@ export interface ConstructVoiceInputOptions<SubmitArgs extends ReadonlyArray<unk
   readonly environmentId: EnvironmentId;
   /** Only whether it is set matters: an unavailable environment cannot record. */
   readonly environmentUnavailable: unknown;
-  readonly isConnecting: boolean;
   readonly composerDraftTargetKey: string;
   readonly isComposerApprovalState: boolean;
   readonly isChoiceOnlyPendingQuestion: boolean;
@@ -152,7 +151,6 @@ export function useConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>
   const {
     environmentId,
     environmentUnavailable,
-    isConnecting,
     composerDraftTargetKey,
     isComposerApprovalState,
     isChoiceOnlyPendingQuestion,
@@ -200,7 +198,6 @@ export function useConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>
 
   const voiceInputDisabled =
     environmentUnavailable !== null ||
-    isConnecting ||
     isComposerApprovalState ||
     isChoiceOnlyPendingQuestion ||
     activePendingIsResponding ||
