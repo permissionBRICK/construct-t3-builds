@@ -227,18 +227,6 @@
       "optional": true
     },
     {
-      "path": "apps/desktop/src/updates/updatesTestHarness.ts",
-      "after": "readonly env?: Record<string, string | undefined>;",
-      "insert": "  /** Construct builds carry `<t3 version>-construct.<hash>`; the default is a stock build. */\n  readonly appVersion?: string;\n",
-      "optional": true
-    },
-    {
-      "path": "apps/desktop/src/updates/updatesTestHarness.ts",
-      "find": "    appVersion: \"1.2.3\",",
-      "replace": "    appVersion: options.appVersion ?? \"1.2.3\",",
-      "optional": true
-    },
-    {
       "path": "apps/desktop/src/updates/DesktopUpdates.test.ts",
       "before": "describe(\"DesktopUpdates\", () => {",
       "insert": "/** A fake %LOCALAPPDATA% holding one extracted Construct repo whose markers say the VM\n *  was provisioned with an OLDER Construct than the one installed on this PC. */\nfunction makeConstructInstall(): string {\n  const localAppData = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), \"t3-construct-updates-\"));\n  const scriptsDir = NodePath.join(\n    localAppData,\n    \"The-Construct\",\n    \"permissionBRICK-The-Construct-main\",\n    \"The-Construct-main\",\n  );\n  NodeFS.mkdirSync(scriptsDir, { recursive: true });\n  NodeFS.writeFileSync(NodePath.join(scriptsDir, \"Auto-Install.ps1\"), \"# marker\\n\");\n  NodeFS.writeFileSync(NodePath.join(scriptsDir, \"Update-T3Code.ps1\"), \"# reprovision\\n\");\n  NodeFS.writeFileSync(\n    NodePath.join(scriptsDir, \".construct-settings.json\"),\n    \"\\uFEFF\" +\n      JSON.stringify({\n        installedCommit: \"dc44958114c7c43145c8f7830f6185235a1d752b\",\n        provisionedCommit: \"b262652aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n      }),\n  );\n  return localAppData;\n}\n\ndescribe(\"DesktopUpdates (Construct builds)\", () => {\n  it.effect(\"seeds the Construct facts from the local markers at configure time\", () =>\n    Effect.gen(function* () {\n      const localAppData = makeConstructInstall();\n      const harness = makeHarness({\n        appVersion: \"0.0.38-construct.bb8cb346\",\n        env: { LOCALAPPDATA: localAppData },\n      });\n      yield* Effect.gen(function* () {\n        const updates = yield* DesktopUpdates.DesktopUpdates;\n        yield* Effect.scoped(updates.configure);\n        const state = yield* updates.getState;\n        assert.isTrue(state.enabled);\n        assert.equal(state.status, \"available\");\n        assert.equal(state.channel, \"latest\");\n        assert.isDefined(state.construct);\n        assert.equal(state.construct?.installedCommit, \"dc44958114c7c43145c8f7830f6185235a1d752b\");\n        assert.isTrue(state.construct?.provisionStale);\n        assert.equal(state.construct?.action, \"reprovision\");\n        assert.equal(state.construct?.vmName, \"agent-vm\");\n        // electron-updater never ran an update check.\n        assert.equal(harness.checkCount(), 0);\n        // The channel preference cannot be changed on a Construct build.\n        const afterChannel = yield* updates.setChannel(\"nightly\");\n        assert.equal(afterChannel.channel, \"latest\");\n      }).pipe(Effect.provide(harness.layer));\n      NodeFS.rmSync(localAppData, { recursive: true, force: true });\n    }),\n  );\n\n  it.effect(\"keeps the facts but launches nothing while auto-updates are disabled\", () =>\n    Effect.gen(function* () {\n      const localAppData = makeConstructInstall();\n      const harness = makeHarness({\n        appVersion: \"0.0.38-construct.bb8cb346\",\n        env: { LOCALAPPDATA: localAppData, T3CODE_DISABLE_AUTO_UPDATE: \"true\" },\n      });\n      yield* Effect.gen(function* () {\n        const updates = yield* DesktopUpdates.DesktopUpdates;\n        yield* Effect.scoped(updates.configure);\n        const state = yield* updates.getState;\n        assert.isFalse(state.enabled);\n        assert.equal(state.status, \"disabled\");\n        assert.isTrue(state.construct?.provisionStale);\n        assert.equal(state.construct?.action, \"reprovision\");\n        assert.isTrue(Option.isSome(yield* updates.disabledReason));\n        const check = yield* updates.check(\"web-ui\");\n        assert.isFalse(check.checked);\n        const download = yield* updates.download;\n        assert.isFalse(download.completed);\n        assert.equal(download.state.status, \"disabled\");\n        assert.include(download.state.message ?? \"\", \"T3CODE_DISABLE_AUTO_UPDATE\");\n        assert.isNull(download.state.construct?.runningAction ?? null);\n      }).pipe(Effect.provide(harness.layer));\n      NodeFS.rmSync(localAppData, { recursive: true, force: true });\n    }),\n  );\n});\n",
@@ -283,7 +271,8 @@
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "after": "check: Effect.fn(\"desktop.updates.check\")",
+      "scope": "check: Effect.fn(\"desktop.updates.check\")",
+      "before": "if (!(yield* Ref.get(updaterConfiguredRef))) {",
       "insert": "      if (constructManaged) {\n        if (!constructEnabled) {\n          return { checked: false, state: yield* Ref.get(updateStateRef) };\n        }\n        if ((yield* Ref.get(constructRunningRef)) !== null) {\n          // A launched script is running: its exit triggers the full check.\n          yield* refreshConstruct(reason, \"local\");\n          return { checked: true, state: yield* Ref.get(updateStateRef) };\n        }\n        if (yield* tryStartUpdateAction(\"check\")) {\n          yield* refreshConstruct(reason, \"full\").pipe(\n            Effect.ensuring(finishUpdateAction(\"check\")),\n          );\n        }\n        return { checked: true, state: yield* Ref.get(updateStateRef) };\n      }\n"
     },
     {
