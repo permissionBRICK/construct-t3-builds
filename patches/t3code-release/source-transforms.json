@@ -88,8 +88,8 @@
     },
     {
       "path": "apps/web/src/components/ChatView.tsx",
-      "find": "bannerItems={composerBannerItems}",
-      "replace": "bannerItems={\n                                constructOmniloop.bannerItem === null\n                                  ? composerBannerItems\n                                  : [constructOmniloop.bannerItem, ...composerBannerItems]\n                              }"
+      "find": "bannerItems={isDraftHeroState ? [] : composerBannerItems}",
+      "replace": "bannerItems={\n                                isDraftHeroState\n                                  ? []\n                                  : constructOmniloop.bannerItem === null\n                                    ? composerBannerItems\n                                    : [constructOmniloop.bannerItem, ...composerBannerItems]\n                              }"
     },
     {
       "path": "apps/web/src/components/chat/RightPanelSurfaceContent.tsx",
@@ -322,11 +322,11 @@
     {
       "path": "apps/server/src/cli/auth.ts",
       "before": "const output = formatIssuedPairingCredential(issued, {",
-      "insert": "          // An explicit --base-url still wins; otherwise fall back to the\n          // public origin Construct's TLS proxy publishes, when it set one.\n          const baseUrl = Option.isSome(flags.baseUrl)\n            ? flags.baseUrl.value\n            : publicBaseUrlOrigin();\n"
+      "insert": "          // An explicit --base-url still wins; otherwise fall back to the\n          // public origin Construct's TLS proxy publishes, when it set one.\n          const baseUrl = Option.isSome(flags.baseUrl)\n            ? flags.baseUrl.value.href\n            : publicBaseUrlOrigin();\n"
     },
     {
       "path": "apps/server/src/cli/auth.ts",
-      "find": "...(Option.isSome(flags.baseUrl) ? { baseUrl: flags.baseUrl.value } : {}),",
+      "find": "...(Option.isSome(flags.baseUrl) ? { baseUrl: flags.baseUrl.value.href } : {}),",
       "scope": "const output = formatIssuedPairingCredential(issued, {",
       "replace": "...(baseUrl === undefined ? {} : { baseUrl }),"
     },
