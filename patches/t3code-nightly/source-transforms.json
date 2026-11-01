@@ -256,8 +256,8 @@
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "find": "    disabledReason: resolveDisabledReason,",
-      "replace": "    disabledReason: constructManaged\n      ? Effect.succeed(constructDisabledReason)\n      : resolveDisabledReason,"
+      "find": "disabledReason: Ref.get(updateStateRef).pipe(",
+      "replace": "disabledReason: constructManaged\n      ? Effect.succeed(constructDisabledReason)\n      : Ref.get(updateStateRef).pipe("
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
