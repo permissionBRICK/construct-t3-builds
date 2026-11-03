@@ -135,6 +135,8 @@ try {
   const text = await banner.textContent();
   assert.match(text, /^docker-hub.*other-vm · push the image · \d+ s left/);
   assert.match(text, /and 2 more.*Approve it in the Construct Companion on your PC\./);
+  // Each listed request's secret names stand out on their own.
+  assert.deepEqual(await banner.locator('[data-slot="construct-vault-names"]').first().locator('span.font-mono').allTextContents(), ['docker-hub']);
   assert.equal(await banner.locator('a', {hasText: 'Approve'}).count(), 2);
   await shot('several');
   await page.setViewportSize({width: 390, height: 844});
@@ -451,5 +453,26 @@ async function desktopFlow(page) {
   assert.ok((await page.evaluate(() => window.companion.reports)).every((report) => report.visibility === 'visible'),
     'every report was made while the page was visible');
   assert.deepEqual(await lastReport(), ['c-7']);
+
+  // A Companion that sends the request's parts: "<vm> <lead>", the secrets with their names
+  // set apart, the facts, the note, the reason and who asked, instead of the plain message.
+  await set(`window.fixture.answers['env-a'] = []; window.companion.answer.approvals = [approval('c-9', {
+    names: ['github-token', 'npm-token'], title: 'Key vault — access request', message: 'THE PLAIN MESSAGE',
+    details: {lead: 'asks for access to', secrets: [{name: 'github-token', description: 'GitHub token for CI', hasUsername: true},
+      {name: 'npm-token', description: '', hasUsername: false}], facts: [{label: 'Access', value: '3 uses, until 14:05 (2 h)'}],
+      note: 'It also becomes auto-approved.', reason: 'publish the release', source: 'root@agent-vm'}})]`);
+  const structured = item('Key vault — access request');
+  await structured.waitFor({timeout: 5_000});
+  const secretNames = structured.locator('[data-slot="construct-vault-secret-name"]');
+  assert.deepEqual(await secretNames.allTextContents(), ['github-token', 'npm-token']);
+  assert.match(await secretNames.first().getAttribute('class'), /font-mono.*font-semibold|font-semibold.*font-mono/);
+  const parts = await structured.textContent();
+  for (const part of ['agent-vm asks for access to', 'with username', 'GitHub token for CI', 'Access 3 uses, until 14:05 (2 h)',
+    'It also becomes auto-approved.', 'Reason “publish the release”', 'Requested by root@agent-vm · 4 min left']) {
+    assert.ok(parts.includes(part), `shows "${part}"`);
+  }
+  assert.ok(!parts.includes('THE PLAIN MESSAGE'), 'the parts replace the plain message');
+  assert.equal(await structured.locator('button').count(), 2);
+  await shot('desktop-structured');
   await page.close();
 }

@@ -24,6 +24,7 @@ const OPS: ReadonlySet<string> = new Set<ConstructVaultPendingOp>([
   "get",
   "add",
   "delete",
+  "autoApprove",
 ]);
 
 /** The note id a directory entry names, or null for anything else (temp files start with "."). */
