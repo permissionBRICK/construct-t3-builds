@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import {
   HttpClient,
   HttpClientRequest,
+  HttpMethod,
   HttpRouter,
   HttpServerRequest,
   HttpServerResponse,
@@ -65,6 +66,9 @@ export const constructOmniloopProxyRouteLayer = HttpRouter.add(
     for (const name of REQUEST_HEADERS_TO_FORWARD) {
       const value = request.headers[name];
       if (typeof value === "string") forwardedHeaders[name] = value;
+    }
+    if (!HttpMethod.isHttpMethod(request.method)) {
+      return HttpServerResponse.text("Method Not Allowed", { status: 405 });
     }
     const method = request.method === "HEAD" || request.method === "TRACE" ? "GET" : request.method;
     let outgoing = HttpClientRequest.make(method)(upstream).pipe(HttpClientRequest.setHeaders(forwardedHeaders));
