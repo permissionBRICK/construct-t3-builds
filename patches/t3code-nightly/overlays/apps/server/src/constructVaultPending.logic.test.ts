@@ -51,6 +51,7 @@ describe("parseVaultPendingNote", () => {
     expect(parse({ approveUrl: null })?.approveUrl).toBeNull();
     expect(parse({ reason: "" })?.reason).toBe("");
     expect(parse({ op: "delete", names: ["a", "b.c_d-e"] })?.names).toEqual(["a", "b.c_d-e"]);
+    expect(parse({ op: "autoApprove" })?.op).toBe("autoApprove");
   });
 
   it("ignores text that is not a note object", () => {

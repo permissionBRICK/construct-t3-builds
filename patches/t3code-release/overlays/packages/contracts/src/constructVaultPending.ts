@@ -9,7 +9,13 @@ import * as Schema from "effect/Schema";
  * a banner that links to the approval page. Notes hold no secret: the secret
  * names, the VM, the agent's reason, the deadline and that link.
  */
-export const ConstructVaultPendingOp = Schema.Literals(["request", "get", "add", "delete"]);
+export const ConstructVaultPendingOp = Schema.Literals([
+  "request",
+  "get",
+  "add",
+  "delete",
+  "autoApprove",
+]);
 export type ConstructVaultPendingOp = typeof ConstructVaultPendingOp.Type;
 
 export const ConstructVaultPendingNote = Schema.Struct({
@@ -47,6 +53,36 @@ export type ConstructVaultPending = typeof ConstructVaultPending.Type;
 export const ConstructVaultDecision = Schema.Literals(["approve", "deny"]);
 export type ConstructVaultDecision = typeof ConstructVaultDecision.Type;
 
+/** One secret an approval is about; `description` is "" when it has none. */
+export const ConstructVaultApprovalSecret = Schema.Struct({
+  name: Schema.String,
+  description: Schema.String,
+  hasUsername: Schema.Boolean,
+});
+export type ConstructVaultApprovalSecret = typeof ConstructVaultApprovalSecret.Type;
+
+/** A labelled part of the request, such as "Access" or "New description". */
+export const ConstructVaultApprovalFact = Schema.Struct({
+  label: Schema.String,
+  value: Schema.String,
+});
+export type ConstructVaultApprovalFact = typeof ConstructVaultApprovalFact.Type;
+
+/**
+ * The parts of an approval's `message`, so the banner can show what is requested at a
+ * glance: "<vm> <lead>", the secrets, the facts, a consequence to notice (`note`), the
+ * agent's reason and who asked. `reason` and `source` are "" when unknown.
+ */
+export const ConstructVaultApprovalDetails = Schema.Struct({
+  lead: Schema.String,
+  secrets: Schema.Array(ConstructVaultApprovalSecret),
+  facts: Schema.Array(ConstructVaultApprovalFact),
+  note: Schema.NullOr(Schema.String),
+  reason: Schema.String,
+  source: Schema.String,
+});
+export type ConstructVaultApprovalDetails = typeof ConstructVaultApprovalDetails.Type;
+
 export const ConstructVaultApproval = Schema.Struct({
   /** The Companion's approval id (1 to 128 of `A-Za-z0-9._~-`). */
   id: Schema.String,
@@ -67,6 +103,8 @@ export const ConstructVaultApproval = Schema.Struct({
   action: Schema.String,
   deny: Schema.String,
   names: Schema.Array(Schema.String),
+  /** Absent from a Companion that sends only the plain `message`. */
+  details: Schema.optionalKey(ConstructVaultApprovalDetails),
   /** Epoch ms on this PC's clock. */
   createdAt: Schema.Number,
   deadline: Schema.NullOr(Schema.Number),

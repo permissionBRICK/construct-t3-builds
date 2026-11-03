@@ -17,6 +17,8 @@ import { useAtomCommand } from "../state/use-atom-command";
 import {
   buildConstructVaultBanner,
   type ConstructVaultBanner,
+  type ConstructVaultBannerApprovalDetails,
+  type ConstructVaultBannerNames,
   type ConstructVaultPendingReading,
   type ConstructVaultRecentApproval,
   type ConstructVaultResultLine,
@@ -339,6 +341,74 @@ export function ConstructVaultPendingNotification() {
   return null;
 }
 
+/** The names of a VM note's secrets, each one set apart. Inline elements only. */
+function ConstructVaultSecretNames({ names }: { readonly names: ConstructVaultBannerNames }) {
+  return (
+    <span className="flex flex-wrap items-baseline gap-x-2" data-slot="construct-vault-names">
+      {names.shown.map((name) => (
+        <span className="break-all font-mono font-semibold text-foreground" key={name}>
+          {name}
+        </span>
+      ))}
+      {names.more !== null ? <span>{names.more}</span> : null}
+    </span>
+  );
+}
+
+/**
+ * What a Companion approval asks, laid out so the secrets stand out: "<vm> <lead>", one
+ * row per secret (its name first), the facts, a consequence to notice, the agent's reason
+ * and who asked. Every text comes from the Companion; inline elements only.
+ */
+function ConstructVaultApprovalDetails({
+  details,
+}: {
+  readonly details: ConstructVaultBannerApprovalDetails;
+}) {
+  return (
+    <span className="flex flex-col gap-1" data-slot="construct-vault-approval-details">
+      <span className="break-words">
+        <span className="font-medium text-foreground">{details.vm}</span> {details.lead}
+      </span>
+      <span
+        className="flex flex-col gap-1 rounded-md border border-border px-2 py-1.5"
+        data-slot="construct-vault-secrets"
+      >
+        {details.secrets.map((secret) => (
+          <span className="flex flex-col" key={secret.name}>
+            <span className="flex flex-wrap items-baseline gap-x-2">
+              <span
+                className="break-all font-mono font-semibold text-foreground"
+                data-slot="construct-vault-secret-name"
+              >
+                {secret.name}
+              </span>
+              {secret.hasUsername ? <span className="text-xs">with username</span> : null}
+            </span>
+            {secret.description !== "" ? (
+              <span className="break-words text-xs">{secret.description}</span>
+            ) : null}
+          </span>
+        ))}
+      </span>
+      {details.facts.map((fact) => (
+        <span className="break-words" key={fact.label}>
+          {fact.label} <span className="text-foreground">{fact.value}</span>
+        </span>
+      ))}
+      {details.note !== null ? (
+        <span className="break-words text-warning">{details.note}</span>
+      ) : null}
+      {details.reason !== "" ? (
+        <span className="break-words">
+          Reason <span className="text-foreground">“{details.reason}”</span>
+        </span>
+      ) : null}
+      {details.footer !== "" ? <span>{details.footer}</span> : null}
+    </span>
+  );
+}
+
 /** Inline elements only: the toast renders its description inside a paragraph. */
 function ConstructVaultBannerBody({
   banner,
@@ -353,8 +423,14 @@ function ConstructVaultBannerBody({
         item.kind === "approval" ? (
           <span className="flex flex-col gap-1" data-slot="construct-vault-approval" key={item.key}>
             <span className="font-medium text-foreground">{item.title}</span>
-            <span className="whitespace-pre-line break-words">{item.message}</span>
-            <span>{item.detail}</span>
+            {item.details === null ? (
+              <>
+                <span className="whitespace-pre-line break-words">{item.message}</span>
+                <span>{item.detail}</span>
+              </>
+            ) : (
+              <ConstructVaultApprovalDetails details={item.details} />
+            )}
             <span className="flex justify-end gap-2">
               <Button
                 disabled={banner.busy}
@@ -376,9 +452,7 @@ function ConstructVaultBannerBody({
         ) : (
           <span className="flex items-start gap-2" key={item.key}>
             <span className="flex min-w-0 flex-1 flex-col">
-              {banner.listed ? (
-                <span className="font-medium text-foreground">{item.names}</span>
-              ) : null}
+              {banner.listed ? <ConstructVaultSecretNames names={item.nameList} /> : null}
               <span>{item.detail}</span>
             </span>
             {item.approveUrl !== null ? (

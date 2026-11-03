@@ -1,5 +1,6 @@
 import type {
   ConstructVaultApproval,
+  ConstructVaultApprovalDetails,
   ConstructVaultDecideResult,
   ConstructVaultDecision,
   ConstructVaultPending,
@@ -75,10 +76,26 @@ export interface ConstructVaultCompanionView {
   readonly notesFirstSeen: ReadonlyMap<string, number>;
 }
 
+/** A request's secret names as the banner spells them out: at most three, and how many more. */
+export interface ConstructVaultBannerNames {
+  readonly shown: ReadonlyArray<string>;
+  /** "and 2 more", or null. */
+  readonly more: string | null;
+}
+
+/** What an approval with structured parts shows instead of its plain message. */
+export interface ConstructVaultBannerApprovalDetails extends ConstructVaultApprovalDetails {
+  /** The VM that asks, emphasised before `lead`. */
+  readonly vm: string;
+  /** "Requested by <source> · <time left>", without the parts that are unknown. */
+  readonly footer: string;
+}
+
 export interface ConstructVaultBannerNoteItem {
   readonly kind: "note";
   readonly key: string;
   readonly names: string;
+  readonly nameList: ConstructVaultBannerNames;
   /** "The agent on <vm> · <reason> · <time left>". */
   readonly detail: string;
   /** The approval page, or null: approve in the Companion on the PC. */
@@ -94,6 +111,8 @@ export interface ConstructVaultBannerApprovalItem {
   /** The texts of the Companion's own dialog (plain text). */
   readonly title: string;
   readonly message: string;
+  /** The message's parts, when the Companion sends them; null: show `message` and `detail`. */
+  readonly details: ConstructVaultBannerApprovalDetails | null;
   /** "The agent on <vm> · <time left>". */
   readonly detail: string;
   readonly approveLabel: string;
@@ -139,10 +158,17 @@ export function formatVaultTimeLeft(ms: number): string {
   return `${Math.floor(hours / 24)} d left`;
 }
 
+export function splitVaultNames(names: ReadonlyArray<string>): ConstructVaultBannerNames {
+  const hidden = names.length - VAULT_BANNER_VISIBLE_NAMES;
+  return {
+    shown: names.slice(0, VAULT_BANNER_VISIBLE_NAMES),
+    more: hidden > 0 ? `and ${hidden} more` : null,
+  };
+}
+
 export function formatVaultNames(names: ReadonlyArray<string>): string {
-  if (names.length <= VAULT_BANNER_VISIBLE_NAMES) return names.join(", ");
-  const shown = names.slice(0, VAULT_BANNER_VISIBLE_NAMES).join(", ");
-  return `${shown} and ${names.length - VAULT_BANNER_VISIBLE_NAMES} more`;
+  const { shown, more } = splitVaultNames(names);
+  return more === null ? shown.join(", ") : `${shown.join(", ")} ${more}`;
 }
 
 /** A request is the same on every connection to its VM. */
@@ -239,7 +265,8 @@ export function vaultDecisionResultText(
   decision: ConstructVaultDecision,
   result: ConstructVaultDecideResult | "pending",
 ): string {
-  const what = `${formatVaultNames(approval.names)} for ${approvalVm(approval)}`;
+  const names = formatVaultNames(approval.names);
+  const what = `${approval.op === "autoApprove" ? `auto-approve of ${names}` : names} for ${approvalVm(approval)}`;
   if (result === "pending")
     return decision === "approve" ? `Approving ${what}…` : `Denying ${what}…`;
   if (result.ok) return decision === "approve" ? `Approved ${what}.` : `Denied ${what}.`;
@@ -322,6 +349,7 @@ export function buildConstructVaultBanner(
           kind: "note",
           key: request.key,
           names,
+          nameList: splitVaultNames(request.names),
           detail: [`The agent on ${request.vm}`, request.reason, timeLeft]
             .filter((part) => part !== "")
             .join(" · "),
@@ -339,6 +367,19 @@ export function buildConstructVaultBanner(
         names,
         title: approval.title,
         message: approval.message,
+        details:
+          approval.details === undefined
+            ? null
+            : {
+                ...approval.details,
+                vm: approvalVm(approval),
+                footer: [
+                  approval.details.source === "" ? "" : `Requested by ${approval.details.source}`,
+                  timeLeft,
+                ]
+                  .filter((part) => part !== "")
+                  .join(" · "),
+              },
         detail: [`The agent on ${approvalVm(approval)}`, timeLeft]
           .filter((part) => part !== "")
           .join(" · "),

@@ -13,6 +13,7 @@
 
 import type {
   ConstructVaultApproval,
+  ConstructVaultApprovalDetails,
   ConstructVaultApprovalsResult,
   ConstructVaultDecideResult,
 } from "@t3tools/contracts";
@@ -37,11 +38,16 @@ const MAX_NAME = 128;
 const MAX_TITLE = 200;
 const MAX_MESSAGE = 2_000;
 const MAX_BUTTON = 32;
+const MAX_SECRETS = 20;
+const MAX_FACTS = 10;
+const MAX_DETAIL = 300;
+const MAX_FACT_LABEL = 40;
+const MAX_NOTE = 500;
 
 const APPROVAL_ID_PATTERN = /^[A-Za-z0-9._~-]{1,128}$/;
 const TOKEN_PATTERN = /^[a-f0-9]{64}$/i;
 const KINDS = new Set(["local", "host"]);
-const OPS = new Set(["request", "get", "add", "delete"]);
+const OPS = new Set(["request", "get", "add", "delete", "autoApprove"]);
 
 export interface CompanionEndpoint {
   readonly port: number;
@@ -228,6 +234,62 @@ function optionalTime(value: unknown): number | null | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The approval's structured parts (`lead`, `secrets`, `facts`, `note`, `reason`, `source`),
+ * or undefined: a Companion that predates them, or `lead`/`secrets` unusable, and the banner
+ * shows the plain `message` instead. The other parts are optional on their own: a malformed
+ * one is left out, never the approval.
+ */
+function sanitizeApprovalDetails(
+  item: Record<string, unknown>,
+): ConstructVaultApprovalDetails | undefined {
+  const { lead, secrets } = item;
+  if (typeof lead !== "string" || !Array.isArray(secrets) || secrets.length === 0) return undefined;
+  const cleanSecrets: Array<ConstructVaultApprovalDetails["secrets"][number]> = [];
+  for (const secret of secrets.slice(0, MAX_SECRETS)) {
+    if (!isRecord(secret) || typeof secret.name !== "string" || secret.name === "")
+      return undefined;
+    const name = clip(secret.name, MAX_NAME);
+    // Names and labels key the banner's rows: a repeated one is left out.
+    if (cleanSecrets.some((seen) => seen.name === name)) continue;
+    cleanSecrets.push({
+      name,
+      description:
+        typeof secret.description === "string" ? clip(secret.description, MAX_DETAIL) : "",
+      hasUsername: secret.hasUsername === true,
+    });
+  }
+  const facts = Array.isArray(item.facts)
+    ? item.facts
+        .filter(
+          (fact): fact is { label: string; value: string } =>
+            isRecord(fact) && typeof fact.label === "string" && typeof fact.value === "string",
+        )
+        .map((fact) => ({
+          label: clip(fact.label, MAX_FACT_LABEL),
+          value: clip(fact.value, MAX_DETAIL),
+        }))
+        .filter(
+          (fact, index, all) => all.findIndex((other) => other.label === fact.label) === index,
+        )
+        .slice(0, MAX_FACTS)
+    : [];
+  const text = (value: unknown, max: number) => (typeof value === "string" ? clip(value, max) : "");
+  const note = text(item.note, MAX_NOTE);
+  return {
+    lead: clip(lead, MAX_TITLE),
+    secrets: cleanSecrets,
+    facts,
+    note: note === "" ? null : note,
+    reason: text(item.reason, MAX_DETAIL),
+    source: text(item.source, MAX_LABEL),
+  };
+}
+
 /** One validated approval, or null for an item that does not match the contract. */
 export function sanitizeCompanionApproval(value: unknown): ConstructVaultApproval | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
@@ -255,6 +317,7 @@ export function sanitizeCompanionApproval(value: unknown): ConstructVaultApprova
   ) {
     return null;
   }
+  const details = sanitizeApprovalDetails(item);
   return {
     id: item.id,
     instance: clip(item.instance as string, MAX_LABEL),
@@ -269,6 +332,7 @@ export function sanitizeCompanionApproval(value: unknown): ConstructVaultApprova
     action: clip(item.action as string, MAX_BUTTON),
     deny: clip(item.deny as string, MAX_BUTTON),
     names: item.names.slice(0, MAX_NAMES).map((name) => clip(name, MAX_NAME)),
+    ...(details === undefined ? {} : { details }),
     createdAt: item.createdAt,
     deadline,
   };

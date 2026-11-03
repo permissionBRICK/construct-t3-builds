@@ -9,6 +9,7 @@ import {
   constructVaultPendingKey,
   type ConstructVaultPendingReading,
   formatVaultNames,
+  splitVaultNames,
   formatVaultTimeLeft,
   isVaultApproveArmed,
   isVaultBannerHiddenByUser,
@@ -78,6 +79,14 @@ describe("formatVaultNames", () => {
     expect(formatVaultNames(["a", "b", "c"])).toBe("a, b, c");
     expect(formatVaultNames(["a", "b", "c", "d", "e"])).toBe("a, b, c and 2 more");
   });
+
+  it("splits them for a list of names that stand out", () => {
+    expect(splitVaultNames(["a", "b"])).toEqual({ shown: ["a", "b"], more: null });
+    expect(splitVaultNames(["a", "b", "c", "d", "e"])).toEqual({
+      shown: ["a", "b", "c"],
+      more: "and 2 more",
+    });
+  });
 });
 
 describe("buildConstructVaultBanner", () => {
@@ -99,6 +108,7 @@ describe("buildConstructVaultBanner", () => {
         kind: "note",
         key: constructVaultPendingKey("agent-vm", "a"),
         names: "github-token, npm-token",
+        nameList: { shown: ["github-token", "npm-token"], more: null },
         detail: "The agent on agent-vm · publish the release · 5 min left",
         approveUrl: "https://host.example:7462/vault/#request=a",
       },
@@ -285,6 +295,7 @@ describe("buildConstructVaultBanner with the Companion", () => {
         names: "github-token, npm-token",
         title: "Key vault request from agent-vm",
         message: "The agent asks for github-token.\nReason: publish the release",
+        details: null,
         detail: "The agent on agent-vm · 4 min left",
         approveLabel: "Approve",
         denyLabel: "Deny",
@@ -294,6 +305,40 @@ describe("buildConstructVaultBanner with the Companion", () => {
     expect(banner?.companionHint).toBeNull();
     expect(banner?.result).toBeNull();
     expect(banner?.keys).toEqual([constructVaultApprovalKey("c1")]);
+  });
+
+  it("lays out an approval's structured parts when the Companion sends them", () => {
+    const details = {
+      lead: "asks for access to",
+      secrets: [
+        { name: "github-token", description: "GitHub token for CI", hasUsername: true },
+        { name: "npm-token", description: "", hasUsername: false },
+      ],
+      facts: [{ label: "Access", value: "3 uses, until 14:05 (2 h)" }],
+      note: null,
+      reason: "publish the release",
+      source: "root@agent-vm",
+    };
+    const banner = buildConstructVaultBanner(
+      [],
+      CLIENT_NOW,
+      none,
+      companion([approval("c1", { names: ["github-token", "npm-token"], details })]),
+    );
+    const item = banner?.items[0];
+    expect(item?.kind === "approval" ? item.details : undefined).toEqual({
+      ...details,
+      vm: "agent-vm",
+      footer: "Requested by root@agent-vm · 4 min left",
+    });
+    // Without a source, the footer is the time left alone.
+    const bare = buildConstructVaultBanner(
+      [],
+      CLIENT_NOW,
+      none,
+      companion([approval("c1", { details: { ...details, source: "" }, deadline: null })]),
+    )?.items[0];
+    expect(bare?.kind === "approval" ? bare.details?.footer : undefined).toBe("");
   });
 
   it("shows a VM note that is a Companion approval once, as the approval", () => {
@@ -527,6 +572,10 @@ describe("decisions", () => {
     );
     expect(vaultDecisionResultText(item, "approve", { ok: false, reason: "error" })).toContain(
       "Try again, or answer in the Companion.",
+    );
+    const auto = approval("c2", { op: "autoApprove", names: ["github-token"] });
+    expect(vaultDecisionResultText(auto, "approve", { ok: true })).toBe(
+      "Approved auto-approve of github-token for agent-vm.",
     );
   });
 

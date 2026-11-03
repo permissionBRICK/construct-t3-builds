@@ -247,6 +247,109 @@ describe("sanitizeCompanionApproval", () => {
   });
 });
 
+describe("sanitizeCompanionApproval: structured parts", () => {
+  const parts = {
+    lead: "asks for access to",
+    secrets: [
+      { name: "github-token", description: "GitHub token for CI", hasUsername: true },
+      { name: "npm-token", description: "", hasUsername: false },
+    ],
+    facts: [{ label: "Access", value: "3 uses, until 14:05 (2 h)" }],
+    note: "It also becomes auto-approved.",
+    reason: "publish the release",
+    source: "root@agent-vm",
+  };
+
+  it("keeps them as details, next to the plain message", () => {
+    const sanitized = sanitizeCompanionApproval(approval(parts));
+    assert.deepEqual(sanitized?.details, parts);
+    assert.equal(sanitized?.message, approval().message);
+    assert.notProperty(sanitized, "lead");
+  });
+
+  it("has no details without a lead or usable secrets, and keeps the approval", () => {
+    for (const over of [
+      {},
+      { ...parts, lead: undefined },
+      { ...parts, lead: 7 },
+      { ...parts, secrets: [] },
+      { ...parts, secrets: "github-token" },
+      { ...parts, secrets: [{ name: "" }] },
+      { ...parts, secrets: [{ name: "ok" }, null] },
+    ]) {
+      const sanitized = sanitizeCompanionApproval(approval(over));
+      assert.isNotNull(sanitized, JSON.stringify(over));
+      assert.notProperty(sanitized, "details", JSON.stringify(over));
+    }
+  });
+
+  it("leaves out a malformed optional part, never the approval", () => {
+    const sanitized = sanitizeCompanionApproval(
+      approval({
+        ...parts,
+        secrets: [{ name: "github-token", description: 5, hasUsername: "yes" }],
+        facts: [{ label: "Access", value: 3 }, "x", { label: "Reason", value: "ok" }],
+        note: 1,
+        reason: null,
+        source: {},
+      }),
+    );
+    assert.deepEqual(sanitized?.details, {
+      lead: "asks for access to",
+      secrets: [{ name: "github-token", description: "", hasUsername: false }],
+      facts: [{ label: "Reason", value: "ok" }],
+      note: null,
+      reason: "",
+      source: "",
+    });
+    assert.deepEqual(
+      sanitizeCompanionApproval(approval({ ...parts, facts: "Access", note: "" }))?.details?.facts,
+      [],
+    );
+    assert.isNull(sanitizeCompanionApproval(approval({ ...parts, note: "" }))?.details?.note);
+  });
+
+  it("caps the secrets and facts and clips their texts", () => {
+    const details = sanitizeCompanionApproval(
+      approval({
+        ...parts,
+        secrets: Array.from({ length: 30 }, (_, index) => ({
+          name: `name-${index}`,
+          description: "d".repeat(1_000),
+          hasUsername: false,
+        })),
+        facts: Array.from({ length: 15 }, (_, index) => ({ label: `l-${index}`, value: "v" })),
+        note: "n".repeat(2_000),
+        reason: "r".repeat(1_000),
+      }),
+    )?.details;
+    assert.equal(details?.secrets.length, 20);
+    assert.equal(details?.secrets[0]?.description.length, 300);
+    assert.equal(details?.facts.length, 10);
+    assert.equal(details?.note?.length, 500);
+    assert.equal(details?.reason.length, 300);
+  });
+
+  it("keeps the first of repeated secret names and fact labels", () => {
+    const details = sanitizeCompanionApproval(
+      approval({
+        ...parts,
+        secrets: [{ name: "a", description: "first", hasUsername: false }, { name: "a" }],
+        facts: [
+          { label: "Access", value: "1 use" },
+          { label: "Access", value: "2 uses" },
+        ],
+      }),
+    )?.details;
+    assert.deepEqual(details?.secrets, [{ name: "a", description: "first", hasUsername: false }]);
+    assert.deepEqual(details?.facts, [{ label: "Access", value: "1 use" }]);
+  });
+
+  it("accepts the autoApprove operation", () => {
+    assert.equal(sanitizeCompanionApproval(approval({ op: "autoApprove" }))?.op, "autoApprove");
+  });
+});
+
 describe("parseCompanionApprovals", () => {
   it("keeps the valid items and drops the rest", () => {
     const parsed = parseCompanionApprovals(
