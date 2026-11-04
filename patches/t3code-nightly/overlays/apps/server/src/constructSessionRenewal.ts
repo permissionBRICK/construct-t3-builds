@@ -6,9 +6,10 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import * as PayloadSigner from "./auth/PayloadSigner.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
-import { base64UrlDecodeUtf8, base64UrlEncode, signPayload } from "./auth/utils.ts";
+import { base64UrlDecodeUtf8, base64UrlEncode } from "./auth/utils.ts";
 
 /**
  * Sliding renewal for paired clients. A session in the last week of its lease
@@ -84,9 +85,10 @@ export const renewSessionToken = Effect.fn("constructSessionRenewal.renew")(func
     return notRenewed(current.expiresAt);
   }
   const expiresAt = DateTime.add(now, { milliseconds: Duration.toMillis(RENEWED_SESSION_TTL) });
-  // @effect-diagnostics-next-line preferSchemaOverJson:off - re-encode upstream's claims unchanged but for exp.
+  // @effect-diagnostics-next-line globalJsonInEffect:off - re-encode upstream's claims unchanged but for exp.
   const encoded = base64UrlEncode(JSON.stringify({ ...claims, exp: expiresAt.epochMilliseconds }));
-  const renewedToken = `${encoded}.${signPayload(encoded, secret.value)}`;
+  const signer = yield* PayloadSigner.fromSecret(secret.value);
+  const renewedToken = `${encoded}.${yield* signer.sign(encoded)}`;
 
   const check = yield* sessions.verify(renewedToken).pipe(Effect.option);
   if (
