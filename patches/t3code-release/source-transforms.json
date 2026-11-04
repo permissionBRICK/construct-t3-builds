@@ -88,8 +88,8 @@
     },
     {
       "path": "apps/web/src/components/ChatView.tsx",
-      "find": "bannerItems={isDraftHeroState ? [] : composerBannerItems}",
-      "replace": "bannerItems={\n                                isDraftHeroState\n                                  ? []\n                                  : constructOmniloop.bannerItem === null\n                                    ? composerBannerItems\n                                    : [constructOmniloop.bannerItem, ...composerBannerItems]\n                              }"
+      "find": "isDraftHeroState || composerBannerItems.length === 0\n                                  ? EMPTY_COMPOSER_BANNER_ITEMS\n                                  : composerBannerItems",
+      "replace": "isDraftHeroState\n                                  ? EMPTY_COMPOSER_BANNER_ITEMS\n                                  : constructOmniloop.bannerItem === null\n                                    ? composerBannerItems.length === 0\n                                      ? EMPTY_COMPOSER_BANNER_ITEMS\n                                      : composerBannerItems\n                                    : [constructOmniloop.bannerItem, ...composerBannerItems]"
     },
     {
       "path": "apps/web/src/components/chat/RightPanelSurfaceContent.tsx",
@@ -256,8 +256,8 @@
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "find": "    disabledReason: resolveDisabledReason,",
-      "replace": "    disabledReason: constructManaged\n      ? Effect.succeed(constructDisabledReason)\n      : resolveDisabledReason,"
+      "find": "disabledReason: Ref.get(updateStateRef).pipe(",
+      "replace": "disabledReason: constructManaged\n      ? Effect.succeed(constructDisabledReason)\n      : Ref.get(updateStateRef).pipe("
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
