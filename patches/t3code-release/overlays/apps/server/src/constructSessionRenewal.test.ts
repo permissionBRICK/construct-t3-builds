@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
@@ -28,7 +29,7 @@ const testLayer = SessionStore.layer.pipe(
 const days = (value: number) => Duration.toMillis(Duration.days(value));
 
 describe("renewSessionToken", () => {
-  it.layer(NodeServices.layer)((it) => {
+  it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))((it) => {
     it.effect("leaves a session alone until the last week of its lease", () =>
       Effect.gen(function* () {
         const sessions = yield* SessionStore.SessionStore;
