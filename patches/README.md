@@ -272,3 +272,19 @@ This repository publishes separate stable and nightly pairs on pushes to main.
 Each channel uses only its own inventory. Construct downloads the latest validated
 pair for its selected channel; local compilation remains an explicit option.
 See [the publisher contract](../README.md) for identity, validation and discovery.
+
+### Construct VM tool permission auto-approval
+
+The server accepts command, file-read, file-change and permission requests when
+its local `/etc/construct/config.env` contains a nonempty `AGENT_NAME` and
+`T3CODE_AUTO_APPROVE=true`. Construct exposes this opt-in in its VM settings and
+through `construct config set t3-auto-approve true`. Missing, unreadable or disabled
+configuration leaves upstream behavior in place. The setting is read for each new
+request; changing it needs no T3 restart and does not answer existing requests.
+
+The shared provider-session event handler answers with `accept`, without creating
+session-wide rules, and logs the request ID and kind. The request and response
+remain in the normal event stream. Questions, authentication, runless trust/login
+requests and MCP elicitation forms stay interactive. Provider denials that never
+emit a request are outside this handler. Desktop and linked environments use
+the policy of their executing server, never a client-wide preference.
