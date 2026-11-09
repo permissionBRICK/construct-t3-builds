@@ -24,15 +24,16 @@ export function constructAutoApprovalRequest(event: ProviderAdapterV2Event) {
   return request;
 }
 
-export function autoApproveConstructRequest(
-  event: ProviderAdapterV2Event,
-  runtime: Pick<ProviderAdapterV2SessionRuntime, "respondToRuntimeRequest">,
-  readConfig?: () => string,
-) {
-  return Effect.gen(function* () {
+export const autoApproveConstructRequest = Effect.fn("autoApproveConstructRequest")(
+  function* (
+    event: ProviderAdapterV2Event,
+    runtime: Pick<ProviderAdapterV2SessionRuntime, "respondToRuntimeRequest">,
+    readConfig?: () => string,
+  ) {
     const request = constructAutoApprovalRequest(event);
     if (!request || !constructAutoApprovalEnabled(readConfig)) return;
     yield* runtime.respondToRuntimeRequest({ requestId: request.id, decision: "accept" });
     yield* Effect.logInfo("construct.tool-permission-auto-approved", { requestId: request.id, kind: request.kind });
-  }).pipe(Effect.catchCause((cause) => Effect.logWarning("construct.tool-permission-auto-approval-failed", cause)));
-}
+  },
+  Effect.catchCause((cause) => Effect.logWarning("construct.tool-permission-auto-approval-failed", cause)),
+);
