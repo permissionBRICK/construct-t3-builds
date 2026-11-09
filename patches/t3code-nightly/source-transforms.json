@@ -592,8 +592,9 @@
     },
     {
       "path": "apps/web/src/routes/__root.tsx",
-      "before": "{appShell}",
-      "insert": "        <ConstructUpdateNotification />\n"
+      "before": "</>",
+      "scope": "const appHosts",
+      "insert": "      <ConstructUpdateNotification />\n"
     },
     {
       "path": "apps/web/src/routes/__root.tsx",
@@ -605,13 +606,15 @@
     },
     {
       "path": "apps/web/src/routes/__root.tsx",
-      "before": "{appShell}",
-      "insert": "        <ConstructDiskSpaceNotification />\n"
+      "before": "</>",
+      "scope": "const appHosts",
+      "insert": "      <ConstructDiskSpaceNotification />\n"
     },
     {
       "path": "apps/web/src/routes/__root.tsx",
-      "before": "{appShell}",
-      "insert": "        <ConstructVaultPendingNotification />\n"
+      "before": "</>",
+      "scope": "const appHosts",
+      "insert": "      <ConstructVaultPendingNotification />\n"
     },
     {
       "path": "packages/client-runtime/src/rpc/client.ts",
@@ -854,7 +857,7 @@
     {
       "path": "apps/web/src/routes/__root.tsx",
       "after": "<ConstructUpdateNotification />",
-      "insert": "        <ConstructAutoLink />\n"
+      "insert": "      <ConstructAutoLink />\n"
     },
     {
       "path": "apps/server/src/cli/auth.ts",
@@ -1083,8 +1086,9 @@
     },
     {
       "path": "apps/web/src/routes/__root.tsx",
-      "before": "{appShell}",
-      "insert": "        <ConstructSessionRenewal />\n"
+      "before": "</>",
+      "scope": "const appHosts",
+      "insert": "      <ConstructSessionRenewal />\n"
     },
     {
       "path": "apps/server/src/orchestration-v2/ProviderSessionManager.ts",
