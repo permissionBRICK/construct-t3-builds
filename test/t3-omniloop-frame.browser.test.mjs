@@ -30,7 +30,8 @@ async function functionFrom(text,start,end) {
  const {code}=await transform(text.slice(text.indexOf(start),text.indexOf(end)),{loader:'ts',format:'esm'});
  return import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
 }
-const {makeDesktopContentSecurityPolicy:makePolicy}=await functionFrom(patched,'export function makeDesktopContentSecurityPolicy','function withContentSecurityPolicy');
+// Upstream keeps the policy builder module-private; export it for the fixture server.
+const {makeDesktopContentSecurityPolicy:makePolicy}=await functionFrom(patched.replace('function makeDesktopContentSecurityPolicy','export function makeDesktopContentSecurityPolicy'),'export function makeDesktopContentSecurityPolicy','function withContentSecurityPolicy');
 const proxy=fs.readFileSync(path.join(root,`patches/t3code-${channel}/overlays/apps/server/src/constructOmniloopProxy.ts`),'utf8');
 const {rewriteOmniloopAsset}=await functionFrom(proxy,'export function rewriteOmniloopAsset','export function rewriteOmniloopLocation');
 const panel=fs.readFileSync(path.join(root,`patches/t3code-${channel}/overlays/apps/web/src/components/omniloop/OmniloopPanel.tsx`),'utf8');

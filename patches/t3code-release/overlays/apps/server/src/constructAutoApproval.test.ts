@@ -1,14 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import type { ProviderAdapterV2Event } from "@t3tools/provider-core/server/ProviderAdapter";
-import { autoApproveConstructRequest, constructAutoApprovalEnabled } from "./constructAutoApproval";
+import {
+  ProviderAdapterRuntimeRequestResponseError,
+  type ProviderAdapterV2Event,
+} from "@t3tools/provider-core/server/ProviderAdapter";
+import { autoApproveConstructRequest, constructAutoApprovalEnabled } from "./constructAutoApproval.ts";
 
 const enabled = () => "AGENT_NAME=disposable-vm\nT3CODE_AUTO_APPROVE=true\n";
 function event(overrides = {}): ProviderAdapterV2Event {
   return { type: "runtime_request.updated", runtimeRequest: {
     id: "request-1", nodeId: "node-1", providerTurnId: "turn-1", nativeRequestRef: null,
     kind: "command", status: "pending", responseCapability: { type: "live", providerSessionId: "session-1" },
-    createdAt: new Date(), resolvedAt: null, ...overrides,
+    createdAt: "2026-11-01T00:00:00.000Z", resolvedAt: null, ...overrides,
   }} as unknown as ProviderAdapterV2Event;
 }
 
@@ -39,7 +42,7 @@ describe("Construct server tool approval policy", () => {
     expect(calls).toBe(0);
   });
   it("does not stop event processing if a response fails", async () => {
-    await Effect.runPromise(autoApproveConstructRequest(event(), { respondToRuntimeRequest: () => Effect.fail(new Error("provider disconnected")) } as never, enabled));
+    await Effect.runPromise(autoApproveConstructRequest(event(), { respondToRuntimeRequest: () => Effect.fail(new ProviderAdapterRuntimeRequestResponseError({ driver: "codex", requestId: "request-1" } as never)) } as never, enabled));
   });
   it("reads the setting again for each new request", async () => {
     let config = enabled(); let calls = 0;
