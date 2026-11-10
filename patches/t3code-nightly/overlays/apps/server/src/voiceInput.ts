@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -179,6 +180,42 @@ export function createVoiceAudioSource(source: VoiceInputSource | undefined): Vo
   return source === "client" ? new ClientAudioSource() : new HostAudioSource();
 }
 
+/**
+ * Whether this server runs Claude voice input: Construct VMs opt in with
+ * `CONSTRUCT_T3_VOICE_INPUT=true`, and a Desktop app's own backend has it unless set to "false".
+ */
+export function constructVoiceInputEnabled(flag: string | undefined, mode: string): boolean {
+  return flag === "true" || (mode === "desktop" && flag !== "false");
+}
+
+/** Holds audio fed before the transcription socket opens and forwards it once it does. */
+class BufferedAudioSource implements VoiceAudioSource {
+  readonly kind = "client" as const;
+  readonly emitsLevels = false;
+  private handlers: VoiceAudioSourceHandlers | null = null;
+  private pending: Buffer[] = [];
+  private stopped = false;
+
+  start(handlers: VoiceAudioSourceHandlers): void {
+    this.handlers = handlers;
+    for (const chunk of this.pending.splice(0)) handlers.audio(chunk);
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.handlers = null;
+    this.pending = [];
+  }
+
+  push(chunk: Uint8Array): boolean {
+    if (this.stopped || chunk.byteLength === 0) return false;
+    const audio = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+    if (this.handlers) this.handlers.audio(audio);
+    else this.pending.push(audio);
+    return true;
+  }
+}
+
 function readClaudeAccessToken(): string {
   const configDirectory =
     process.env.CLAUDE_CONFIG_DIR?.trim() || NodePath.join(NodeOS.homedir(), ".claude");
@@ -280,6 +317,11 @@ function refreshClaudeAuth(rejectedToken: string): Promise<void> {
   return claudeAuthRefresh;
 }
 
+/** The language Claude's voice service transcribes. */
+export function claudeVoiceLanguage(): string {
+  return process.env.CLAUDE_CODE_VOICE_LANGUAGE?.trim() || "en";
+}
+
 function voiceStreamUrl(): string {
   const query = new URLSearchParams({
     encoding: "linear16",
@@ -287,7 +329,7 @@ function voiceStreamUrl(): string {
     channels: "1",
     endpointing_ms: "300",
     utterance_end_ms: "1000",
-    language: process.env.CLAUDE_CODE_VOICE_LANGUAGE?.trim() || "en",
+    language: claudeVoiceLanguage(),
     use_conversation_engine: "true",
     forward_interims: "typed",
   });
@@ -539,11 +581,23 @@ export class VoiceSession {
     this.finish(false);
   }
 
-  private fullTranscript(): string {
+  fullTranscript(): string {
     return this.streams
       .flatMap((stream) => [...stream.committed, stream.interim.trim()])
       .filter(Boolean)
       .join(" ");
+  }
+
+  /** Text of the streams before the live one, and the live stream's text so far. */
+  transcriptParts(): { readonly committed: string; readonly tentative: string } {
+    const live = this.streams.at(-1);
+    const committed = this.streams
+      .flatMap((stream) =>
+        stream === live ? stream.committed : [...stream.committed, stream.interim.trim()],
+      )
+      .filter(Boolean)
+      .join(" ");
+    return { committed, tentative: live?.interim.trim() ?? "" };
   }
 
   private routeAudio(chunk: Buffer): void {
@@ -780,4 +834,83 @@ export function startVoiceInput(
       (detach) => Effect.sync(detach),
     ).pipe(Effect.forkScoped),
   );
+}
+
+/** A Claude transcription driven by audio the server already holds, for T3's speech endpoints. */
+export interface ClaudeTranscription {
+  /** 16 kHz mono S16LE PCM. */
+  readonly feed: (chunk: Uint8Array) => void;
+  readonly text: () => { readonly committed: string; readonly tentative: string };
+  /** Transcribes everything fed so far and resolves with the final text. */
+  readonly finish: () => Promise<string>;
+  readonly cancel: () => void;
+}
+
+export function startClaudeTranscription(): ClaudeTranscription {
+  const source = new BufferedAudioSource();
+  const session = new VoiceSession(NodeCrypto.randomUUID(), source);
+  let listening = false;
+  let finishing = false;
+  let rejectFinal: (error: Error) => void = () => {};
+  const final = new Promise<string>((resolve, reject) => {
+    rejectFinal = reject;
+    session.attach({
+      event: (event) => {
+        if (event.type === "listening") {
+          listening = true;
+          // The source receives its queued audio right after this event; stop behind it.
+          if (finishing) queueMicrotask(() => session.stop());
+        } else if (event.type === "stopped") resolve(session.fullTranscript());
+      },
+      error: (error) => reject(new Error(error.message)),
+      complete: () => {},
+    });
+  });
+  // A failure before anyone awaits the result must not surface as unhandled.
+  final.catch(() => undefined);
+  session.start();
+  return {
+    feed: (chunk) => void source.push(chunk),
+    text: () => session.transcriptParts(),
+    finish: () => {
+      if (!finishing) {
+        finishing = true;
+        // Before the socket opens, stopping would drop the audio still queued here.
+        if (listening) session.stop();
+      }
+      return final;
+    },
+    cancel: () => {
+      session.abort();
+      rejectFinal(new Error("Claude transcription was cancelled."));
+    },
+  };
+}
+
+/** Recorded audio is replayed this many times faster than it was spoken. */
+export const CLAUDE_RECORDING_SPEEDUP = 4;
+const RECORDING_CHUNK_MS = 100;
+
+/** Transcribes a finished recording (16 kHz mono S16LE) with Claude. */
+export async function transcribeClaudeRecording(
+  pcm: Uint8Array,
+  signal: AbortSignal,
+): Promise<string> {
+  const transcription = startClaudeTranscription();
+  const cancel = () => transcription.cancel();
+  signal.addEventListener("abort", cancel, { once: true });
+  try {
+    const chunkBytes = RECORDING_CHUNK_MS * PCM_BYTES_PER_MS;
+    for (let offset = 0; offset < pcm.byteLength; offset += chunkBytes) {
+      if (signal.aborted) throw new Error("Claude transcription was cancelled.");
+      transcription.feed(pcm.subarray(offset, offset + chunkBytes));
+      // The voice service transcribes reliably only near real time.
+      await new Promise((resolve) =>
+        setTimeout(resolve, RECORDING_CHUNK_MS / CLAUDE_RECORDING_SPEEDUP),
+      );
+    }
+    return await transcription.finish();
+  } finally {
+    signal.removeEventListener("abort", cancel);
+  }
 }

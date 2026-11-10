@@ -85,7 +85,9 @@
     "apps/web/src/voice/constructSpeechInput.ts",
     "apps/web/src/voice/constructSpeechInput.browser.test.tsx",
     "apps/web/src/constructRemoteOpen.ts",
-    "apps/web/src/constructRemoteOpen.test.ts"
+    "apps/web/src/constructRemoteOpen.test.ts",
+    "apps/server/src/speech/constructClaudeSpeech.ts",
+    "apps/server/src/speech/constructClaudeSpeech.test.ts"
   ],
   "transforms": [
     {
@@ -202,6 +204,15 @@
       "path": "apps/server/src/server.ts",
       "after": "layerMakeRoutes = Layer.mergeAll(",
       "insert": "    constructSessionRenewalRouteLayer,\n"
+    },
+    {
+      "path": "apps/server/src/server.ts",
+      "import": "import { withConstructClaudeSpeech } from \"./speech/constructClaudeSpeech.ts\";\n"
+    },
+    {
+      "path": "apps/server/src/server.ts",
+      "find": "SpeechService.layer.pipe(",
+      "replace": "withConstructClaudeSpeech(SpeechService.layer).pipe("
     },
     {
       "path": "apps/desktop/src/electron/ElectronProtocol.test.ts",
@@ -362,9 +373,13 @@
     },
     {
       "path": "apps/server/src/environment/ServerEnvironment.ts",
+      "import": "import { constructVoiceInputEnabled } from \"../voiceInput.ts\";\n"
+    },
+    {
+      "path": "apps/server/src/environment/ServerEnvironment.ts",
       "after": "capabilities: {",
       "scope": "const descriptor",
-      "insert": "      voiceInput:\n        (yield* HostProcess.Environment).CONSTRUCT_T3_VOICE_INPUT === \"true\" ||\n        (serverConfig.mode === \"desktop\" &&\n          (yield* HostProcess.Environment).CONSTRUCT_T3_VOICE_INPUT !== \"false\"),\n      voiceInputClientAudio: true,\n      voiceInputDefault: (yield* HostProcess.Environment).CONSTRUCT_T3_VOICE_INPUT === \"true\",\n"
+      "insert": "      voiceInput: constructVoiceInputEnabled(\n        (yield* HostProcess.Environment).CONSTRUCT_T3_VOICE_INPUT,\n        serverConfig.mode,\n      ),\n      voiceInputClientAudio: true,\n      voiceInputDefault: (yield* HostProcess.Environment).CONSTRUCT_T3_VOICE_INPUT === \"true\",\n      voiceInputSpeechModel: constructVoiceInputEnabled(\n        (yield* HostProcess.Environment).CONSTRUCT_T3_VOICE_INPUT,\n        serverConfig.mode,\n      ),\n"
     },
     {
       "path": "apps/server/src/environment/ServerEnvironment.ts",
@@ -623,7 +638,7 @@
     {
       "path": "packages/contracts/src/environment.ts",
       "after": "ExecutionEnvironmentCapabilities = Schema.Struct({",
-      "insert": "  /** Construct-patched servers can capture host audio through the recorder shim and\n      stream Claude's live speech transcript into a connected composer. */\n  voiceInput: Schema.optionalKey(Schema.Boolean),\n  /** Server accepts microphone audio pushed by the client over\n      `voiceInput.audio`. Absent on servers that can only record through the\n      host bridge, so clients fall back to the host source. */\n  voiceInputClientAudio: Schema.optionalKey(Schema.Boolean),\n  /** Construct VMs (`CONSTRUCT_T3_VOICE_INPUT=true`): a client that never chose a voice\n      destination chooses Claude on this server, once. */\n  voiceInputDefault: Schema.optionalKey(Schema.Boolean),\n"
+      "insert": "  /** Construct-patched servers can capture host audio through the recorder shim and\n      stream Claude's live speech transcript into a connected composer. */\n  voiceInput: Schema.optionalKey(Schema.Boolean),\n  /** Server accepts microphone audio pushed by the client over\n      `voiceInput.audio`. Absent on servers that can only record through the\n      host bridge, so clients fall back to the host source. */\n  voiceInputClientAudio: Schema.optionalKey(Schema.Boolean),\n  /** Construct VMs (`CONSTRUCT_T3_VOICE_INPUT=true`): a client that never chose a voice\n      destination chooses this server, once; it transcribes with Claude by default. */\n  voiceInputDefault: Schema.optionalKey(Schema.Boolean),\n  /** Claude is one of this server's transcription models (`construct/claude`); patched\n      clients transcribe live into the draft while it is selected. */\n  voiceInputSpeechModel: Schema.optionalKey(Schema.Boolean),\n"
     },
     {
       "path": "packages/contracts/src/environment.ts",
@@ -999,7 +1014,7 @@
     {
       "path": "apps/server/src/environment/ServerEnvironment.test.ts",
       "before": "it.effect(\"persists the environment id across service restarts\", () =>",
-      "insert": "  it.effect(\"enables local Desktop voice without VM configuration and preserves the remote flag\", () =>\n    Effect.gen(function* () {\n      const fileSystem = yield* FileSystem.FileSystem;\n      const baseDir = yield* fileSystem.makeTempDirectoryScoped({\n        prefix: \"t3-local-voice-test-\",\n      });\n      const serverConfig = yield* makeServerConfig(baseDir);\n      yield* fileSystem.makeDirectory(serverConfig.stateDir, { recursive: true });\n      for (const mode of [\"desktop\", \"web\"] as const) {\n        for (const flag of [undefined, \"true\", \"false\"]) {\n          const descriptor = yield* Effect.gen(function* () {\n            const environment = yield* ServerEnvironment.ServerEnvironment;\n            return yield* environment.getDescriptor;\n          }).pipe(\n            Effect.provide(\n              ServerEnvironment.layer.pipe(\n                Layer.provide(ServerSecretStore.layer),\n                Layer.provide(ServerConfig.layer({ ...serverConfig, mode })),\n              ),\n            ),\n            Effect.provideService(\n              HostProcess.Environment,\n              flag === undefined ? {} : { CONSTRUCT_T3_VOICE_INPUT: flag },\n            ),\n          );\n          const expected = mode === \"desktop\" ? flag !== \"false\" : flag === \"true\";\n          expect(descriptor.capabilities.voiceInput, `${mode}, flag=${flag}`).toBe(expected);\n          expect(descriptor.capabilities.voiceInputClientAudio).toBe(true);\n          expect(descriptor.capabilities.voiceInputDefault).toBe(flag === \"true\");\n        }\n      }\n    }),\n  );\n\n",
+      "insert": "  it.effect(\"enables local Desktop voice without VM configuration and preserves the remote flag\", () =>\n    Effect.gen(function* () {\n      const fileSystem = yield* FileSystem.FileSystem;\n      const baseDir = yield* fileSystem.makeTempDirectoryScoped({\n        prefix: \"t3-local-voice-test-\",\n      });\n      const serverConfig = yield* makeServerConfig(baseDir);\n      yield* fileSystem.makeDirectory(serverConfig.stateDir, { recursive: true });\n      for (const mode of [\"desktop\", \"web\"] as const) {\n        for (const flag of [undefined, \"true\", \"false\"]) {\n          const descriptor = yield* Effect.gen(function* () {\n            const environment = yield* ServerEnvironment.ServerEnvironment;\n            return yield* environment.getDescriptor;\n          }).pipe(\n            Effect.provide(\n              ServerEnvironment.layer.pipe(\n                Layer.provide(ServerSecretStore.layer),\n                Layer.provide(ServerConfig.layer({ ...serverConfig, mode })),\n              ),\n            ),\n            Effect.provideService(\n              HostProcess.Environment,\n              flag === undefined ? {} : { CONSTRUCT_T3_VOICE_INPUT: flag },\n            ),\n          );\n          const expected = mode === \"desktop\" ? flag !== \"false\" : flag === \"true\";\n          expect(descriptor.capabilities.voiceInput, `${mode}, flag=${flag}`).toBe(expected);\n          expect(descriptor.capabilities.voiceInputClientAudio).toBe(true);\n          expect(descriptor.capabilities.voiceInputDefault).toBe(flag === \"true\");\n          expect(descriptor.capabilities.voiceInputSpeechModel).toBe(expected);\n        }\n      }\n    }),\n  );\n\n",
       "optional": true
     },
     {

@@ -1,6 +1,6 @@
 /**
- * Claude voice input behind T3's own voice controls, while Claude is the chosen voice
- * destination. The transcript streams into the editable draft at the cursor as it is
+ * Claude voice input behind T3's own voice controls, on the environment that transcribes
+ * with Claude. The transcript streams into the editable draft at the cursor as it is
  * spoken; Enter or Send stops recording and sends once the final text is in the draft.
  */
 
@@ -27,7 +27,6 @@ import {
   startClientAudioCapture,
   type ClientAudioCapture,
 } from "./clientAudioCapture";
-import { useClaudeVoiceDestination } from "./useClaudeVoiceDestination";
 import { createVoiceAudioSender, type VoiceAudioSender } from "./voiceAudioSender";
 import { canReconnectVoiceInput, describeVoiceInputFailure } from "./voiceInputFailure";
 import { recoverVoiceSubscription } from "./voiceSessionRecovery";
@@ -54,6 +53,8 @@ export interface ConstructVoiceInputOptions extends ConstructComposerAccess {
   /** The draft or question answer being written; a change cancels the session. */
   readonly ownerKey: string;
   readonly disabled: boolean;
+  /** Where Claude transcribes; null while the voice choice cannot use Claude. */
+  readonly environmentId: EnvironmentId | null;
 }
 
 /** The parts of T3's speech input that the Claude session provides instead. */
@@ -136,7 +137,7 @@ async function finishVoiceSession(
   }
 }
 
-/** Null while Claude is not the chosen voice destination. */
+/** Null without an environment to transcribe with Claude. */
 export function useConstructVoiceInput(
   options: ConstructVoiceInputOptions,
 ): ClaudeSpeechInput | null {
@@ -147,9 +148,8 @@ export function useConstructVoiceInput(
     pendingAnswer,
     readComposerSnapshot,
     applyPromptReplacement,
+    environmentId,
   } = options;
-  const destination = useClaudeVoiceDestination();
-  const environmentId = destination?.environmentId ?? null;
   const serverConfigs = useServerConfigs();
   const serverConfig = environmentId ? serverConfigs.get(environmentId) : undefined;
   const supportsVoiceInput = serverConfig?.environment.capabilities.voiceInput === true;

@@ -1,22 +1,35 @@
 /**
- * Claude in T3's voice picker (Settings → Voice → Transcribe with) and the one-time
- * default that picks it on a device connected to a Construct VM.
+ * The one-time Claude default on a device connected to a Construct VM, the move of saved
+ * `claude-code` choices to the environment's Claude model, and the `claude-code` options
+ * for servers that predate that model (Settings → Voice → Transcribe with).
  */
 
-import { ProviderDriverKind, type EnvironmentId } from "@t3tools/contracts";
+import type { PreparedConnection } from "@t3tools/client-runtime/connection";
+import {
+  getEnvironmentSpeechStatus,
+  selectEnvironmentSpeechModel,
+} from "@t3tools/client-runtime/voice-input";
+import { CLAUDE_SPEECH_MODEL_ID, ProviderDriverKind, type EnvironmentId } from "@t3tools/contracts";
+import * as Option from "effect/Option";
 import { useEffect, type ReactNode } from "react";
 
 import { ProviderInstanceIcon } from "../components/chat/ProviderInstanceIcon";
 import { SelectGroup, SelectGroupLabel, SelectItem } from "../components/ui/select";
+import { runEnvironmentSpeech } from "../speech/runEnvironmentSpeech";
 import { chooseAudioDestination, useAudioChoice } from "../speech/voiceConsent";
 import { useServerConfigs } from "../state/entities";
 import { useEnvironments } from "../state/environments";
+import { usePreparedConnection } from "../state/session";
 import {
   CLAUDE_VOICE_KIND,
   claudeVoiceDestinationOf,
+  claudeVoiceMigrationTarget,
   claudeVoiceOptionValue,
+  defaultClaudeVoiceDestination,
+  offersClaudeSpeechModel,
   pickDefaultClaudeVoiceEnvironment,
   shouldChooseClaudeVoiceDefault,
+  usesClaudeSpeechModel,
   type ClaudeVoiceDestination,
 } from "./claudeVoiceDestination";
 
@@ -40,24 +53,53 @@ function writeDefaultDecided(): void {
   }
 }
 
-/** The chosen Claude destination, or null while another destination (or none) is chosen. */
+/** The chosen `claude-code` destination, or null while another destination (or none) is chosen. */
 export function useClaudeVoiceDestination(): ClaudeVoiceDestination | null {
   return claudeVoiceDestinationOf(useAudioChoice());
 }
 
+const migrating = new Set<EnvironmentId>();
+
+/** Makes Claude the environment's model, then moves the saved choice to that environment. */
+async function migrateClaudeVoiceChoice(
+  environmentId: EnvironmentId,
+  connection: PreparedConnection,
+): Promise<void> {
+  if (migrating.has(environmentId)) return;
+  migrating.add(environmentId);
+  try {
+    const status = await runEnvironmentSpeech(getEnvironmentSpeechStatus(connection));
+    if (!usesClaudeSpeechModel(status)) {
+      await runEnvironmentSpeech(selectEnvironmentSpeechModel(connection, CLAUDE_SPEECH_MODEL_ID));
+    }
+    chooseAudioDestination({ kind: "environment", environmentId });
+  } catch (error) {
+    // The saved `claude-code` choice keeps working; the next visit tries again.
+    console.warn("[voice] could not move the Claude choice to the environment's model", error);
+  } finally {
+    migrating.delete(environmentId);
+  }
+}
+
 /**
  * The first time this device is connected to a Construct VM without any voice choice,
- * choose Claude on that VM, as Construct's voice input worked before T3 had its own.
+ * choose that VM, which transcribes with Claude unless another model was installed there.
+ * A saved `claude-code` choice moves to its environment once that server lists Claude.
  */
-export function useClaudeVoiceDefault(): void {
+export function useClaudeVoiceChoice(): void {
   const choice = useAudioChoice();
   const serverConfigs = useServerConfigs();
+  const capabilitiesOf = (id: EnvironmentId) => serverConfigs.get(id)?.environment.capabilities;
   const environmentId = pickDefaultClaudeVoiceEnvironment(
     [...serverConfigs].map(([id, config]) => ({
       environmentId: id,
       capabilities: config.environment.capabilities,
     })),
   );
+  const offersModel =
+    environmentId !== null && offersClaudeSpeechModel(capabilitiesOf(environmentId));
+  const migrateFrom = claudeVoiceMigrationTarget(choice, capabilitiesOf);
+  const migrationConnection = Option.getOrNull(usePreparedConnection(migrateFrom));
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- writes the one-time default into T3's stored voice choice once a Construct VM connects
   useEffect(() => {
     const alreadyDecided = readDefaultDecided();
@@ -67,9 +109,14 @@ export function useClaudeVoiceDefault(): void {
       return;
     }
     if (!shouldChooseClaudeVoiceDefault({ alreadyDecided, choice, environmentId })) return;
-    chooseAudioDestination({ kind: CLAUDE_VOICE_KIND, environmentId: environmentId! });
+    chooseAudioDestination(defaultClaudeVoiceDestination(environmentId!, offersModel));
     writeDefaultDecided();
-  }, [choice, environmentId]);
+  }, [choice, environmentId, offersModel]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- moves a saved choice once its environment is connected and lists Claude as a model
+  useEffect(() => {
+    if (migrateFrom && migrationConnection)
+      void migrateClaudeVoiceChoice(migrateFrom, migrationConnection);
+  }, [migrateFrom, migrationConnection]);
 }
 
 function ClaudeLogo() {
@@ -95,14 +142,18 @@ export type ClaudeVoicePicker = {
   readonly label: ReactNode;
 };
 
-/** Claude's options and selected label for the destination picker in Voice settings. */
+/**
+ * The `claude-code` options and selected label for the destination picker in Voice settings.
+ * Servers that list Claude as a model need no option: picking the environment uses it.
+ */
 export function useClaudeVoicePicker(): ClaudeVoicePicker {
-  useClaudeVoiceDefault();
+  useClaudeVoiceChoice();
   const destination = useClaudeVoiceDestination();
   const { environments } = useEnvironments();
-  const capable = environments.filter(
-    (environment) => environment.serverConfig?.environment.capabilities.voiceInput === true,
-  );
+  const capable = environments.filter((environment) => {
+    const capabilities = environment.serverConfig?.environment.capabilities;
+    return capabilities?.voiceInput === true && !offersClaudeSpeechModel(capabilities);
+  });
   const chosen = destination
     ? environments.find((environment) => environment.environmentId === destination.environmentId)
     : undefined;

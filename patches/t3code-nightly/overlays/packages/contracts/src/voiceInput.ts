@@ -68,3 +68,9 @@ export class VoiceInputError extends Schema.TaggedError<VoiceInputError>()("Voic
   message: Schema.String,
   fatal: Schema.optional(Schema.Boolean),
 }) {}
+
+/**
+ * Construct: Claude in T3's own transcription model list (Settings → Voice). Patched clients
+ * transcribe live into the draft while an environment uses it; any other client gets T3's flow.
+ */
+export const CLAUDE_SPEECH_MODEL_ID = "construct/claude";

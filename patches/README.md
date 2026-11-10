@@ -87,25 +87,38 @@ through re-indentation) and the list of `conflicts`.
 ## What the inventories add to T3 Code
 
 - **Voice input** (`voiceInput.*` RPCs, client or host capture): Claude Code's live
-  transcription as one more destination in T3's own voice picker (Settings → Voice →
-  Transcribe with → "Claude via <environment>", stored as the `claude-code`
-  destination kind). While Claude is chosen, T3's microphone button, recording pill,
-  dictation shortcut and send-after-dictation drive the `useConstructVoiceInput` session
-  instead of T3's recorder; any other destination uses T3's recorder unchanged. The
-  composer imports its speech input from the `constructSpeechInput` wrapper and lends
-  it the draft, which is its only ChatComposer change. T3's other voice fields (pull
-  request comments, previews) do not offer Claude.
+  transcription as one of T3's own transcription models. A server with Claude voice
+  input lists "Claude" (`construct/claude`, advertised as `voiceInputSpeechModel`) first
+  among its models in Settings → Voice, and serves T3's own speech endpoints with it
+  (`constructClaudeSpeech` wraps T3's `SpeechService`): a recording uploaded after Stop
+  (the stock mobile app) is replayed to Claude's voice service at 4x real time, and T3's
+  live `/ws/voice` stream (stock web and desktop clients) shows Claude's text in T3's
+  preview. Patched clients instead transcribe live into the draft: while the chosen
+  destination is an environment whose model is Claude (checked when each recording
+  starts), T3's microphone button, recording pill, dictation shortcut and
+  send-after-dictation drive the `useConstructVoiceInput` session; any other model or
+  destination uses T3's recorder unchanged. The composer imports its speech input from
+  the `constructSpeechInput` wrapper and lends it the draft, which is its only
+  ChatComposer change. T3's other voice fields (pull request comments, previews) use
+  T3's own flow with whatever model the environment uses, Claude included.
   The environment that runs Claude can be a Construct VM or a Desktop app's own backend.
   Desktop-managed backends enable it by default, using the desktop microphone
   and the Claude Code login in that backend's environment. Remote servers keep
   the `CONSTRUCT_T3_VOICE_INPUT=true` opt-in; an explicit `false` disables voice
   on either backend. Local Desktop use does not require a Construct VM.
-  Servers with the opt-in also advertise `voiceInputDefault`. A device that has never
-  chosen a voice destination chooses Claude on the first such server it is connected
-  to, once (a local marker records it). An existing choice, including Off, is never
-  replaced, and a Desktop backend alone never becomes the default.
+  Servers with the opt-in select Claude as their model when no installed model is
+  selected, and advertise `voiceInputDefault`. A device that has never chosen a voice
+  destination chooses the first such server it is connected to, once (a local marker
+  records it). An existing choice, including Off, is never replaced, and a Desktop
+  backend alone never becomes the default. The model is per environment, so choosing
+  another model there moves every device using that environment to T3's recorder.
+  Servers built before the Claude model existed are offered as the `claude-code`
+  destination kind ("Claude via <environment>"). A device whose saved choice is that kind
+  moves to the environment itself once that server lists Claude, selecting Claude as the
+  environment's model first so nothing changes for it.
   The Microphone chosen in Voice settings applies; T3's language, vocabulary, filler-word
-  and cleanup options do not, since the transcript comes from Claude as spoken.
+  and cleanup options do not, since the transcript comes from Claude as spoken (its
+  language is `CLAUDE_CODE_VOICE_LANGUAGE`, English by default).
   Client recordings retain up to 30 seconds of unacknowledged PCM and reattach the
   same server session after connection loss. Ordered byte offsets make retries
   idempotent; Stop flushes capture and drains uploads before closing transcription.
