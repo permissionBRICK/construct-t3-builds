@@ -76,7 +76,12 @@
     "apps/web/src/state/constructSessionRenewal.logic.test.ts",
     "apps/web/src/components/ConstructSessionRenewal.tsx",
     "apps/server/src/constructAutoApproval.ts",
-    "apps/server/src/constructAutoApproval.test.ts"
+    "apps/server/src/constructAutoApproval.test.ts",
+    "apps/web/src/voice/claudeVoiceDestination.ts",
+    "apps/web/src/voice/claudeVoiceDestination.test.ts",
+    "apps/web/src/voice/useClaudeVoiceDestination.tsx",
+    "apps/web/src/voice/constructSpeechInput.ts",
+    "apps/web/src/voice/constructSpeechInput.browser.test.tsx"
   ],
   "transforms": [
     {
@@ -355,7 +360,7 @@
       "path": "apps/server/src/environment/ServerEnvironment.ts",
       "after": "capabilities: {",
       "scope": "const descriptor",
-      "insert": "      voiceInput:\n        process.env.CONSTRUCT_T3_VOICE_INPUT === \"true\" ||\n        (serverConfig.mode === \"desktop\" && process.env.CONSTRUCT_T3_VOICE_INPUT !== \"false\"),\n      voiceInputClientAudio: true,\n"
+      "insert": "      voiceInput:\n        (yield* HostProcess.Environment).CONSTRUCT_T3_VOICE_INPUT === \"true\" ||\n        (serverConfig.mode === \"desktop\" &&\n          (yield* HostProcess.Environment).CONSTRUCT_T3_VOICE_INPUT !== \"false\"),\n      voiceInputClientAudio: true,\n      voiceInputDefault: (yield* HostProcess.Environment).CONSTRUCT_T3_VOICE_INPUT === \"true\",\n"
     },
     {
       "path": "apps/server/src/environment/ServerEnvironment.ts",
@@ -472,28 +477,13 @@
     },
     {
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
-      "import": "import { useConstructVoiceInput } from \"../../voice/useConstructVoiceInput\";\n"
+      "find": "import { useEnvironmentSpeechInput } from \"../../speech/useEnvironmentSpeechInput\";",
+      "replace": "import { useEnvironmentSpeechInput } from \"../../voice/constructSpeechInput\";"
     },
     {
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
-      "before": "const submitComposer =",
-      "insert": "  const constructVoiceInput = useConstructVoiceInput({\n    environmentId,\n    environmentUnavailable,\n    composerDraftTargetKey,\n    isComposerApprovalState,\n    isChoiceOnlyPendingQuestion,\n    activePendingUserInput,\n    activePendingProgress,\n    activePendingIsResponding,\n    promptRef,\n    readComposerSnapshot: readComposerSnapshotStable,\n    applyPromptReplacement: applyPromptReplacementStable,\n    getSubmitComposer: () => submitComposerStable,\n  });\n"
-    },
-    {
-      "path": "apps/web/src/components/chat/ChatComposer.tsx",
-      "scope": "const submitComposer =",
-      "after": ") => {",
-      "insert": "    if (constructVoiceInput.interceptSubmit(event, dispatchMode, submissionIntent)) return;\n"
-    },
-    {
-      "path": "apps/web/src/components/chat/ChatComposer.tsx",
-      "before": "<ComposerFooterPrimaryActions",
-      "insert": "                  {constructVoiceInput.footerControl}\n"
-    },
-    {
-      "path": "apps/web/src/components/chat/ChatComposer.tsx",
-      "before": "<ComposerPromptLengthValidation",
-      "insert": "            {constructVoiceInput.questionControl}\n"
+      "after": "const speechInput = useEnvironmentSpeechInput({",
+      "insert": "    // Construct: the Claude voice destination writes its live transcript into this draft.\n    construct: {\n      promptRef,\n      pendingAnswer: activePendingProgress?.customAnswer ?? null,\n      readComposerSnapshot: readComposerSnapshotStable,\n      applyPromptReplacement: applyPromptReplacementStable,\n    },\n"
     },
     {
       "path": "apps/web/src/components/desktopUpdate.logic.ts",
@@ -629,7 +619,7 @@
     {
       "path": "packages/contracts/src/environment.ts",
       "after": "ExecutionEnvironmentCapabilities = Schema.Struct({",
-      "insert": "  /** Construct-patched servers can capture host audio through the recorder shim and\n      stream Claude's live speech transcript into a connected composer. */\n  voiceInput: Schema.optionalKey(Schema.Boolean),\n  /** Server accepts microphone audio pushed by the client over\n      `voiceInput.audio`. Absent on servers that can only record through the\n      host bridge, so clients fall back to the host source. */\n  voiceInputClientAudio: Schema.optionalKey(Schema.Boolean),\n"
+      "insert": "  /** Construct-patched servers can capture host audio through the recorder shim and\n      stream Claude's live speech transcript into a connected composer. */\n  voiceInput: Schema.optionalKey(Schema.Boolean),\n  /** Server accepts microphone audio pushed by the client over\n      `voiceInput.audio`. Absent on servers that can only record through the\n      host bridge, so clients fall back to the host source. */\n  voiceInputClientAudio: Schema.optionalKey(Schema.Boolean),\n  /** Construct VMs (`CONSTRUCT_T3_VOICE_INPUT=true`): a client that never chose a voice\n      destination chooses Claude on this server, once. */\n  voiceInputDefault: Schema.optionalKey(Schema.Boolean),\n"
     },
     {
       "path": "packages/contracts/src/environment.ts",
@@ -767,6 +757,11 @@
       "path": "packages/contracts/src/settings.ts",
       "after": "ClientSettingsPatch = Schema.Struct({",
       "insert": "  voiceInputSource: Schema.optionalKey(VoiceInputSourcePreference),\n"
+    },
+    {
+      "path": "packages/contracts/src/settings.ts",
+      "after": "VoiceTranscriptionDestination = Schema.Union([",
+      "insert": "  // Construct: Claude Code's live transcription, streamed through this environment.\n  Schema.Struct({ kind: Schema.Literal(\"claude-code\"), environmentId: EnvironmentId }),\n"
     },
     {
       "path": "apps/desktop/src/ipc/channels.ts",
@@ -1000,7 +995,7 @@
     {
       "path": "apps/server/src/environment/ServerEnvironment.test.ts",
       "before": "it.effect(\"persists the environment id across service restarts\", () =>",
-      "insert": "  it.effect(\"enables local Desktop voice without VM configuration and preserves the remote flag\", () =>\n    Effect.gen(function* () {\n      const fileSystem = yield* FileSystem.FileSystem;\n      const baseDir = yield* fileSystem.makeTempDirectoryScoped({\n        prefix: \"t3-local-voice-test-\",\n      });\n      const serverConfig = yield* makeServerConfig(baseDir);\n      yield* fileSystem.makeDirectory(serverConfig.stateDir, { recursive: true });\n      const saved = process.env.CONSTRUCT_T3_VOICE_INPUT;\n      try {\n        for (const mode of [\"desktop\", \"web\"] as const) {\n          for (const flag of [undefined, \"true\", \"false\"]) {\n            if (flag === undefined) delete process.env.CONSTRUCT_T3_VOICE_INPUT;\n            else process.env.CONSTRUCT_T3_VOICE_INPUT = flag;\n            const descriptor = yield* Effect.gen(function* () {\n              const environment = yield* ServerEnvironment.ServerEnvironment;\n              return yield* environment.getDescriptor;\n            }).pipe(\n              Effect.provide(\n                ServerEnvironment.layer.pipe(\n                  Layer.provide(ServerSecretStore.layer),\n                  Layer.provide(ServerConfig.layer({ ...serverConfig, mode })),\n                ),\n              ),\n            );\n            const expected = mode === \"desktop\" ? flag !== \"false\" : flag === \"true\";\n            expect(descriptor.capabilities.voiceInput, `${mode}, flag=${flag}`).toBe(expected);\n            expect(descriptor.capabilities.voiceInputClientAudio).toBe(true);\n          }\n        }\n      } finally {\n        if (saved === undefined) delete process.env.CONSTRUCT_T3_VOICE_INPUT;\n        else process.env.CONSTRUCT_T3_VOICE_INPUT = saved;\n      }\n    }),\n  );\n\n",
+      "insert": "  it.effect(\"enables local Desktop voice without VM configuration and preserves the remote flag\", () =>\n    Effect.gen(function* () {\n      const fileSystem = yield* FileSystem.FileSystem;\n      const baseDir = yield* fileSystem.makeTempDirectoryScoped({\n        prefix: \"t3-local-voice-test-\",\n      });\n      const serverConfig = yield* makeServerConfig(baseDir);\n      yield* fileSystem.makeDirectory(serverConfig.stateDir, { recursive: true });\n      for (const mode of [\"desktop\", \"web\"] as const) {\n        for (const flag of [undefined, \"true\", \"false\"]) {\n          const descriptor = yield* Effect.gen(function* () {\n            const environment = yield* ServerEnvironment.ServerEnvironment;\n            return yield* environment.getDescriptor;\n          }).pipe(\n            Effect.provide(\n              ServerEnvironment.layer.pipe(\n                Layer.provide(ServerSecretStore.layer),\n                Layer.provide(ServerConfig.layer({ ...serverConfig, mode })),\n              ),\n            ),\n            Effect.provideService(\n              HostProcess.Environment,\n              flag === undefined ? {} : { CONSTRUCT_T3_VOICE_INPUT: flag },\n            ),\n          );\n          const expected = mode === \"desktop\" ? flag !== \"false\" : flag === \"true\";\n          expect(descriptor.capabilities.voiceInput, `${mode}, flag=${flag}`).toBe(expected);\n          expect(descriptor.capabilities.voiceInputClientAudio).toBe(true);\n          expect(descriptor.capabilities.voiceInputDefault).toBe(flag === \"true\");\n        }\n      }\n    }),\n  );\n\n",
       "optional": true
     },
     {
@@ -1098,6 +1093,65 @@
       "path": "apps/server/src/orchestration-v2/ProviderSessionManager.ts",
       "after": "yield* publishToSubscribers(entry.eventSubscribers, { type: \"event\", event });",
       "insert": "                  yield* autoApproveConstructRequest(event, entry.runtime).pipe(Effect.forkIn(entry.scope));\n"
+    },
+    {
+      "path": "apps/web/src/speech/useEnvironmentSpeechInput.ts",
+      "after": "const supported =",
+      "insert": "    grant?.destination.kind !== \"claude-code\" &&\n"
+    },
+    {
+      "path": "apps/web/src/components/settings/VoiceSettingsPanel.tsx",
+      "import": "import { useClaudeVoicePicker } from \"../../voice/useClaudeVoiceDestination\";\n"
+    },
+    {
+      "path": "apps/web/src/components/settings/VoiceSettingsPanel.tsx",
+      "after": "export function VoiceSettingsPanel() {",
+      "insert": "  const constructClaudeVoice = useClaudeVoicePicker();\n"
+    },
+    {
+      "path": "apps/web/src/components/settings/VoiceSettingsPanel.tsx",
+      "find": "const destinationValue = destination.cloudProvider",
+      "replace": "const destinationValue = constructClaudeVoice.value !== null\n    ? constructClaudeVoice.value\n    : destination.cloudProvider"
+    },
+    {
+      "path": "apps/web/src/components/settings/VoiceSettingsPanel.tsx",
+      "after": "const chosenUnsupported =",
+      "insert": "    !constructClaudeVoice.active &&\n"
+    },
+    {
+      "path": "apps/web/src/components/settings/VoiceSettingsPanel.tsx",
+      "scope": "{...searchableSetting(\"voice-transcription-destination\")}",
+      "after": "if (!value) return;",
+      "insert": "                  if (constructClaudeVoice.choose(value)) {\n                    setPendingCloud(null);\n                    return;\n                  }\n"
+    },
+    {
+      "path": "apps/web/src/components/settings/VoiceSettingsPanel.tsx",
+      "scope": "{...searchableSetting(\"voice-transcription-destination\")}",
+      "after": "<SelectValue>",
+      "insert": "                    {constructClaudeVoice.label ?? (\n                    <>\n"
+    },
+    {
+      "path": "apps/web/src/components/settings/VoiceSettingsPanel.tsx",
+      "scope": "{...searchableSetting(\"voice-transcription-destination\")}",
+      "before": "</SelectValue>",
+      "insert": "                    </>\n                    )}\n"
+    },
+    {
+      "path": "apps/web/src/components/settings/VoiceSettingsPanel.tsx",
+      "scope": "{...searchableSetting(\"voice-transcription-destination\")}",
+      "before": "</SelectPopup>",
+      "insert": "                  {constructClaudeVoice.options}\n"
+    },
+    {
+      "path": "packages/shared/src/keybindings.ts",
+      "after": "const DEFAULT_KEYBINDINGS",
+      "insert": "  { key: \"alt+q\", command: \"composer.dictation\", when: \"!terminalFocus\" },\n"
+    },
+    {
+      "path": "apps/server/src/keybindings.ts",
+      "scope": "const LATE_DEFAULT_KEYBINDINGS",
+      "after": "}> = [",
+      "insert": "  {\n    id: \"construct:composer.dictation:alt+q\",\n    alongside: { key: \"mod+shift+d\", command: \"composer.dictation\", when: \"!terminalFocus\" },\n    rule: { key: \"alt+q\", command: \"composer.dictation\", when: \"!terminalFocus\" },\n  },\n"
     }
   ]
 }

@@ -212,6 +212,8 @@ export type ClientAudioCapture = {
 };
 
 export type ClientAudioCaptureOptions = {
+  /** The input device chosen in Voice settings; absent follows the system default. */
+  readonly microphoneId?: string;
   readonly onChunk: (chunk: Uint8Array) => void;
   readonly onLevel: (level: number) => void;
   /** Called once with a user-facing reason; the capture is dead afterwards. */
@@ -266,6 +268,7 @@ export function startClientAudioCapture(options: ClientAudioCaptureOptions): Cli
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
+          ...(options.microphoneId ? { deviceId: { exact: options.microphoneId } } : {}),
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,

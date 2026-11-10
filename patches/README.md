@@ -86,13 +86,26 @@ through re-indentation) and the list of `conflicts`.
 
 ## What the inventories add to T3 Code
 
-- **Voice input** (`voiceInput.*` RPCs, composer mic button, client or host capture).
-  The composer side is the `useConstructVoiceInput` overlay hook; ChatComposer only
-  imports it, calls it once, lets it intercept submits and places its two controls.
+- **Voice input** (`voiceInput.*` RPCs, client or host capture): Claude Code's live
+  transcription as one more destination in T3's own voice picker (Settings → Voice →
+  Transcribe with → "Claude via <environment>", stored as the `claude-code`
+  destination kind). While Claude is chosen, T3's microphone button, recording pill,
+  dictation shortcut and send-after-dictation drive the `useConstructVoiceInput` session
+  instead of T3's recorder; any other destination uses T3's recorder unchanged. The
+  composer imports its speech input from the `constructSpeechInput` wrapper and lends
+  it the draft, which is its only ChatComposer change. T3's other voice fields (pull
+  request comments, previews) do not offer Claude.
+  The environment that runs Claude can be a Construct VM or a Desktop app's own backend.
   Desktop-managed backends enable it by default, using the desktop microphone
   and the Claude Code login in that backend's environment. Remote servers keep
   the `CONSTRUCT_T3_VOICE_INPUT=true` opt-in; an explicit `false` disables voice
   on either backend. Local Desktop use does not require a Construct VM.
+  Servers with the opt-in also advertise `voiceInputDefault`. A device that has never
+  chosen a voice destination chooses Claude on the first such server it is connected
+  to, once (a local marker records it). An existing choice, including Off, is never
+  replaced, and a Desktop backend alone never becomes the default.
+  The Microphone chosen in Voice settings applies; T3's language, vocabulary, filler-word
+  and cleanup options do not, since the transcript comes from Claude as spoken.
   Client recordings retain up to 30 seconds of unacknowledged PCM and reattach the
   same server session after connection loss. Ordered byte offsets make retries
   idempotent; Stop flushes capture and drains uploads before closing transcription.
@@ -117,14 +130,16 @@ through re-indentation) and the list of `conflicts`.
   the service would transcribe it twice and repeat the words at the join. The
   text of each stream is joined in order; a stream that does not finalize within
   3 seconds keeps its last text.
-  The microphone control shows a spinning amber ring while voice input starts and while
-  the final transcript is pending. It turns red only once speech is kept: the
-  transcription stream is open and the microphone has delivered audio (for the
-  host bridge, the first level event from the server).
-  Alt+Q starts and stops voice input: tap to toggle, or hold and release to
-  stop. It matches the physical Q key and requires that Ctrl is not held, so
-  AltGr+Q still types "@". Browsers keep Ctrl+T for a new tab; the old Ctrl+T
-  shortcut still works where it arrives (the desktop app) but is not shown.
+  T3's controls show "Preparing" while voice input starts and "Transcribing" while the
+  final transcript is pending. They show recording, with T3's level meter, only once
+  speech is kept: the transcription stream is open and the microphone has delivered
+  audio (for the host bridge, the first level event from the server). T3's Cancel
+  (or Escape) ends the session at once and keeps the text already written.
+  Alt+Q is a default binding of T3's dictation command beside its own Ctrl+Shift+D:
+  tap to toggle, or hold and release to stop (T3's Dictation shortcut setting). A
+  keybindings file that still has T3's default dictation binding gets Alt+Q once
+  through T3's late-default migration; a customised one is left alone. It matches the
+  physical Q key without Ctrl, so AltGr+Q still types "@".
   The composer stays editable while recording and finishing transcription, so
   focus and Alt+Q retain their normal behavior. Text edits do not cancel voice
   input. Transcript updates use the session's latest requested text rather than
@@ -136,7 +151,9 @@ through re-indentation) and the list of `conflicts`.
   Shift+Enter and the microphone's Stop control keep their normal behavior.
   Regression coverage includes delayed/lost uploads, scope cancellation and
   reattachment, final-result replay, offline Stop, and real browser AudioWorklet
-  capture/flush. The publisher runs the voice unit and browser tests for each pair.
+  capture/flush. The publisher runs the voice unit tests for each pair; the overlay
+  browser test (`vp test run --project browser src/voice`) drives the session through
+  T3's real button, pill and shortcut and is run by hand.
 - **Public base URL** (`T3CODE_PUBLIC_BASE_URL` for pairing URLs behind the TLS proxy).
 - **Construct updates** in the Desktop app: update Construct, reprovision a VM that is
   behind the installed Construct, or update T3 Code alone (`Update-T3Code.ps1 -Mode
