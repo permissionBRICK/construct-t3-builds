@@ -186,6 +186,14 @@ through re-indentation) and the list of `conflicts`.
   stored once the VM is known; a notice shown before the VM list loaded stays). A
   failure shows an error and is retried on the next app start. Servers that are not
   Construct VMs of this PC keep upstream's notice.
+- **Editor links to Construct VMs** (`constructRemoteOpen.ts`, Desktop app): "Open in"
+  and file links for a linked Construct VM of this PC go through the ssh alias Construct
+  wrote for it into the PC's `~/.ssh/config` (`ssh-remote+<hostAlias>`, the Companion's
+  own link, with the user from that block). Upstream takes the first host the server
+  advertises; a VM without Tailscale advertises `root@<hostname>.local`, which resolves
+  only on the VM's own network. The VM is found as the re-link finds it: by the paired
+  route's address, else by the auto-link marker's environment id. Other servers and
+  browsers keep upstream's host.
 - **Disk-space warning** (`construct.diskSpace` RPC, capability `constructDiskSpace`):
   a prompt when the VM disk is almost full or only the root reserve is left.
 - **Key vault banner** (`construct.vaultPending` RPC, capability `constructVaultPending`):
