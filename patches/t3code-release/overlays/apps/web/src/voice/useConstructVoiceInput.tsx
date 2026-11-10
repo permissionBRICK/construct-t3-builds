@@ -1,23 +1,17 @@
 /**
- * Construct's voice input for the chat composer: the microphone control, the
- * Alt+Q shortcut, live transcript insertion into the draft or question answer,
- * and the send that waits for the final transcript.
- *
- * ChatComposer calls this hook once and passes everything it needs from the
- * composer explicitly, so the composer itself only places the returned controls
- * and lets `interceptSubmit` take a submit while voice input is active.
+ * Claude voice input behind T3's own voice controls, while Claude is the chosen voice
+ * destination. The transcript streams into the editable draft at the cursor as it is
+ * spoken; Enter or Send stops recording and sends once the final text is in the draft.
  */
 
 import type { EnvironmentId } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
-import { MicIcon, SquareIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { toastManager } from "../components/ui/toast";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { useClientSettings } from "../hooks/useSettings";
 import { useStableCallback } from "../hooks/useStableCallback";
-import { cn, randomUUID } from "../lib/utils";
+import { randomUUID } from "../lib/utils";
 import { useServerConfigs } from "../state/entities";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
@@ -25,6 +19,7 @@ import {
   startVoiceInput as startVoiceInputCommand,
   stopVoiceInput as stopVoiceInputCommand,
 } from "../state/voiceInput";
+import { claudeVoiceInputState, type ClaudeVoicePhase } from "./claudeVoiceDestination";
 import {
   canCaptureClientAudio,
   isSecureContext,
@@ -32,25 +27,20 @@ import {
   startClientAudioCapture,
   type ClientAudioCapture,
 } from "./clientAudioCapture";
+import { useClaudeVoiceDestination } from "./useClaudeVoiceDestination";
 import { createVoiceAudioSender, type VoiceAudioSender } from "./voiceAudioSender";
 import { canReconnectVoiceInput, describeVoiceInputFailure } from "./voiceInputFailure";
 import { recoverVoiceSubscription } from "./voiceSessionRecovery";
 
-export interface ConstructVoiceInputOptions<SubmitArgs extends ReadonlyArray<unknown>> {
-  readonly environmentId: EnvironmentId;
-  /** Only whether it is set matters: an unavailable environment cannot record. */
-  readonly environmentUnavailable: unknown;
-  readonly composerDraftTargetKey: string;
-  readonly isComposerApprovalState: boolean;
-  readonly isChoiceOnlyPendingQuestion: boolean;
-  readonly activePendingUserInput: { readonly requestId: string } | null;
-  readonly activePendingProgress: {
-    readonly customAnswer: string;
-    readonly activeQuestion: { readonly id: string } | null;
-  } | null;
-  readonly activePendingIsResponding: boolean;
+/** What the composer lends the session to write the transcript into its draft. */
+export interface ConstructComposerAccess {
   /** The text the composer last wrote, including writes not rendered yet. */
   readonly promptRef: { current: string };
+  /**
+   * The open question's typed answer, which the transcript extends. Null without a
+   * question. A collapsed question can still expose the chat draft's editor snapshot.
+   */
+  readonly pendingAnswer: string | null;
   readonly readComposerSnapshot: () => { readonly value: string; readonly expandedCursor: number };
   readonly applyPromptReplacement: (
     rangeStart: number,
@@ -58,35 +48,36 @@ export interface ConstructVoiceInputOptions<SubmitArgs extends ReadonlyArray<unk
     replacement: string,
     options: { expectedText: string; focusEditorAfterReplace: boolean },
   ) => boolean;
-  /**
-   * Returns the composer's submit. A getter, because the composer declares its
-   * submit after this hook: the submit calls `interceptSubmit` first.
-   */
-  readonly getSubmitComposer: () => (event: undefined, ...args: SubmitArgs) => void;
 }
 
-export interface ConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>> {
-  /** The control beside the send button; empty while a question is open. */
-  readonly footerControl: ReactNode;
-  /** The control in its own row under a question answer, which has no footer on mobile. */
-  readonly questionControl: ReactNode;
-  /**
-   * Called first in the composer's submit: while voice input is active, Enter or
-   * Send stops recording and the send happens once the final transcript is in
-   * the draft. Returns whether it took the submit.
-   */
-  readonly interceptSubmit: (
-    event: { preventDefault: () => void } | undefined,
-    ...args: SubmitArgs
-  ) => boolean;
+export interface ConstructVoiceInputOptions extends ConstructComposerAccess {
+  /** The draft or question answer being written; a change cancels the session. */
+  readonly ownerKey: string;
+  readonly disabled: boolean;
+}
+
+/** The parts of T3's speech input that the Claude session provides instead. */
+export interface ClaudeSpeechInput {
+  readonly available: boolean;
+  readonly state: ReturnType<typeof claudeVoiceInputState>;
+  readonly level: number;
+  readonly blocksSubmission: boolean;
+  readonly transcriptionEnvironmentId: EnvironmentId;
+  readonly transcriptionEnvironmentLabel: string | null;
+  readonly start: () => Promise<void>;
+  readonly stop: () => Promise<void>;
+  readonly cancel: () => void;
+  /** Stops recording and calls `submit` once the final transcript is in the draft. */
+  readonly submitAfterDictation: (submit: (text: string) => void) => void;
 }
 
 /**
  * A live voice session's insertion window plus, for client-captured audio, the
  * microphone and the sender pushing it to the server.
  */
-type VoiceInsertionState<SubmitArgs> = {
+type VoiceInsertionState = {
   sessionId: string;
+  environmentId: EnvironmentId;
   targetKey: string;
   prefix: string;
   suffix: string;
@@ -97,11 +88,11 @@ type VoiceInsertionState<SubmitArgs> = {
   sender: VoiceAudioSender | null;
   cancelled: boolean;
   stopRequested: boolean;
-  submitArgs?: SubmitArgs;
+  submit?: (text: string) => void;
 };
 
 /** Idempotent, so every path that drops a session can call it. */
-function releaseVoiceCapture(insertion: VoiceInsertionState<unknown> | null): void {
+function releaseVoiceCapture(insertion: VoiceInsertionState | null): void {
   if (!insertion) return;
   insertion.cancelled = true;
   insertion.capture?.stop();
@@ -116,7 +107,7 @@ function releaseVoiceCapture(insertion: VoiceInsertionState<unknown> | null): vo
  * session; a request that is lost while reconnecting is repeated for 30 seconds.
  */
 async function finishVoiceSession(
-  insertion: VoiceInsertionState<unknown>,
+  insertion: VoiceInsertionState,
   requestStop: () => Promise<boolean>,
 ): Promise<void> {
   await insertion.capture?.finish();
@@ -145,87 +136,65 @@ async function finishVoiceSession(
   }
 }
 
-export function useConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>>(
-  options: ConstructVoiceInputOptions<SubmitArgs>,
-): ConstructVoiceInput<SubmitArgs> {
+/** Null while Claude is not the chosen voice destination. */
+export function useConstructVoiceInput(
+  options: ConstructVoiceInputOptions,
+): ClaudeSpeechInput | null {
   const {
-    environmentId,
-    environmentUnavailable,
-    composerDraftTargetKey,
-    isComposerApprovalState,
-    isChoiceOnlyPendingQuestion,
-    activePendingUserInput,
-    activePendingProgress,
-    activePendingIsResponding,
+    ownerKey,
+    disabled,
     promptRef,
+    pendingAnswer,
     readComposerSnapshot,
     applyPromptReplacement,
-    getSubmitComposer,
   } = options;
+  const destination = useClaudeVoiceDestination();
+  const environmentId = destination?.environmentId ?? null;
   const serverConfigs = useServerConfigs();
-  const supportsVoiceInput =
-    serverConfigs.get(environmentId)?.environment.capabilities.voiceInput === true;
+  const serverConfig = environmentId ? serverConfigs.get(environmentId) : undefined;
+  const supportsVoiceInput = serverConfig?.environment.capabilities.voiceInput === true;
   const supportsClientVoiceAudio =
-    serverConfigs.get(environmentId)?.environment.capabilities.voiceInputClientAudio === true;
+    serverConfig?.environment.capabilities.voiceInputClientAudio === true;
   const voiceInputSourcePreference = useClientSettings((settings) => settings.voiceInputSource);
+  const microphoneId = useClientSettings((settings) => settings.voiceMicrophone);
   const voiceInputSource = resolveVoiceInputSource({
     preference: voiceInputSourcePreference,
     canCaptureHere: canCaptureClientAudio(),
     serverAcceptsClientAudio: supportsClientVoiceAudio,
     secureContext: isSecureContext(),
   });
-  const voiceSourceHint =
-    voiceInputSource.source === "client"
-      ? "records with this device's microphone"
-      : voiceInputSource.source === "host"
-        ? "records through the Construct host bridge"
-        : voiceInputSource.reason;
   const runStartVoiceInput = useAtomCommand(startVoiceInputCommand, { reportFailure: false });
   const runStopVoiceInput = useAtomCommand(stopVoiceInputCommand, { reportFailure: false });
   const runSendVoiceAudio = useAtomCommand(sendVoiceAudioCommand, { reportFailure: false });
 
-  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+  const [phase, setPhase] = useState<ClaudeVoicePhase>("idle");
   const [voiceLevel, setVoiceLevel] = useState(0);
-  const [voiceLive, setVoiceLive] = useState(false);
-  const [voiceStatus, setVoiceStatus] = useState("Recording");
   const [voiceSubmission, setVoiceSubmission] = useState<{
     targetKey: string;
-    args: SubmitArgs;
+    submit: (text: string) => void;
   } | null>(null);
   const sentVoiceSubmissionRef = useRef<typeof voiceSubmission>(null);
-  const voiceInsertionRef = useRef<VoiceInsertionState<SubmitArgs> | null>(null);
-  const voiceShortcutRef = useRef<{ started: boolean; downAt: number } | null>(null);
+  const voiceInsertionRef = useRef<VoiceInsertionState | null>(null);
 
-  const voiceInputDisabled =
-    environmentUnavailable !== null ||
-    isComposerApprovalState ||
-    isChoiceOnlyPendingQuestion ||
-    activePendingIsResponding ||
-    (activePendingUserInput !== null && !activePendingProgress?.activeQuestion);
-
-  // The question answer is a separate draft from the regular chat prompt.
-  const voiceTargetKey = JSON.stringify([
-    composerDraftTargetKey,
-    activePendingUserInput?.requestId ?? null,
-    activePendingProgress?.activeQuestion?.id ?? null,
-    isComposerApprovalState,
-    activePendingIsResponding,
-    isChoiceOnlyPendingQuestion,
-  ]);
+  // A different draft, question or destination ends the session.
+  const voiceTargetKey = JSON.stringify([ownerKey, disabled, environmentId]);
   const voiceTargetRef = useRef(voiceTargetKey);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- publishes the committed target to the session's asynchronous transcript callbacks
   useLayoutEffect(() => {
     voiceTargetRef.current = voiceTargetKey;
   });
 
   const stopVoiceRecording = useStableCallback(() => {
     setVoiceLevel(0);
-    setVoiceLive(false);
     const insertion = voiceInsertionRef.current;
     if (!insertion || insertion.stopRequested) return;
     insertion.stopRequested = true;
-    setVoiceStatus("Finishing transcription…");
+    setPhase("transcribing");
     void finishVoiceSession(insertion, async () => {
-      const result = await runStopVoiceInput({ environmentId, sessionId: insertion.sessionId });
+      const result = await runStopVoiceInput({
+        environmentId: insertion.environmentId,
+        sessionId: insertion.sessionId,
+      });
       return AsyncResult.isSuccess(result) && result.value.stopped;
     }).catch((error: unknown) => {
       if (insertion.cancelled) return;
@@ -233,7 +202,7 @@ export function useConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>
       releaseVoiceCapture(insertion);
       if (voiceInsertionRef.current === insertion) {
         voiceInsertionRef.current = null;
-        setIsVoiceRecording(false);
+        setPhase("idle");
       }
       toastManager.add({
         type: "error",
@@ -243,8 +212,22 @@ export function useConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>
     });
   });
 
+  /** Ends the session at once and keeps the text it already wrote; nothing is sent. */
+  const cancelVoiceRecording = useStableCallback(() => {
+    const insertion = voiceInsertionRef.current;
+    if (!insertion) return;
+    releaseVoiceCapture(insertion);
+    voiceInsertionRef.current = null;
+    setPhase("idle");
+    setVoiceLevel(0);
+    void runStopVoiceInput({
+      environmentId: insertion.environmentId,
+      sessionId: insertion.sessionId,
+    });
+  });
+
   const startVoiceRecording = useStableCallback(() => {
-    if (!supportsVoiceInput || voiceInsertionRef.current || voiceInputDisabled) return;
+    if (!environmentId || !supportsVoiceInput || voiceInsertionRef.current || disabled) return;
     if (voiceInputSource.source === null) {
       toastManager.add({
         type: "error",
@@ -256,11 +239,12 @@ export function useConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>
     const source = voiceInputSource.source;
     const snapshot = readComposerSnapshot();
     // A collapsed question can still expose an editor snapshot from the prior draft.
-    const value = activePendingProgress?.customAnswer ?? snapshot.value;
+    const value = pendingAnswer ?? snapshot.value;
     const cursor = snapshot.value === value ? snapshot.expandedCursor : value.length;
     const sessionId = randomUUID();
-    const insertion: VoiceInsertionState<SubmitArgs> = {
+    const insertion: VoiceInsertionState = {
       sessionId,
+      environmentId,
       targetKey: voiceTargetRef.current,
       prefix: value.slice(0, cursor),
       suffix: value.slice(cursor),
@@ -273,12 +257,10 @@ export function useConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>
       stopRequested: false,
     };
     voiceInsertionRef.current = insertion;
-    setVoiceStatus("Starting microphone…");
-    setIsVoiceRecording(true);
+    setPhase("preparing");
     setVoiceLevel(0);
-    setVoiceLive(false);
-    // Red only once speech is kept: the transcription stream is open and the
-    // microphone has delivered audio. Until then the control stays yellow.
+    // Recording only once speech is kept: the transcription stream is open and the
+    // microphone has delivered audio. Until then the controls show it preparing.
     let streamOpen = false;
     let heard = false;
     let live = false;
@@ -293,8 +275,7 @@ export function useConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>
         return;
       }
       live = true;
-      setVoiceLive(true);
-      setVoiceStatus((status) => (status === "Starting microphone…" ? "Recording" : status));
+      setPhase((current) => (current === "preparing" ? "recording" : current));
     };
 
     const failRecording = (message: string) => {
@@ -302,7 +283,7 @@ export function useConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>
       console.warn("[voice] recording stopped", { sessionId, reason: message });
       releaseVoiceCapture(insertion);
       voiceInsertionRef.current = null;
-      setIsVoiceRecording(false);
+      setPhase("idle");
       setVoiceLevel(0);
       void runStopVoiceInput({ environmentId, sessionId });
       toastManager.add({ type: "error", title: "Voice input stopped", description: message });
@@ -314,21 +295,12 @@ export function useConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>
           if (AsyncResult.isFailure(result)) throw new Error("Audio upload interrupted");
           return result.value;
         },
-        onState: (buffering) => {
-          if (insertion.cancelled) return;
-          setVoiceStatus(
-            insertion.stopRequested
-              ? "Finishing transcription…"
-              : buffering
-                ? "Reconnecting—still recording"
-                : live
-                  ? "Recording"
-                  : "Starting microphone…",
-          );
-        },
+        // Recording continues while the connection returns; the controls keep showing it.
+        onState: () => {},
         onError: failRecording,
       });
       insertion.capture = startClientAudioCapture({
+        ...(microphoneId ? { microphoneId } : {}),
         onChunk: (chunk) => {
           if (voiceInsertionRef.current !== insertion) return;
           insertion.sender?.push(chunk);
@@ -347,9 +319,6 @@ export function useConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>
       isActive: () => !insertion.cancelled && voiceInsertionRef.current === insertion,
       onReconnecting: () => {
         insertion.sender?.setReady(false);
-        setVoiceStatus(
-          insertion.stopRequested ? "Finishing transcription…" : "Reconnecting—still recording",
-        );
       },
       connect: async (resume, listening) => {
         const result = await runStartVoiceInput({
@@ -369,13 +338,6 @@ export function useConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>
             if (event.type === "listening") {
               listening();
               active.sender?.setReady(true);
-              setVoiceStatus(
-                active.stopRequested
-                  ? "Finishing transcription…"
-                  : live
-                    ? "Recording"
-                    : "Starting microphone…",
-              );
               streamOpen = true;
               markLive();
               return;
@@ -393,15 +355,15 @@ export function useConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>
                 });
               }
               if (
-                active.submitArgs &&
+                active.submit &&
                 event.reason === "user-stop" &&
                 voiceTargetRef.current === active.targetKey
               ) {
-                setVoiceSubmission({ targetKey: active.targetKey, args: active.submitArgs });
+                setVoiceSubmission({ targetKey: active.targetKey, submit: active.submit });
               }
               releaseVoiceCapture(active);
               voiceInsertionRef.current = null;
-              setIsVoiceRecording(false);
+              setPhase("idle");
               setVoiceLevel(0);
               return;
             }
@@ -412,7 +374,7 @@ export function useConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>
               stopVoiceRecording();
               releaseVoiceCapture(active);
               voiceInsertionRef.current = null;
-              setIsVoiceRecording(false);
+              setPhase("idle");
               return;
             }
             // Use the last requested replacement, including writes React/Lexical
@@ -433,7 +395,7 @@ export function useConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>
               stopVoiceRecording();
               releaseVoiceCapture(active);
               voiceInsertionRef.current = null;
-              setIsVoiceRecording(false);
+              setPhase("idle");
               return;
             }
             active.rendered = rendered;
@@ -460,167 +422,68 @@ export function useConstructVoiceInput<SubmitArgs extends ReadonlyArray<unknown>
       );
   });
 
-  const toggleVoiceRecording = useStableCallback(() => {
-    if (voiceInsertionRef.current) stopVoiceRecording();
-    else startVoiceRecording();
+  const submitAfterDictation = useStableCallback((submit: (text: string) => void) => {
+    const active = voiceInsertionRef.current;
+    if (!active) {
+      submit(promptRef.current);
+      return;
+    }
+    // Repeated submits while finishing send only once.
+    if (!active.submit) active.submit = submit;
+    stopVoiceRecording();
   });
 
-  const interceptSubmit = (
-    event: { preventDefault: () => void } | undefined,
-    ...args: SubmitArgs
-  ): boolean => {
-    const active = voiceInsertionRef.current;
-    if (!active) return false;
-    event?.preventDefault();
-    if (!active.submitArgs) active.submitArgs = args;
-    stopVoiceRecording();
-    return true;
-  };
-
-  // Alt+Q mirrors Claude's tap/hold behavior: tap once to start, tap again to
-  // stop, or hold the first press and recording stops when the key is released.
-  // Ctrl+T still works where the browser does not keep it (the desktop app).
-  useEffect(() => {
-    if (!supportsVoiceInput) return;
-    // Physical key, since macOS turns Option+Q into "œ". Without Ctrl, so AltGr+Q stays "@".
-    const isAltQ = (event: KeyboardEvent) =>
-      event.code === "KeyQ" && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
-    const isCtrlT = (event: KeyboardEvent) =>
-      event.key.toLowerCase() === "t" && event.ctrlKey && !event.altKey && !event.metaKey;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!isAltQ(event) && !isCtrlT(event)) return;
-      if (
-        !(event.target instanceof Element) ||
-        !event.target.closest('[data-chat-composer-form="true"]')
-      )
-        return;
-      // Key repeats while holding must not type into the composer either.
-      event.preventDefault();
-      if (event.repeat) return;
-      const wasRecording = voiceInsertionRef.current !== null;
-      if (wasRecording) {
-        stopVoiceRecording();
-        voiceShortcutRef.current = { started: false, downAt: performance.now() };
-      } else {
-        startVoiceRecording();
-        voiceShortcutRef.current = { started: true, downAt: performance.now() };
-      }
-    };
-    const onKeyUp = (event: KeyboardEvent) => {
-      // Releasing either key of a held Alt+Q ends the hold.
-      const altQ = event.code === "KeyQ" || event.key === "Alt";
-      if (!altQ && (event.key.toLowerCase() !== "t" || !event.ctrlKey)) return;
-      const shortcut = voiceShortcutRef.current;
-      voiceShortcutRef.current = null;
-      if (shortcut?.started && performance.now() - shortcut.downAt >= 400) stopVoiceRecording();
-    };
-    document.addEventListener("keydown", onKeyDown, true);
-    document.addEventListener("keyup", onKeyUp, true);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown, true);
-      document.removeEventListener("keyup", onKeyUp, true);
-    };
-  }, [startVoiceRecording, stopVoiceRecording, supportsVoiceInput]);
-
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- ends the server session and microphone when the draft, question or destination changes
   useEffect(() => {
     const active = voiceInsertionRef.current;
     if (active && voiceTargetKey !== active.targetKey) {
       stopVoiceRecording();
       releaseVoiceCapture(active);
       voiceInsertionRef.current = null;
-      setIsVoiceRecording(false);
+      setPhase("idle");
       setVoiceLevel(0);
     }
   }, [voiceTargetKey, stopVoiceRecording]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- releases the microphone and the server session on unmount
   useEffect(
     () => () => {
       const active = voiceInsertionRef.current;
       if (active) {
         releaseVoiceCapture(active);
-        void runStopVoiceInput({ environmentId, sessionId: active.sessionId });
+        void runStopVoiceInput({
+          environmentId: active.environmentId,
+          sessionId: active.sessionId,
+        });
       }
     },
-    [environmentId, runStopVoiceInput],
+    [runStopVoiceInput],
   );
 
-  // Wait for the final transcript to reach the controlled draft and parent send callback.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- sends only after the final transcript has committed to the controlled draft
   useEffect(() => {
     if (!voiceSubmission || sentVoiceSubmissionRef.current === voiceSubmission) return;
     sentVoiceSubmissionRef.current = voiceSubmission;
     if (voiceSubmission.targetKey !== voiceTargetKey || voiceInsertionRef.current) return;
-    getSubmitComposer()(undefined, ...voiceSubmission.args);
-  }, [getSubmitComposer, voiceSubmission, voiceTargetKey]);
+    voiceSubmission.submit(promptRef.current);
+  }, [promptRef, voiceSubmission, voiceTargetKey]);
 
-  const voiceInputControl =
-    supportsVoiceInput && !isComposerApprovalState && !isChoiceOnlyPendingQuestion ? (
-      <>
-        {isVoiceRecording ? (
-          <span role="status" className="max-w-40 text-xs text-muted-foreground">
-            {voiceStatus}
-          </span>
-        ) : null}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                className={cn(
-                  "relative flex h-9 w-9 items-center justify-center rounded-full transition-[color,background-color,box-shadow,transform] duration-75 sm:h-8 sm:w-8",
-                  isVoiceRecording && voiceLive
-                    ? "bg-destructive text-white hover:bg-destructive/90"
-                    : "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-                )}
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={toggleVoiceRecording}
-                style={
-                  isVoiceRecording && voiceLive
-                    ? {
-                        transform: `scale(${1 + voiceLevel * 0.12})`,
-                        boxShadow: `0 0 0 ${2 + voiceLevel * 7}px rgb(239 68 68 / ${0.2 + voiceLevel * 0.45})`,
-                      }
-                    : undefined
-                }
-                data-voice-level={isVoiceRecording ? voiceLevel.toFixed(3) : undefined}
-                data-voice-live={isVoiceRecording ? String(voiceLive) : undefined}
-                disabled={!isVoiceRecording && voiceInputDisabled}
-                aria-pressed={isVoiceRecording}
-                aria-label={isVoiceRecording ? "Stop voice input" : "Start voice input"}
-              />
-            }
-          >
-            {isVoiceRecording && voiceLive ? (
-              <SquareIcon className="size-3.5" fill="currentColor" aria-hidden="true" />
-            ) : (
-              <MicIcon className="size-4" aria-hidden="true" />
-            )}
-            {/* Starting or finishing: a spinning arc on the edge instead of the recording look. */}
-            {isVoiceRecording && !voiceLive ? (
-              <span
-                data-voice-pending
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-0 animate-spin rounded-full border-2 border-warning/25 border-t-warning"
-              />
-            ) : null}
-          </TooltipTrigger>
-          <TooltipPopup side="top">
-            {`${isVoiceRecording ? "Stop voice input" : "Voice input"} (Alt+Q) — ${voiceSourceHint}`}
-          </TooltipPopup>
-        </Tooltip>
-      </>
-    ) : null;
+  const start = useStableCallback(async () => startVoiceRecording());
+  const stop = useStableCallback(async () => stopVoiceRecording());
 
+  if (!environmentId) return null;
   return {
-    footerControl: activePendingUserInput ? null : voiceInputControl,
-    questionControl:
-      activePendingUserInput && voiceInputControl ? (
-        <div
-          data-question-voice-input
-          className="flex items-center justify-end gap-2 px-3 pb-2 sm:px-4"
-        >
-          {voiceInputControl}
-        </div>
-      ) : null,
-    interceptSubmit,
+    available: supportsVoiceInput,
+    state: claudeVoiceInputState(phase),
+    level: voiceLevel,
+    blocksSubmission: phase !== "idle",
+    transcriptionEnvironmentId: environmentId,
+    transcriptionEnvironmentLabel: serverConfig
+      ? `Claude via ${serverConfig.environment.label}`
+      : null,
+    start,
+    stop,
+    cancel: cancelVoiceRecording,
+    submitAfterDictation,
   };
 }

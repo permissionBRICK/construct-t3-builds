@@ -77,7 +77,6 @@ python3 scripts/publisher.py plan --channel nightly --work work-nightly
 ```
 
 The browser-driven checks (`test/*.browser.test.mjs`: the update popup, the
-question panels and answer callbacks with mocked audio and transcription, the
 microphone capture shim, the key vault banner with its inline Desktop approval,
 displayed reports and the notes held back for the Companion, through a stubbed Companion
 bridge) are manual and not part of the build. Run one for an inventory with
@@ -85,8 +84,10 @@ bridge) are manual and not part of the build. Run one for an inventory with
 dependencies, `T3_TEST_TOOLS` at a package directory providing esbuild and
 Playwright, and `T3_TEST_CHANNEL=release|nightly`, for example
 `node test/t3-update-notification.browser.test.mjs`. Set `T3_TEST_CHROMIUM` to use
-an existing Chromium executable. The build itself verifies the patch application
-and runs the overlays' unit suites (`vp test run`) only.
+an existing Chromium executable. The Claude voice session behind T3's composer
+controls has an overlay browser test instead: in the patched checkout, run
+`vp test run --project browser src/voice` from `apps/web`. The build itself verifies
+the patch application and runs the overlays' unit suites (`vp test run`) only.
 
 After a build, `node test/t3-wsl-runtime.test.mjs` extracts the WSL runtime from the
 installer, runs upstream's archive smoke test on it, installs it with upstream's WSL
