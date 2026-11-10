@@ -25,7 +25,7 @@ source_dir="$(dirname "$(dirname "$(dirname "$(dirname "$(readlink -f "$work/t3"
 # (test/*.browser.test.mjs) are manual, per README: they need Chromium and a fresh
 # upstream can break their harness independently of the patch.
 (cd "$source_dir/apps/web" && "$source_dir/node_modules/.bin/vp" test run --project unit src/voice src/state/constructSessionRenewal.logic.test.ts)
-(cd "$source_dir/apps/server" && "$source_dir/node_modules/.bin/vp" test run src/voiceInput.test.ts src/environment/ServerEnvironment.test.ts src/constructSessionRenewal.test.ts src/constructAutoApproval.test.ts)
+(cd "$source_dir/apps/server" && "$source_dir/node_modules/.bin/vp" test run src/voiceInput.test.ts src/environment/ServerEnvironment.test.ts src/constructSessionRenewal.test.ts src/constructAutoApproval.test.ts src/constructProjectsRoot.test.ts)
 (cd "$source_dir/packages/client-runtime" && "$source_dir/node_modules/.bin/vp" test run src/connection/constructSessionRenewal.test.ts)
 node "$publisher/scripts/package-linux.mjs" "$source_dir" "$work/linux-runtime" "$(command -v node)"
 # The distributed runtime uses the exact Node executable that built its native modules.

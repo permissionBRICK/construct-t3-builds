@@ -241,6 +241,14 @@ through re-indentation) and the list of `conflicts`.
   `constructOpenCodeMonitor.ts`). The entry bundle is marked, so the runtime patchers
   in `extension/vm/` report it compatible and leave it unchanged. There is no Claude
   usage-limit park; upstream's "Auto-resume limited threads" setting replaces it.
+- **New-project folder** (`constructProjectsRoot.ts`): on a Construct VM, "New project"
+  creates its folder in the VM's `WORKSPACE_ROOT` from `/etc/construct/config.env`
+  (`/root/repos` by default) instead of upstream's `~/.t3/projects`, so new projects sit
+  beside the checked-out repos. Clients show that root as the server's `newProjectsRoot`,
+  and link-started clones that use it land there too. The server reads the file once at
+  startup. Only a server using the default T3 home (`~/.t3`) applies it. Test and
+  isolated servers with their own base directory, and servers without Construct's
+  config (the Desktop app's local and WSL backends), keep upstream's folder.
 
 ## Local build cache and Windows handoff
 

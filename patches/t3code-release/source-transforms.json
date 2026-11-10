@@ -77,6 +77,8 @@
     "packages/provider-opencode/src/server/constructOpenCodeMonitor.test.ts",
     "apps/server/src/constructAutoApproval.ts",
     "apps/server/src/constructAutoApproval.test.ts",
+    "apps/server/src/constructProjectsRoot.ts",
+    "apps/server/src/constructProjectsRoot.test.ts",
     "apps/web/src/voice/claudeVoiceDestination.ts",
     "apps/web/src/voice/claudeVoiceDestination.test.ts",
     "apps/web/src/voice/useClaudeVoiceDestination.tsx",
@@ -1110,6 +1112,15 @@
       "path": "apps/server/src/orchestration-v2/ProviderSessionManager.ts",
       "after": "yield* publishToSubscribers(entry.eventSubscribers, { type: \"event\", event });",
       "insert": "                  yield* autoApproveConstructRequest(event, entry.runtime).pipe(Effect.forkIn(entry.scope));\n"
+    },
+    {
+      "path": "apps/server/src/project/ManagedProjectFolders.ts",
+      "import": "import { constructNamedProjectsRoot } from \"../constructProjectsRoot.ts\";\n"
+    },
+    {
+      "path": "apps/server/src/project/ManagedProjectFolders.ts",
+      "find": "const namedProjectsRoot =",
+      "replace": "const namedProjectsRoot = constructNamedProjectsRoot(config.baseDir) ??"
     },
     {
       "path": "apps/web/src/speech/useEnvironmentSpeechInput.ts",
