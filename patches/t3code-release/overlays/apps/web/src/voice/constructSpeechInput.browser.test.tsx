@@ -1,7 +1,10 @@
 // T3's own composer controls (microphone button, recording pill, dictation shortcut) drive
 // the Claude session through Construct's speech-input wrapper. Only the voiceInput RPCs,
-// the microphone and the stores are faked; the composer is a plain textarea.
+// T3's recorder and speech requests, the microphone and the stores are faked; the composer
+// is a plain textarea.
+import { CLAUDE_SPEECH_MODEL_ID } from "@t3tools/contracts";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";
 import { useRef, useState } from "react";
 import { expect, it, vi } from "vite-plus/test";
@@ -36,27 +39,63 @@ const rpc = vi.hoisted(() => ({
   audio: () => {},
   capturing: false,
   toasts: [] as unknown[],
+  modelId: "",
+  modelSelections: [] as string[],
+  t3Starts: 0,
 }));
 
-vi.mock("../speech/useEnvironmentSpeechInput", () => ({
-  useEnvironmentSpeechInput: () => ({
-    available: false,
-    status: null,
-    transcriptionEnvironmentId: null,
-    transcriptionEnvironmentLabel: null,
-    setup: { open: false },
-    state: { phase: "idle", error: null, errorAction: null },
-    preview: null,
-    level: 0,
-    preparing: false,
-    blocksSubmission: false,
-    freezesEditor: true,
-    start: async () => {},
-    submitAfterDictation: () => {},
-    stop: async () => {},
-    cancel: () => {},
-    skipPostProcessing: () => {},
+// T3's recorder offers itself for an environment destination, as it does for a supported one.
+vi.mock("../speech/useEnvironmentSpeechInput", async () => {
+  const { useAudioChoice } = await import("../speech/voiceConsent");
+  return {
+    useVoiceTranscriptionDestination: () => ({ prepared: { environmentId: "vm" } }),
+    useEnvironmentSpeechInput: () => {
+      const choice = useAudioChoice();
+      return {
+        available: choice !== null && choice !== "off" && choice.destination.kind === "environment",
+        status: null,
+        transcriptionEnvironmentId: null,
+        transcriptionEnvironmentLabel: null,
+        setup: { open: false },
+        state: { phase: "idle", error: null, errorAction: null },
+        preview: null,
+        level: 0,
+        preparing: false,
+        blocksSubmission: false,
+        freezesEditor: true,
+        start: async () => {
+          rpc.t3Starts += 1;
+        },
+        submitAfterDictation: () => {},
+        stop: async () => {},
+        cancel: () => {},
+        skipPostProcessing: () => {},
+      };
+    },
+  };
+});
+vi.mock("@t3tools/client-runtime/voice-input", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@t3tools/client-runtime/voice-input")>()),
+  getEnvironmentSpeechStatus: () => ({ request: "status" }),
+  selectEnvironmentSpeechModel: (_connection: unknown, modelId: string) => ({
+    request: "select",
+    modelId,
   }),
+}));
+vi.mock("../speech/runEnvironmentSpeech", () => ({
+  runEnvironmentSpeech: async (
+    input: { request: "status" } | { request: "select"; modelId: string },
+  ) => {
+    if (input.request === "status") return { supported: true, modelId: rpc.modelId };
+    rpc.modelSelections.push(input.modelId);
+    rpc.modelId = input.modelId;
+    return { models: [] };
+  },
+}));
+vi.mock("../state/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../state/session")>()),
+  usePreparedConnection: (environmentId: string | null) =>
+    environmentId === null ? Option.none() : Option.some({ environmentId }),
 }));
 vi.mock("../state/entities", () => ({
   useServerConfigs: () =>
@@ -200,20 +239,27 @@ function Composer() {
   );
 }
 
-/** A fresh device and fake server for one test; the stored voice choice goes with it. */
-function freshDevice(capabilities: Record<string, boolean> = {}) {
+/**
+ * A fresh device and fake server for one test; the stored voice choice goes with it. The
+ * server lists Claude as a transcription model and uses it, unless the test says otherwise.
+ */
+function freshDevice(capabilities: Record<string, boolean> = {}, modelId = CLAUDE_SPEECH_MODEL_ID) {
   window.localStorage.clear();
   Object.assign(rpc, {
     capabilities: {
       voiceInput: true,
       voiceInputClientAudio: true,
       voiceInputDefault: true,
+      voiceInputSpeechModel: true,
       ...capabilities,
     },
     starts: [],
     stops: 0,
     holdFinal: false,
     toasts: [],
+    modelId,
+    modelSelections: [],
+    t3Starts: 0,
   });
   sends.length = 0;
   // performance.now() measures how long the shortcut is held; tests advance it.
@@ -253,14 +299,14 @@ async function startLive() {
   await phase("recording");
 }
 
-it("chooses Claude on a connected Construct VM once, and never over another choice", async () => {
+const storedDestination = () => JSON.parse(window.localStorage.getItem(AUDIO_KEY) ?? "null");
+
+it("chooses a connected Construct VM once, and never over another choice", async () => {
   using _device = freshDevice();
   await using screen = await render(<Composer />);
-  await expect
-    .poll(() => JSON.parse(window.localStorage.getItem(AUDIO_KEY) ?? "null"))
-    .toMatchObject({
-      destination: { kind: "claude-code", environmentId: "vm" },
-    });
+  await expect.poll(storedDestination).toMatchObject({
+    destination: { kind: "environment", environmentId: "vm" },
+  });
   await expect.element(page.getByRole("button", { name: "Start voice input" })).toBeVisible();
   chooseAudioDestination(null);
   await screen.rerender(<Composer />);
@@ -268,6 +314,38 @@ it("chooses Claude on a connected Construct VM once, and never over another choi
     .element(page.getByRole("button", { name: "Start voice input" }))
     .not.toBeInTheDocument();
   expect(window.localStorage.getItem(AUDIO_KEY)).toBe('"off"');
+});
+
+it("chooses `claude-code` on a VM that predates the Claude model, and streams without a model check", async () => {
+  using _device = freshDevice({ voiceInputSpeechModel: false }, "local/whisper");
+  await using _screen = await render(<Composer />);
+  await expect.poll(storedDestination).toMatchObject({
+    destination: { kind: "claude-code", environmentId: "vm" },
+  });
+  placeCursor(11);
+  await startLive();
+  rpc.emit({ type: "transcript", text: "spoken" });
+  await expect.poll(draft).toBe("hello world spoken");
+  expect(rpc.t3Starts).toBe(0);
+});
+
+it("moves a saved `claude-code` choice to the VM and makes Claude its model", async () => {
+  using _device = freshDevice({}, "local/whisper");
+  chooseAudioDestination({ kind: "claude-code", environmentId: "vm" as never });
+  await using _screen = await render(<Composer />);
+  await expect.poll(storedDestination).toMatchObject({
+    destination: { kind: "environment", environmentId: "vm" },
+  });
+  expect(rpc.modelSelections).toEqual([CLAUDE_SPEECH_MODEL_ID]);
+});
+
+it("records with T3's own flow while the VM uses another model", async () => {
+  using _device = freshDevice({}, "local/whisper");
+  await using _screen = await render(<Composer />);
+  await page.getByRole("button", { name: "Start voice input" }).click();
+  await expect.poll(() => rpc.t3Starts).toBe(1);
+  expect(rpc.starts).toEqual([]);
+  expect(page.getByLabelText("Composer").element().hasAttribute("disabled")).toBe(true);
 });
 
 it("leaves a device without a Construct VM undecided", async () => {

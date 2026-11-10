@@ -37,9 +37,10 @@ ok("source transforms: voice RPC, live cursor-safe insertion, Claude voice desti
 ok("source transforms: stream PCM amplitude into the level of T3's recording controls",
   /readInt16LE/.test(sourceRecipe) && /Schema\.Literal\(\\?"level\\?"\)/.test(sourceRecipe) &&
   /setVoiceLevel\(event\.value\)/.test(sourceRecipe) && /level: voiceLevel/.test(sourceRecipe));
-// Voice input is one more destination in T3's own voice picker. Upstream's ChatComposer
-// changes almost daily, so it only imports its speech input from Construct's wrapper and
-// lends that wrapper its draft; T3's button, pill, shortcut and submit drive the session.
+// Claude is one of T3's own transcription models on Construct servers, so stock clients can
+// use it. Upstream's ChatComposer changes almost daily, so it only imports its speech input
+// from Construct's wrapper and lends that wrapper its draft; T3's button, pill, shortcut and
+// submit drive the live session while the chosen environment's model is Claude.
 for (const channel of ["release", "nightly"]) {
   const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, "patches", `t3code-${channel}`, "source-transforms.json"), "utf8"));
   const composer = manifest.transforms.filter((t) => t.path === "apps/web/src/components/chat/ChatComposer.tsx");
@@ -56,10 +57,23 @@ for (const channel of ["release", "nightly"]) {
     composer.some((t) => t.replace === 'import { useEnvironmentSpeechInput } from "../../voice/constructSpeechInput";') &&
     composer.some((t) => t.after === "const speechInput = useEnvironmentSpeechInput({" &&
       /construct: \{[^]*promptRef,[^]*applyPromptReplacement: applyPromptReplacementStable,/.test(t.insert)));
-  ok(`voice input (${channel}): Claude replaces T3's recorder only while it is the chosen destination`,
-    /const claude = useConstructVoiceInput\(/.test(wrapper) && /if \(!claude\) return t3;/.test(wrapper) &&
+  ok(`voice input (${channel}): the live Claude session replaces T3's recorder only while the environment's model is Claude`,
+    /const claude = useConstructVoiceInput\(/.test(wrapper) && /if \(!claude \|\| !route\) return t3;/.test(wrapper) &&
+    /usesClaudeSpeechModel\(status\) \? claude\.start\(\) : t3\.start\(\)/.test(wrapper) &&
     /freezesEditor: false/.test(wrapper) && /preview: null/.test(wrapper) &&
     speech.length === 1 && /grant\?\.destination\.kind !== "claude-code" &&/.test(speech[0].insert));
+  const serverRoot = path.join(repoRoot, "patches", `t3code-${channel}`, "overlays", "apps", "server", "src");
+  const claudeSpeech = fs.readFileSync(path.join(serverRoot, "speech", "constructClaudeSpeech.ts"), "utf8");
+  ok(`voice input (${channel}): the server lists Claude among T3's transcription models and moves saved choices to it`,
+    manifest.overlays.includes("apps/server/src/speech/constructClaudeSpeech.ts") &&
+    manifest.transforms.some((t) => t.path === "apps/server/src/server.ts" &&
+      t.replace === "withConstructClaudeSpeech(SpeechService.layer).pipe(") &&
+    manifest.transforms.some((t) => t.path === "apps/server/src/environment/ServerEnvironment.ts" &&
+      /voiceInputSpeechModel: constructVoiceInputEnabled\(/.test(t.insert || "")) &&
+    /claudeSpeechModel\(active, engine\.language\(\)\)/.test(claudeSpeech) &&
+    /transcribeWithClaude\(pcmBytes\)/.test(claudeSpeech) && /streamWithClaude/.test(claudeSpeech) &&
+    /selectEnvironmentSpeechModel\(connection, CLAUDE_SPEECH_MODEL_ID\)/.test(destination) &&
+    /chooseAudioDestination\(\{ kind: "environment", environmentId \}\)/.test(destination));
   ok(`voice input (${channel}): Voice settings offer Claude and a Construct VM is chosen once by default`,
     panel.some((t) => /useClaudeVoicePicker\(\)/.test(t.insert || "")) &&
     panel.some((t) => /constructClaudeVoice\.options/.test(t.insert || "")) &&
