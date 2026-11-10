@@ -81,7 +81,9 @@
     "apps/web/src/voice/claudeVoiceDestination.test.ts",
     "apps/web/src/voice/useClaudeVoiceDestination.tsx",
     "apps/web/src/voice/constructSpeechInput.ts",
-    "apps/web/src/voice/constructSpeechInput.browser.test.tsx"
+    "apps/web/src/voice/constructSpeechInput.browser.test.tsx",
+    "apps/web/src/constructRemoteOpen.ts",
+    "apps/web/src/constructRemoteOpen.test.ts"
   ],
   "transforms": [
     {
@@ -1152,6 +1154,15 @@
       "scope": "const LATE_DEFAULT_KEYBINDINGS",
       "after": "}> = [",
       "insert": "  {\n    id: \"construct:composer.dictation:alt+q\",\n    alongside: { key: \"mod+shift+d\", command: \"composer.dictation\", when: \"!terminalFocus\" },\n    rule: { key: \"alt+q\", command: \"composer.dictation\", when: \"!terminalFocus\" },\n  },\n"
+    },
+    {
+      "path": "apps/web/src/remoteOpen.ts",
+      "import": "import { constructSshTarget } from \"./constructRemoteOpen\";\n"
+    },
+    {
+      "path": "apps/web/src/remoteOpen.ts",
+      "find": "profile !== null && profile._tag === \"SshConnectionProfile\" ? profile.target : null,",
+      "replace": "profile !== null && profile._tag === \"SshConnectionProfile\" ? profile.target : constructSshTarget(get, environmentId, entry),"
     }
   ]
 }
