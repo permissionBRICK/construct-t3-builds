@@ -903,8 +903,12 @@
     },
     {
       "path": "apps/server/src/orchestration-v2/runtimeLayer.ts",
+      "import": "import { constructAutoApprovalWorkerLive } from \"../constructAutoApproval.ts\";\n"
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/runtimeLayer.ts",
       "after": "layerProduction = Layer.mergeAll(",
-      "insert": "  constructCapacityRetryWorkerLive.pipe(\n    Layer.provide(Layer.mergeAll(layerThreadManagementProvided, layerEventSink)),\n  ),\n"
+      "insert": "  Layer.mergeAll(constructCapacityRetryWorkerLive, constructAutoApprovalWorkerLive).pipe(\n    Layer.provide(Layer.mergeAll(layerThreadManagementProvided, layerEventSink)),\n  ),\n"
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
@@ -1103,15 +1107,6 @@
       "before": "</>",
       "scope": "const appHosts",
       "insert": "      <ConstructSessionRenewal />\n"
-    },
-    {
-      "path": "apps/server/src/orchestration-v2/ProviderSessionManager.ts",
-      "import": "import { autoApproveConstructRequest } from \"../constructAutoApproval\";\n"
-    },
-    {
-      "path": "apps/server/src/orchestration-v2/ProviderSessionManager.ts",
-      "after": "yield* publishToSubscribers(entry.eventSubscribers, { type: \"event\", event });",
-      "insert": "                  yield* autoApproveConstructRequest(event, entry.runtime).pipe(Effect.forkIn(entry.scope));\n"
     },
     {
       "path": "apps/server/src/project/ManagedProjectFolders.ts",
