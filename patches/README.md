@@ -328,9 +328,14 @@ through `construct config set t3-auto-approve true`. Missing, unreadable or disa
 configuration leaves upstream behavior in place. The setting is read for each new
 request; changing it needs no T3 restart and does not answer existing requests.
 
-The shared provider-session event handler answers with `accept`, without creating
-session-wide rules, and logs the request ID and kind. The request and response
-remain in the normal event stream. Questions, authentication, runless trust/login
-requests and MCP elicitation forms stay interactive. Provider denials that never
-emit a request are outside this handler. Desktop and linked environments use
-the policy of their executing server, never a client-wide preference.
+A server worker (`constructAutoApprovalWorkerLive`, composed next to the capacity
+retry in `runtimeLayer.ts`) follows stored `runtime-request.updated` events and
+answers each new pending one with the `runtime-request.respond` `accept` command a
+client's Approve button sends, without session-wide rules, and logs the request ID.
+The answer must go through the orchestrator: it records the request as resolved
+before the provider gets it, so every client clears its approval prompt. Answering
+the provider session directly left the thread marked as waiting for approval.
+Questions, authentication, runless trust/login requests and MCP elicitation forms
+stay interactive. Provider denials that never emit a request are outside this
+worker. Desktop and linked environments use the policy of their executing server,
+never a client-wide preference.
