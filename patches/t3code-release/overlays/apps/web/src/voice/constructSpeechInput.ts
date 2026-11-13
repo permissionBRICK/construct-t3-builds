@@ -4,17 +4,12 @@
  * in place of T3's, so its one microphone button, shortcut and send-after-dictation drive both.
  */
 
-import { getEnvironmentSpeechStatus } from "@t3tools/client-runtime/voice-input";
+import { CLAUDE_SPEECH_MODEL_ID } from "@t3tools/contracts";
 
-import { useStableCallback } from "../hooks/useStableCallback";
-import { runEnvironmentSpeech } from "../speech/runEnvironmentSpeech";
-import {
-  useEnvironmentSpeechInput as useT3SpeechInput,
-  useVoiceTranscriptionDestination,
-} from "../speech/useEnvironmentSpeechInput";
+import { useEnvironmentSpeechInput as useT3SpeechInput } from "../speech/useEnvironmentSpeechInput";
 import { useAudioChoice } from "../speech/voiceConsent";
 import { useServerConfigs } from "../state/entities";
-import { claudeVoiceRoute, usesClaudeSpeechModel } from "./claudeVoiceDestination";
+import { claudeVoiceRoute } from "./claudeVoiceDestination";
 import { useClaudeVoiceChoice } from "./useClaudeVoiceDestination";
 import { useConstructVoiceInput, type ConstructComposerAccess } from "./useConstructVoiceInput";
 
@@ -25,7 +20,6 @@ export function useEnvironmentSpeechInput(
 ): SpeechInput {
   useClaudeVoiceChoice();
   const t3 = useT3SpeechInput(input);
-  const { prepared } = useVoiceTranscriptionDestination();
   const serverConfigs = useServerConfigs();
   const route = claudeVoiceRoute(
     useAudioChoice(),
@@ -37,17 +31,13 @@ export function useEnvironmentSpeechInput(
     disabled: input.disabled === true,
     environmentId: route?.environmentId ?? null,
   });
-  // The environment's model can change on any device, so it is read again for each recording.
-  const start = useStableCallback(async () => {
-    if (!claude) return t3.start();
-    if (!route?.checkModel) return claude.start();
-    const status = prepared
-      ? await runEnvironmentSpeech(getEnvironmentSpeechStatus(prepared)).catch(() => null)
-      : null;
-    return usesClaudeSpeechModel(status) ? claude.start() : t3.start();
-  });
-  if (!claude || !route) return t3;
-  if (route.checkModel && claude.state.phase === "idle") return { ...t3, start };
+  // The environment's model is a server setting pushed to every client, so the button knows
+  // where to record without asking. A running recording keeps its route if the model changes.
+  const usesClaude =
+    route !== null &&
+    (!route.checkModel ||
+      serverConfigs.get(route.environmentId)?.settings.speechModelId === CLAUDE_SPEECH_MODEL_ID);
+  if (!claude || (!usesClaude && claude.state.phase === "idle")) return t3;
   return {
     ...t3,
     ...claude,

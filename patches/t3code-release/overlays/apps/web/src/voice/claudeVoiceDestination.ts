@@ -52,7 +52,7 @@ export function usesClaudeSpeechModel(status: EnvironmentSpeechStatus | null): b
 
 /**
  * Where this client's live Claude session may run for the saved choice. An environment
- * destination needs a check of that environment's model before each recording.
+ * destination uses it only while that environment's synced `speechModelId` is Claude.
  */
 export function claudeVoiceRoute(
   choice: AudioChoice,
