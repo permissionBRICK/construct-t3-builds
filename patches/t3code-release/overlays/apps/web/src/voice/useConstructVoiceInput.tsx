@@ -259,19 +259,12 @@ export function useConstructVoiceInput(
     voiceInsertionRef.current = insertion;
     setPhase("preparing");
     setVoiceLevel(0);
-    // Recording only once speech is kept: the transcription stream is open and the
-    // microphone has delivered audio. Until then the controls show it preparing.
-    let streamOpen = false;
+    // Recording once the microphone delivers audio. The sender keeps it until the server's
+    // transcription stream is open, so opening that stream does not hold the controls back.
     let heard = false;
     let live = false;
     const markLive = () => {
-      if (
-        live ||
-        !streamOpen ||
-        !heard ||
-        insertion.stopRequested ||
-        voiceInsertionRef.current !== insertion
-      ) {
+      if (live || !heard || insertion.stopRequested || voiceInsertionRef.current !== insertion) {
         return;
       }
       live = true;
@@ -338,8 +331,6 @@ export function useConstructVoiceInput(
             if (event.type === "listening") {
               listening();
               active.sender?.setReady(true);
-              streamOpen = true;
-              markLive();
               return;
             }
             if (event.type === "stopped") {

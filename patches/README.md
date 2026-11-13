@@ -94,10 +94,12 @@ through re-indentation) and the list of `conflicts`.
   (the stock mobile app) is replayed to Claude's voice service at 4x real time, and T3's
   live `/ws/voice` stream (stock web and desktop clients) shows Claude's text in T3's
   preview. Patched clients instead transcribe live into the draft: while the chosen
-  destination is an environment whose model is Claude (checked when each recording
-  starts), T3's microphone button, recording pill, dictation shortcut and
-  send-after-dictation drive the `useConstructVoiceInput` session; any other model or
-  destination uses T3's recorder unchanged. The composer imports its speech input from
+  destination is an environment whose model is Claude (its `speechModelId` server
+  setting, which every client receives, so the button decides without a request),
+  T3's microphone button, recording pill, dictation shortcut and send-after-dictation
+  drive the `useConstructVoiceInput` session; any other model or destination uses T3's
+  recorder unchanged. The session shows Recording once the microphone delivers audio and
+  holds that audio until the server's transcription stream is open. The composer imports its speech input from
   the `constructSpeechInput` wrapper and lends it the draft, which is its only
   ChatComposer change. T3's other voice fields (pull request comments, previews) use
   T3's own flow with whatever model the environment uses, Claude included.

@@ -58,8 +58,9 @@ for (const channel of ["release", "nightly"]) {
     composer.some((t) => t.after === "const speechInput = useEnvironmentSpeechInput({" &&
       /construct: \{[^]*promptRef,[^]*applyPromptReplacement: applyPromptReplacementStable,/.test(t.insert)));
   ok(`voice input (${channel}): the live Claude session replaces T3's recorder only while the environment's model is Claude`,
-    /const claude = useConstructVoiceInput\(/.test(wrapper) && /if \(!claude \|\| !route\) return t3;/.test(wrapper) &&
-    /usesClaudeSpeechModel\(status\) \? claude\.start\(\) : t3\.start\(\)/.test(wrapper) &&
+    /const claude = useConstructVoiceInput\(/.test(wrapper) &&
+    /settings\.speechModelId === CLAUDE_SPEECH_MODEL_ID/.test(wrapper) &&
+    /if \(!claude \|\| \(!usesClaude && claude\.state\.phase === "idle"\)\) return t3;/.test(wrapper) &&
     /freezesEditor: false/.test(wrapper) && /preview: null/.test(wrapper) &&
     speech.length === 1 && /grant\?\.destination\.kind !== "claude-code" &&/.test(speech[0].insert));
   const serverRoot = path.join(repoRoot, "patches", `t3code-${channel}`, "overlays", "apps", "server", "src");

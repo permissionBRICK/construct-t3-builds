@@ -41,6 +41,8 @@ const rpc = vi.hoisted(() => ({
   toasts: [] as unknown[],
   modelId: "",
   modelSelections: [] as string[],
+  statusPending: null as Promise<void> | null,
+  sentAudioBytes: 0,
   t3Starts: 0,
 }));
 
@@ -86,7 +88,10 @@ vi.mock("../speech/runEnvironmentSpeech", () => ({
   runEnvironmentSpeech: async (
     input: { request: "status" } | { request: "select"; modelId: string },
   ) => {
-    if (input.request === "status") return { supported: true, modelId: rpc.modelId };
+    if (input.request === "status") {
+      await rpc.statusPending;
+      return { supported: true, modelId: rpc.modelId };
+    }
     rpc.modelSelections.push(input.modelId);
     rpc.modelId = input.modelId;
     return { models: [] };
@@ -99,7 +104,15 @@ vi.mock("../state/session", async (importOriginal) => ({
 }));
 vi.mock("../state/entities", () => ({
   useServerConfigs: () =>
-    new Map([["vm", { environment: { label: "dev-vm", capabilities: rpc.capabilities } }]]),
+    new Map([
+      [
+        "vm",
+        {
+          environment: { label: "dev-vm", capabilities: rpc.capabilities },
+          settings: { speechModelId: rpc.modelId },
+        },
+      ],
+    ]),
 }));
 vi.mock("../hooks/useSettings", () => ({
   useClientSettings: (select: (settings: Record<string, unknown>) => unknown) =>
@@ -134,8 +147,10 @@ vi.mock("../state/use-atom-command", () => {
       }
       return AsyncResult.success({ stopped: true });
     },
-    audio: async ({ chunk }: { chunk: Uint8Array }) =>
-      AsyncResult.success({ accepted: true, nextSequence: chunk.length }),
+    audio: async ({ chunk, sequence }: { chunk: Uint8Array; sequence: number }) => {
+      rpc.sentAudioBytes += chunk.length;
+      return AsyncResult.success({ accepted: true, nextSequence: sequence + chunk.length });
+    },
   };
   return { useAtomCommand: (command: { label: keyof typeof commands }) => commands[command.label] };
 });
@@ -259,6 +274,8 @@ function freshDevice(capabilities: Record<string, boolean> = {}, modelId = CLAUD
     toasts: [],
     modelId,
     modelSelections: [],
+    statusPending: null,
+    sentAudioBytes: 0,
     t3Starts: 0,
   });
   sends.length = 0;
@@ -346,6 +363,22 @@ it("records with T3's own flow while the VM uses another model", async () => {
   await expect.poll(() => rpc.t3Starts).toBe(1);
   expect(rpc.starts).toEqual([]);
   expect(page.getByLabelText("Composer").element().hasAttribute("disabled")).toBe(true);
+});
+
+it("records from the click without asking the server for its model, keeping audio until Claude listens", async () => {
+  using _device = freshDevice();
+  rpc.statusPending = new Promise<void>(() => {});
+  await using _screen = await render(<Composer />);
+  placeCursor(11);
+  await page.getByRole("button", { name: "Start voice input" }).click();
+  await phase("preparing");
+  rpc.audio();
+  await phase("recording");
+  expect(rpc.sentAudioBytes).toBe(0);
+  rpc.emit({ type: "listening" });
+  await expect.poll(() => rpc.sentAudioBytes).toBe(3200);
+  rpc.emit({ type: "transcript", text: "spoken" });
+  await expect.poll(draft).toBe("hello world spoken");
 });
 
 it("leaves a device without a Construct VM undecided", async () => {
