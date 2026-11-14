@@ -170,21 +170,34 @@ through re-indentation) and the list of `conflicts`.
   browser test (`vp test run --project browser src/voice`) drives the session through
   T3's real button, pill and shortcut and is run by hand.
 - **Public base URL** (`T3CODE_PUBLIC_BASE_URL` for pairing URLs behind the TLS proxy).
-- **Construct updates** in the Desktop app: update Construct, reprovision a VM that is
-  behind the installed Construct, or update T3 Code alone (`Update-T3Code.ps1 -Mode
-  quick`) when a newer build of this repository is published for the channel. The app
-  reads the same release manifests the VM installs from and compares their
-  `desktopVersion` with its own, so a release counts once its build is published and a
-  rebuild of the same release counts too. **Update T3 Code** updates this app and every
-  Construct VM it is connected to (matched by address or by the link marker's environment
-  id); a stopped VM is left alone, and with none connected nothing is launched. Several
-  VMs run one after another in one console, each in its own PowerShell, because the first
-  run installs the Desktop app and closes it. A reprovision popup resolves the active
-  thread's linked remote to a Construct instance, shows its name, and launches that exact
-  instance, using that VM's provisioning marker and T3 channel. Without an unambiguous
-  match, no reprovision is offered, but the T3 Code update still is. Switching threads
-  replaces the offer; host Construct updates remain available independently of the
-  active thread.
+- **Construct updates** in T3's own update control at the bottom of the sidebar, beside
+  the provider updates: the new version and one click, with no notice of its own (nightly;
+  the release inventory still shows its popup and Providers buttons until it is ported).
+  - *Desktop with the new Construct* (`construct/ConstructAgent.ts`, the one integration
+    module): the device agent's token file (`%LOCALAPPDATA%\Construct\agent\endpoint.json`,
+    `$XDG_DATA_HOME/construct-agent` or `~/.local/share/construct-agent`, or
+    `CONSTRUCT_AGENT_HOME`) names its loopback port and token; the main process keeps the
+    token. `apiFeatures` in the agent's health answer says what it serves (none named: the
+    committed v1 contract); every request names what this build uses. The control shows this
+    device's update (`GET /api/update`), each of the user's VMs whose engine offers a newer
+    payload or a host release (`GET /vms/{vm}/update` through the agent's engine proxy), and
+    a newer T3 Code build; Update posts `POST /api/update/everything` (this PC, the hosts the
+    user administers, the user's VMs, in the background) and the agent's events follow the
+    run until it ends, or show what failed. Pairing links (`t3-pairing`), the panel and a
+    VM's page (`/api/shell/open`) and key vault approvals and entry requests
+    (`/api/vault/...`, decided only for the request the banner shows) go through the agent too.
+  - *Desktop with the old Construct* (no agent answers): the same control runs today's
+    scripts: `Update-Construct.ps1`, a reprovision of the default VM and of every linked VM
+    that is behind (in one console), or `Update-T3Code.ps1 -Mode quick` for this app and
+    every connected VM when a newer build of this repository is published for the channel.
+    The app reads the same release manifests the VM installs from and compares their
+    `desktopVersion` with its own, so a release counts once its build is published and a
+    rebuild of the same release counts too.
+  - *A browser without the Desktop app* (a phone): the T3 server answers
+    `construct.vmUpdate.status` with `construct update status --json` (the engine's answer
+    for this VM) and `construct.vmUpdate.run` with `construct update run --json`, both fixed
+    argument lists without a shell; a missing command or a failure shows nothing. One run at
+    a time; the reprovision restarts the server, which T3 survives.
 - **Auto-link** (`ConstructAutoLink`, Windows Desktop app): every Construct VM of the PC
   that runs T3 and is not yet a remote environment is linked on its own. The main process
   runs `Get-ConstructT3PairingLink.ps1` hidden to mint a link over SSH. A marker in the
