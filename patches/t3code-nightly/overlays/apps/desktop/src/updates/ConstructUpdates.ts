@@ -1854,9 +1854,11 @@ export async function checkConstructAgentUpdates(
   const channel = resolveConstructT3Channel(t3Version);
   const previous = options.previous?.everything?.source === "agent" ? options.previous : null;
   const full = options.fetchJson !== undefined;
+  // The engines are asked on every read, events included: a VM updated elsewhere (or a new
+  // offer) shows at once, not on the next full check.
   const read = await ConstructAgent.readConstructAgentUpdates(agent, {
     check: full,
-    withVms: full || previous === null || previous.everything?.running === true,
+    withVms: true,
     previous: previous?.everything ?? null,
   });
   const t3LatestByChannel = {
@@ -1871,9 +1873,16 @@ export async function checkConstructAgentUpdates(
   const t3Latest = t3LatestByChannel[channel];
   const t3UpdateAvailable = isNewerConstructT3Build(t3Latest, options.appVersion.trim(), channel);
   const joinPath = options.joinPath ?? defaultJoinPath;
-  // The old Construct's state of the same name keeps its link marker and T3 port.
+  // The old Construct's state of the same name keeps its link marker and T3 port; its scripts
+  // folder, where one is left, holds the default VM's (the marker store needs it).
+  const legacyScriptsDir = resolveConstructScriptsDir(
+    options.localAppData,
+    readConstructVmTargetFromRegistry(options.localAppData, options.fs, joinPath),
+    options.fs,
+    joinPath,
+  );
   const instances = ConstructAgent.constructAgentInstances(read.connections, (name) =>
-    readConstructInstanceState(options.localAppData, name, null, options.fs, joinPath),
+    readConstructInstanceState(options.localAppData, name, legacyScriptsDir, options.fs, joinPath),
   );
   const failure = ConstructAgent.constructAgentRunFailure(read.view);
   if (failure !== null) errors.push(failure);
@@ -1881,7 +1890,8 @@ export async function checkConstructAgentUpdates(
     companionInstalled: agent.has("shell-open"),
     repo: "",
     ref: read.view.version,
-    scriptsDir: null,
+    // Only the link markers use it with an agent: nothing launches a script.
+    scriptsDir: legacyScriptsDir,
     vmName: instances[0]?.name ?? "",
     vmHost: instances[0]?.vmHost ?? "",
     instances,

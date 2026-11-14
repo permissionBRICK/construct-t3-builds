@@ -326,6 +326,15 @@ describe("the old Construct's reprovision through the one control", () => {
     expect(offered.construct?.action).toBe("reprovision");
     expect(withConstructReprovisionOffer(state, [])).toBe(state);
     expect(withConstructReprovisionOffer({ ...state, enabled: false }, remotes)?.construct?.action).toBeNull();
+    // A linked VM on a channel with a newer T3 Code build (its row's button is gone): the control offers it.
+    const nightly = {
+      ...info,
+      instances: [vm("agent-vm", 5178, INSTALLED), { ...vm("dev", 5179, INSTALLED), channel: "nightly" as const }],
+      t3LatestByChannel: { latest: null, nightly: "0.0.40-nightly.20261113.1-construct.abcdef12" },
+    };
+    const t3 = withConstructReprovisionOffer({ ...state, construct: nightly }, remotes)!;
+    expect(t3.construct?.action).toBe("update-t3");
+    expect(t3.status).toBe("available");
     const running = { ...state, construct: { ...info, runningAction: "update-t3" as const } };
     expect(withConstructReprovisionOffer(running, remotes)).toBe(running);
   });

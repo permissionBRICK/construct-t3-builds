@@ -277,6 +277,16 @@ describe("the update control's state", () => {
     assert.isNull(done.runningAction);
   });
 
+  it("re-asks the engines on an event-driven read: a VM updated elsewhere drops its offer", async () => {
+    agent.connections = [connection("dev")];
+    agent.vmUpdates.set("eng1/dev", { status: 200, body: { newerPayload: true, availableCommit: "abcdef1234", appliedCommit: null, hostUpdate: null } });
+    const offered = await check(null);
+    assert.equal(offered.action, "update-everything");
+    agent.vmUpdates.set("eng1/dev", { status: 200, body: { newerPayload: false, availableCommit: null, appliedCommit: "abcdef1234", hostUpdate: null } });
+    const local = await check(offered, false);
+    assert.isNull(local.action);
+  });
+
   it("falls back to the scripts when no agent answers", async () => {
     const info = await checkConstructUpdates({
       appVersion: "0.1.10-nightly.20261113.4656-construct.abcdef12",
@@ -338,6 +348,14 @@ describe("pairing link and panel", () => {
     const link = await mintConstructAgentPairingLink(live, "dev");
     assert.deepEqual(link, { ok: true, pairUrl: "https://vm.example:5178/pair#token=one-time", scopes: "administrative" });
     assert.isTrue(agent.seen.some((seen) => seen.url === "/api/connections/eng1/dev/t3-pairing"));
+  });
+
+  it("never pairs or opens another engine's VM of the same name", async () => {
+    agent.connections = [connection("dev"), { ...connection("dev"), engine: "eng2" }];
+    const live = await found();
+    assert.isFalse((await mintConstructAgentPairingLink(live, "dev")).ok);
+    assert.isFalse(await openConstructAgentShell(live, "dev"));
+    assert.isFalse(agent.seen.some((seen) => seen.method === "POST"));
   });
 
   it("opens the panel or the VM's page in the agent's window", async () => {

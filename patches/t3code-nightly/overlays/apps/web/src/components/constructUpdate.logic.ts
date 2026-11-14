@@ -184,8 +184,9 @@ export function constructReprovisionTargets(
   return [...names];
 }
 
-/** The old Construct's state with a reprovision offer for linked VMs that are behind while
- *  the default VM is current (the Providers rows used to offer those one by one). Pure. */
+/** The old Construct's state with an offer for linked VMs that are behind while the default VM
+ *  is current (the Providers rows used to offer those one by one): a reprovision, else a T3
+ *  Code update of the connected VMs. Pure. */
 export function withConstructReprovisionOffer(
   state: DesktopUpdateState | null,
   remotes: ReadonlyArray<ConstructLinkedRemote>,
@@ -193,14 +194,18 @@ export function withConstructReprovisionOffer(
   const info = state?.construct;
   if (state === null || info === undefined || info.everything !== undefined || !state.enabled) return state;
   if (info.action !== null || info.runningAction !== null || info.scriptsDir === null) return state;
-  if (constructReprovisionTargets(info, remotes).length === 0) return state;
+  const reprovision = constructReprovisionTargets(info, remotes).length > 0;
+  const t3Behind = planConstructProviderRows({ remotes, info, t3LatestByChannel: info.t3LatestByChannel }).some(
+    (row) => row.linked && row.t3UpdateAvailable && row.instanceName !== null,
+  );
+  if (!reprovision && !t3Behind) return state;
   return {
     ...state,
     status: "available",
-    availableVersion: "Construct reprovision",
+    availableVersion: reprovision ? "Construct reprovision" : "T3 Code",
     message: null,
     errorContext: null,
-    construct: { ...info, action: "reprovision" },
+    construct: { ...info, action: reprovision ? "reprovision" : "update-t3" },
   };
 }
 

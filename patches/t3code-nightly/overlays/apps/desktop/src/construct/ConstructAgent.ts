@@ -537,10 +537,11 @@ export function constructAgentInstances(
   });
 }
 
-/** The connection an instance name (its alias) stands for, re-read from the agent. */
+/** The connection an instance name (its alias) stands for, re-read from the agent. A name
+ *  two engines' VMs share stands for neither: never the other engine's VM. */
 async function connectionByName(agent: ConstructAgent, name: string): Promise<ConstructAgentConnection | null> {
-  const listed = await listConstructAgentConnections(agent);
-  return listed?.find((connection) => connection.alias === name) ?? null;
+  const matches = (await listConstructAgentConnections(agent))?.filter((connection) => connection.alias === name) ?? [];
+  return matches.length === 1 ? matches[0]! : null;
 }
 
 // ── Pairing link, panel, a VM's page ──────────────────────────────────────
