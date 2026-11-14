@@ -7,14 +7,15 @@ import type {
 } from "@t3tools/contracts";
 
 import {
+  constructReprovisionTargets,
+  constructVmUpdateState,
   getConstructLaunchOutcome,
-  getConstructThreadUpdateInfo,
   getConstructUpdateButtonLabel,
   getConstructUpdateDetail,
   getConstructUpdateHeadline,
-  getConstructUpdateNotificationKey,
   getConstructUpdateTooltip,
   getConstructVersionLabel,
+  withConstructReprovisionOffer,
 } from "./constructUpdate.logic";
 import { getDesktopUpdateButtonTooltip } from "./desktopUpdate.logic";
 
@@ -73,7 +74,6 @@ describe("construct update presentation", () => {
     expect(getConstructUpdateDetail(current)).toBe("Up to date · T3 Code 0.0.38 (newest on its channel)");
     expect(getConstructUpdateTooltip(current)).toBe("Construct and T3 Code are up to date");
     expect(getConstructUpdateButtonLabel(current)).toBe("Check for Updates");
-    expect(getConstructUpdateNotificationKey(current)).toBeNull();
   });
 
   it("offers the published Construct release", () => {
@@ -91,13 +91,7 @@ describe("construct update presentation", () => {
       "Construct update available — click to update Construct on this PC.",
     );
     expect(getConstructUpdateButtonLabel(info)).toBe("Update Construct");
-    expect(getConstructUpdateNotificationKey(info)).toBe(
-      `construct:update-construct:${INSTALLED}:${INSTALLED}:-`,
-    );
     expect(getConstructUpdateDetail({ ...info, installedCommit: null })).toBe(getConstructUpdateDetail(info));
-    expect(getConstructUpdateNotificationKey({ ...info, latestCommit: "e".repeat(40) })).toBe(
-      getConstructUpdateNotificationKey(info),
-    );
   });
 
   it("explains a pending reprovision and a T3 Code update", () => {
@@ -127,9 +121,6 @@ describe("construct update presentation", () => {
     expect(getConstructUpdateTooltip(t3)).toBe(
       "T3 Code update available — click to update T3 Code in this app and on the connected Construct VMs.",
     );
-    expect(getConstructUpdateNotificationKey(t3)).toBe(
-      `construct:update-t3:${INSTALLED}:${INSTALLED}:0.0.39`,
-    );
     expect(getConstructUpdateHeadline({ ...t3, runningAction: "update-t3" })).toBe(
       "T3 Code update running",
     );
@@ -155,7 +146,6 @@ describe("construct update presentation", () => {
     expect(getConstructUpdateHeadline(running)).toBe("Construct reprovision running");
     expect(getConstructUpdateTooltip(running)).toBe("Construct reprovision running…");
     expect(getConstructUpdateButtonLabel(running)).toBe("Running…");
-    expect(getConstructUpdateNotificationKey(running)).toBeNull();
 
     const failed: ConstructUpdateInfo = {
       ...current,
@@ -231,104 +221,121 @@ describe("construct update presentation", () => {
   });
 });
 
-describe("thread VM update offers", () => {
-  const vm = (
-    name: string,
-    port: number,
-    provisionedCommit = PROVISIONED,
-  ): ConstructInstanceInfo => ({
+describe("the one Update of the new Construct", () => {
+  const agentView = {
+    source: "agent" as const,
+    version: "1.4.0",
+    available: "1.5.0",
+    vms: [{ name: "dev", version: "abcdef1", host: false }],
+    running: false,
+    parts: [],
+  };
+  const agent: ConstructUpdateInfo = {
+    ...current,
+    scriptsDir: null,
+    ref: "1.4.0",
+    action: "update-everything",
+    everything: agentView,
+  };
+
+  it("names the new version and says what Update does", () => {
+    expect(getConstructUpdateHeadline(agent)).toBe("Construct 1.5.0 available");
+    expect(getConstructUpdateButtonLabel(agent)).toBe("Update");
+    expect(getConstructUpdateDetail(agent)).toContain("this PC, the hosts you administer and your VMs");
+    expect(getConstructUpdateTooltip(agent)).toBe(
+      "Construct 1.5.0 available — click to update everything of yours in the background.",
+    );
+    const vmOnly = { ...agent, everything: { ...agentView, available: null } };
+    expect(getConstructUpdateHeadline(vmOnly)).toBe("Construct abcdef1 available");
+  });
+
+  it("shows a running run's part, a failure, and nothing when current", () => {
+    const running = {
+      ...agent,
+      runningAction: "update-everything" as const,
+      everything: {
+        ...agentView,
+        running: true,
+        parts: [{ part: "engine" as const, name: "home-host", state: "running" as const, detail: "Updating to 2.0.0" }],
+      },
+    };
+    expect(getConstructUpdateHeadline(running)).toBe("Construct update running");
+    expect(getConstructUpdateDetail(running)).toBe("Updating in the background: home-host (Updating to 2.0.0).");
+    const failed = { ...agent, action: null, error: "home-host: the host update failed" };
+    expect(getConstructUpdateDetail(failed)).toBe("home-host: the host update failed");
+    const done = { ...agent, action: null, everything: { ...agentView, available: null, vms: [] } };
+    expect(getConstructUpdateDetail(done)).toBe("Up to date · Construct 1.4.0 · T3 Code 0.0.38");
+  });
+
+  it("is the VM's own update in a browser", () => {
+    expect(constructVmUpdateState(null, "0.1.10")).toBeNull();
+    expect(
+      constructVmUpdateState({ available: false, running: false, version: null, host: false, appliedCommit: "0123456" }, "0.1.10"),
+    ).toBeNull();
+    const offer = constructVmUpdateState(
+      { available: true, running: false, version: "2.1.0", host: true, appliedCommit: "0123456" },
+      "0.1.10",
+    )!;
+    expect(offer.status).toBe("available");
+    expect(offer.construct?.action).toBe("update-everything");
+    expect(offer.construct?.everything?.source).toBe("vm");
+    expect(getDesktopUpdateButtonTooltip(offer)).toBe(
+      "Construct 2.1.0 available — click to update everything of yours in the background.",
+    );
+    expect(getConstructUpdateDetail(offer.construct!)).toContain("this VM and its host");
+    const running = constructVmUpdateState(
+      { available: true, running: true, version: "2.1.0", host: true, appliedCommit: "0123456" },
+      "0.1.10",
+    )!;
+    expect(running.status).toBe("downloading");
+    expect(running.construct?.action).toBeNull();
+    expect(running.construct?.runningAction).toBe("update-everything");
+  });
+});
+
+describe("the old Construct's reprovision through the one control", () => {
+  const vm = (name: string, port: number, provisionedCommit: string): ConstructInstanceInfo => ({
     name,
-    vmHost: "host.example",
-    publicHost: "host.example",
+    vmHost: `${name}.mshome.net`,
+    publicHost: null,
     hostAlias: name,
-    isDefault: name === "offline-default",
+    isDefault: name === "agent-vm",
     provisionedCommit,
     channel: "latest",
     t3Port: port,
     t3Enabled: true,
-    t3BaseUrl: `https://host.example:${port}`,
+    t3BaseUrl: null,
     t3Link: null,
   });
-  const remote = { id: "thread-environment", baseUrl: "https://host.example:2302" };
-  const info = { ...current, instances: [vm("offline-default", 2301), vm("thread-vm", 2302)] };
+  const info: ConstructUpdateInfo = {
+    ...current,
+    instances: [vm("agent-vm", 5178, INSTALLED), vm("dev", 5179, PROVISIONED), vm("idle", 5180, PROVISIONED)],
+  };
+  const remotes = [{ id: "env-dev", baseUrl: "https://dev.mshome.net:5179", connected: true }];
 
-  it("offers the thread VM even when the default has no host-wide offer", () => {
-    const offer = getConstructThreadUpdateInfo(info, remote)!;
-    expect(offer.vmName).toBe("thread-vm");
-    expect(offer.action).toBe("reprovision");
-    expect(offer.provisionedCommit).toBe(PROVISIONED);
-    expect(getConstructUpdateDetail(offer)).toContain('onto "thread-vm"');
+  it("targets the default VM when it is behind and every linked VM that is behind", () => {
+    expect(constructReprovisionTargets(info, remotes)).toEqual(["dev"]);
+    expect(constructReprovisionTargets({ ...info, provisionStale: true }, remotes)).toEqual(["agent-vm", "dev"]);
+    expect(constructReprovisionTargets(info, [])).toEqual([]);
   });
 
-  it("does not borrow the default VM's stale status", () => {
-    const offer = getConstructThreadUpdateInfo(
-      {
-        ...info,
-        action: "reprovision",
-        provisionStale: true,
-        instances: [vm("offline-default", 2301), vm("thread-vm", 2302, INSTALLED)],
-      },
-      remote,
-    )!;
-    expect(offer.action).toBeNull();
-    expect(getConstructUpdateNotificationKey(offer)).toBeNull();
-  });
-
-  it("never falls back for a missing, unknown or ambiguous thread remote", () => {
-    expect(getConstructThreadUpdateInfo(info, null)).toBeNull();
-    expect(
-      getConstructThreadUpdateInfo(info, { ...remote, baseUrl: "https://unknown:5178" }),
-    ).toBeNull();
-    expect(
-      getConstructThreadUpdateInfo(
-        { ...info, instances: [...info.instances, vm("duplicate", 2302)] },
-        remote,
-      ),
-    ).toBeNull();
-  });
-
-  it("uses the matched VM's channel for upstream offers", () => {
-    const offer = getConstructThreadUpdateInfo(
-      {
-        ...info,
-        instances: [{ ...vm("thread-vm", 2302, INSTALLED), channel: "nightly" }],
-        t3LatestByChannel: {
-          latest: "0.0.38-construct.bb8cb346",
-          nightly: "0.0.39-nightly.20260907-construct.4567cdef",
-        },
-      },
-      remote,
-    )!;
-    expect(offer.action).toBe("update-t3");
-    expect(offer.t3LatestVersion).toBe("0.0.39-nightly.20260907");
-  });
-
-  it("separates identical offers on different VMs and suppresses them during a launch", () => {
-    const first = getConstructThreadUpdateInfo(info, remote)!;
-    const second = getConstructThreadUpdateInfo(info, {
-      ...remote,
-      baseUrl: "https://host.example:2301",
-    })!;
-    expect(getConstructUpdateNotificationKey(first)).not.toBe(
-      getConstructUpdateNotificationKey(second),
-    );
-    expect(
-      getConstructUpdateNotificationKey({ ...first, runningAction: "reprovision" }),
-    ).toBeNull();
-  });
-
-  it("offers the app's T3 Code update without a matched thread VM, but never its reprovision", () => {
-    const t3 = { ...info, t3UpdateAvailable: true, t3LatestVersion: "0.0.39", action: "update-t3" as const };
-    expect(getConstructThreadUpdateInfo(t3, null)?.action).toBe("update-t3");
-    expect(
-      getConstructThreadUpdateInfo(t3, { ...remote, baseUrl: "https://unknown:5178" })?.action,
-    ).toBe("update-t3");
-    const staleDefault = { ...info, provisionStale: true, action: "reprovision" as const };
-    expect(getConstructThreadUpdateInfo(staleDefault, null)).toBeNull();
-  });
-
-  it("keeps the host Construct update available without a thread", () => {
-    const host = { ...info, action: "update-construct" as const };
-    expect(getConstructThreadUpdateInfo(host, null)).toBe(host);
+  it("offers it in the control when only a linked VM is behind", () => {
+    const state = { ...baseState, construct: info };
+    const offered = withConstructReprovisionOffer(state, remotes)!;
+    expect(offered.status).toBe("available");
+    expect(offered.construct?.action).toBe("reprovision");
+    expect(withConstructReprovisionOffer(state, [])).toBe(state);
+    expect(withConstructReprovisionOffer({ ...state, enabled: false }, remotes)?.construct?.action).toBeNull();
+    // A linked VM on a channel with a newer T3 Code build (its row's button is gone): the control offers it.
+    const nightly = {
+      ...info,
+      instances: [vm("agent-vm", 5178, INSTALLED), { ...vm("dev", 5179, INSTALLED), channel: "nightly" as const }],
+      t3LatestByChannel: { latest: null, nightly: "0.0.40-nightly.20261113.1-construct.abcdef12" },
+    };
+    const t3 = withConstructReprovisionOffer({ ...state, construct: nightly }, remotes)!;
+    expect(t3.construct?.action).toBe("update-t3");
+    expect(t3.status).toBe("available");
+    const running = { ...state, construct: { ...info, runningAction: "update-t3" as const } };
+    expect(withConstructReprovisionOffer(running, remotes)).toBe(running);
   });
 });

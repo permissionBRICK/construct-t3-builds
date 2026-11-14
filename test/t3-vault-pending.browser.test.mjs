@@ -174,7 +174,7 @@ try {
 
   await desktopFlow(await openPage());
   assert.deepEqual(errors, []);
-  console.log(`PASS ${channel}: Desktop inline approval through the Companion (matching, arming, optimistic decide, answered elsewhere, host and Companion failures, displayed reports only while visible, notes held back for the Companion)`);
+  console.log(`PASS ${channel}: Desktop inline approval through the Companion (matching, arming, optimistic decide, answered elsewhere, host and Companion failures, displayed reports only while visible, notes held back for the Companion${channel === 'nightly' ? '; an agent\'s entry request saves the typed value' : ''})`);
 } finally {
   await browser.close();
 }
@@ -213,8 +213,8 @@ async function desktopFlow(page) {
       constructVaultDisplayed: async (ids) => {
         window.companion.reports.push({ids: [...ids], visibility: window.visibility});
       },
-      constructVaultDecide: (id, decision) => {
-        window.companion.decisions.push([id, decision]);
+      constructVaultDecide: (id, decision, entry) => {
+        window.companion.decisions.push(entry === undefined ? [id, decision] : [id, decision, entry]);
         return new Promise((resolve) => {
           window.companion.release = () => resolve(structuredClone(window.companion.reply));
           if (!window.companion.hold) window.companion.release();
@@ -474,5 +474,22 @@ async function desktopFlow(page) {
   assert.ok(!parts.includes('THE PLAIN MESSAGE'), 'the parts replace the plain message');
   assert.equal(await structured.locator('button').count(), 2);
   await shot('desktop-structured');
+
+  if (channel === 'nightly') {
+    // A device agent's secret entry request: the value typed here goes with Save, only then.
+    await set(`window.companion.hold = false; window.companion.reply = {ok: true}; window.companion.decisions = [];
+      window.companion.answer.approvals = [approval('e~eng1~ask-3', {names: ['npm-token'], title: 'Enter the secret npm-token',
+        message: 'npm publish', action: 'Save', deny: 'Decline', entry: true})]`);
+    const entry = item('Enter the secret npm-token');
+    await entry.waitFor({timeout: 5_000});
+    const save = entry.getByRole('button', {name: 'Save'});
+    await page.waitForTimeout(1_100);
+    assert.ok(await save.isDisabled(), 'Save waits for a value');
+    await entry.getByLabel('Value of npm-token').fill('s3cret');
+    await save.click();
+    assert.deepEqual(await page.evaluate(() => window.companion.decisions), [['e~eng1~ask-3', 'approve', {value: 's3cret'}]]);
+    await line.filter({hasText: 'Saved npm-token for agent-vm.'}).waitFor({timeout: 5_000});
+    await shot('desktop-entry');
+  }
   await page.close();
 }

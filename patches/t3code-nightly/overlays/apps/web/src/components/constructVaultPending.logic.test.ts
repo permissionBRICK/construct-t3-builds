@@ -300,11 +300,20 @@ describe("buildConstructVaultBanner with the Companion", () => {
         approveLabel: "Approve",
         denyLabel: "Deny",
         armed: true,
+        entry: false,
       },
     ]);
     expect(banner?.companionHint).toBeNull();
     expect(banner?.result).toBeNull();
     expect(banner?.keys).toEqual([constructVaultApprovalKey("c1")]);
+  });
+
+  it("marks a device agent's entry request and words its result as a save", () => {
+    const entry = approval("e~eng1~ask-3", { names: ["npm-token"], entry: true, action: "Save", deny: "Decline" });
+    const banner = buildConstructVaultBanner([], CLIENT_NOW, none, companion([entry]));
+    expect(banner?.items[0]).toMatchObject({ kind: "approval", entry: true, approveLabel: "Save", denyLabel: "Decline" });
+    expect(vaultDecisionResultText(entry, "approve", { ok: true })).toBe("Saved npm-token for agent-vm.");
+    expect(vaultDecisionResultText(entry, "deny", "pending")).toBe("Declining npm-token for agent-vm…");
   });
 
   it("lays out an approval's structured parts when the Companion sends them", () => {
