@@ -105,7 +105,10 @@ for (const channel of ["release", "nightly"]) {
     /CONSTRUCT_OPEN_COMPANION_CHANNEL = "desktop:construct-open-companion"/.test(inserts) &&
     /ipcRenderer\.invoke\(IpcChannels\.CONSTRUCT_OPEN_COMPANION_CHANNEL, instanceName\)/.test(inserts) &&
     /yield\* ipc\.handle\(openConstructCompanion\)/.test(inserts) &&
-    /ConstructUpdates\.openConstructCompanion\(instanceName,/.test(inserts));
+    // Nightly opens the device agent's panel when it runs, else the Companion.
+    (channel === "nightly"
+      ? /ConstructUpdates\.openConstructPanel\(instanceName,/.test(inserts) && /return openConstructCompanion\(instanceName, options\);/.test(companionDesktop)
+      : /ConstructUpdates\.openConstructCompanion\(instanceName,/.test(inserts)));
   ok(`Companion (${channel}): installation status survives the update-state schema`,
     /ConstructUpdateInfoSchema = Schema\.Struct\(\{\s*companionInstalled: Schema\.Boolean,/.test(inserts));
   ok(`Companion (${channel}): activation keeps the shared CLI contract and detached argv launch`,
@@ -129,7 +132,10 @@ for (const channel of ["release", "nightly"]) {
     /linkConstructInstance: \(name: string\) => Promise<ConstructPairingLinkResult>/.test(inserts) &&
     /recordConstructInstanceT3Link: \(name: string, link: ConstructT3LinkInfo\) => Promise<boolean>/.test(inserts) &&
     /CONSTRUCT_LINK_INSTANCE_CHANNEL/.test(inserts) && /CONSTRUCT_RECORD_T3_LINK_CHANNEL/.test(inserts) &&
-    /ConstructUpdates\.runConstructPairingLink\(planned\.plan\)/.test(inserts) &&
+    (channel === "nightly"
+      ? /ConstructUpdates\.mintConstructPairingLink\(name, info, environment\.platform, constructAgentOptions\)/.test(inserts) &&
+        /runConstructPairingLink\(planned\.plan\)/.test(companionDesktop)
+      : /ConstructUpdates\.runConstructPairingLink\(planned\.plan\)/.test(inserts)) &&
     /ConstructUpdates\.recordConstructInstanceT3Link\(/.test(inserts));
   ok(`auto-link (${channel}): \`t3 auth pairing create --scopes administrative\` exists in the patched build`,
     /Flag\.[sS]tring\("scopes"\)/.test(inserts) && /\.value === "administrative"\n\s*\? AuthStandardClientScopes\n/.test(inserts));
@@ -147,4 +153,36 @@ for (const channel of ["release", "nightly"]) {
     /host: input\.baseUrl,\n\s*pairingCode: token,\n\s*expectedEnvironmentId: input\.environmentId,/.test(relinkLink));
   ok(`auto-link (${channel}): upstream's pair-again notice is dismissed by a layout effect for the VMs Construct re-links`,
     /useLayoutEffect\(\(\) => \{[^}]*setLocalStorageItem\(`t3code:permission-update:v1:\$\{environmentId\}`/.test(relink));
+}
+// The new Construct (nightly): T3 Desktop is a client of the device agent's local API through ONE
+// module; the Construct update is part of T3's own update control, with no notice of its own;
+// the web UI without Desktop asks the VM through fixed CLI calls.
+{
+  const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, "patches", "t3code-nightly", "source-transforms.json"), "utf8"));
+  const overlays = path.join(repoRoot, "patches", "t3code-nightly", "overlays");
+  const read = (file) => fs.readFileSync(path.join(overlays, file), "utf8");
+  const inserts = manifest.transforms.map((t) => (t.insert || t.replace || t.import || "")).join("\n");
+  const agent = read("apps/desktop/src/construct/ConstructAgent.ts");
+  ok("agent (nightly): one integration module, imported by overlays only, never by an upstream file",
+    manifest.overlays.includes("apps/desktop/src/construct/ConstructAgent.ts") &&
+    !/construct\/ConstructAgent/.test(inserts) &&
+    /from "\.\.\/construct\/ConstructAgent\.ts"/.test(read("apps/desktop/src/updates/ConstructUpdates.ts")) &&
+    /from "\.\.\/\.\.\/construct\/ConstructAgent\.ts"/.test(read("apps/desktop/src/ipc/methods/constructVault.ts")));
+  ok("agent (nightly): the token file is found as the agent writes it, and the token stays in the main process",
+    /"Construct", "agent", "endpoint\.json"/.test(agent) && /"construct-agent", "endpoint\.json"/.test(agent) &&
+    /Authorization: `Bearer \$\{token\}`/.test(agent) && !/token/i.test(read("packages/contracts/src/constructVmUpdate.ts")) &&
+    !manifest.transforms.some((t) => t.path === "apps/desktop/src/preload.ts" && /agent|token/i.test(t.insert || "")));
+  ok("agent (nightly): capabilities both ways (apiFeatures from health, this build's features on every request)",
+    /body\.apiFeatures/.test(agent) && /X-Construct-Client-Features/.test(agent));
+  ok("update control (nightly): no own notice; the sidebar control shows and starts Construct's update",
+    !manifest.overlays.includes("apps/web/src/components/ConstructUpdateNotification.tsx") &&
+    !/ConstructUpdateNotification/.test(inserts) &&
+    manifest.transforms.some((t) => t.path === "apps/web/src/components/sidebar/SidebarUpdatePill.tsx" &&
+      t.replace === "const state = useConstructUpdateState(useDesktopUpdateState());") &&
+    /ConstructUpdates\.launchConstructAgentUpdate\(constructAgentOptions\)/.test(inserts));
+  const vmUpdate = read("apps/server/src/constructVmUpdate.ts");
+  ok("update control (nightly): the web UI asks the VM with fixed argv, no shell, one run at a time",
+    /\["update", "status", "--json"\]/.test(vmUpdate) && /\["update", "run", "--json"\]/.test(vmUpdate) &&
+    /shell: false/.test(vmUpdate) && /running \?\?=/.test(vmUpdate) &&
+    /\[WS_METHODS\.constructVmUpdateRun\]: AuthEnvironmentMaintainScope/.test(inserts));
 }
