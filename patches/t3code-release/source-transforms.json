@@ -918,7 +918,7 @@
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
-      "import": "import {\n  constructOpenCodeMonitorRoster,\n  hasConstructOpenCodeMonitor,\n  withoutConstructOpenCodeMonitors,\n} from \"./constructOpenCodeMonitor.ts\";\n"
+      "import": "import {\n  constructOpenCodeMonitorRoster,\n  hasConstructOpenCodeMonitor,\n  markConstructOpenCodeStop,\n  withoutConstructOpenCodeMonitors,\n} from \"./constructOpenCodeMonitor.ts\";\n"
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
@@ -939,7 +939,7 @@
       "path": "packages/provider-opencode/src/server/adapter.ts",
       "scope": "interruptTurn:",
       "before": "yield* abortDescendants(sessionId);",
-      "insert": "                if (state !== undefined && hasConstructOpenCodeMonitor(state.providerThread))\n                  yield* updateProviderThread(state, {\n                    pendingBackgroundTasks: withoutConstructOpenCodeMonitors(state.providerThread),\n                  });\n"
+      "insert": "                if (state !== undefined && hasConstructOpenCodeMonitor(state.providerThread))\n                  yield* updateProviderThread(state, {\n                    pendingBackgroundTasks: withoutConstructOpenCodeMonitors(state.providerThread),\n                  });\n                // Disarm the plugin too, or its watcher wakes the stopped session unseen.\n                yield* Effect.sync(() => markConstructOpenCodeStop(sessionId));\n"
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.test.ts",
