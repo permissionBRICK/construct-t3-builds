@@ -917,7 +917,7 @@
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
       "before": "const itemOrdinal =",
-      "insert": "        // Construct: the background plugin's armed watchers are monitors of the root thread.\n        const trackConstructOpenCodeMonitor = Effect.fnUntraced(function* (\n          state: OpenCodeThreadState,\n          part: OpenCodePart,\n        ) {\n          let owner = state;\n          while (owner.parentSubagent !== null) owner = owner.parentSubagent.parentState;\n          const roster = constructOpenCodeMonitorRoster(\n            owner.providerThread.pendingBackgroundTasks ?? [],\n            part,\n            state.messageRoles.get(part.messageID) === \"user\",\n          );\n          if (roster !== null) yield* updateProviderThread(owner, { pendingBackgroundTasks: roster });\n        });\n\n"
+      "insert": "        // Construct: the background plugin's armed watchers are monitors of the root thread.\n        const trackConstructOpenCodeMonitor = Effect.fnUntraced(function* (\n          state: OpenCodeThreadState,\n          part: OpenCodePart,\n          held: ReadonlyArray<OpenCodeEvent> = [],\n        ) {\n          let owner = state;\n          while (owner.parentSubagent !== null) owner = owner.parentSubagent.parentState;\n          const roster = constructOpenCodeMonitorRoster(\n            owner.providerThread.pendingBackgroundTasks ?? [],\n            part,\n            state.messageRoles.get(part.messageID) === \"user\" ||\n              held.some(\n                (event) =>\n                  event.type === \"message.updated\" &&\n                  event.properties.info.id === part.messageID &&\n                  event.properties.info.role === \"user\",\n              ),\n          );\n          if (roster !== null) yield* updateProviderThread(owner, { pendingBackgroundTasks: roster });\n        });\n\n"
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
@@ -926,14 +926,24 @@
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
-      "find": "hasPendingBackgroundWork: Effect.sync(() => busySessionIds.size > 0),",
-      "replace": "hasPendingBackgroundWork: Effect.sync(\n            () =>\n              busySessionIds.size > 0 ||\n              [...threads.values()].some((state) => hasConstructOpenCodeMonitor(state.providerThread)),\n          ),\n          hasPendingBackgroundWorkForThread: (providerThread) =>\n            Effect.sync(() =>\n              hasConstructOpenCodeMonitor(\n                threads.get(providerThread.nativeThreadRef?.nativeId ?? \"\")?.providerThread,\n              ),\n            ),"
+      "after": "const wake = owner.wake;",
+      "insert": "          // Construct: a held wake ends its watcher's monitor now; the run that monitor pins must settle before the wake can run.\n          if (wake !== null && event.type === \"message.part.updated\")\n            yield* trackConstructOpenCodeMonitor(owner, event.properties.part, wake.events);\n"
+    },
+    {
+      "path": "packages/provider-opencode/src/server/adapter.ts",
+      "after": "busySessionIds.size > 0 ||",
+      "insert": "              [...threads.values()].some((state) => hasConstructOpenCodeMonitor(state.providerThread)) ||\n"
+    },
+    {
+      "path": "packages/provider-opencode/src/server/adapter.ts",
+      "before": "hasPendingBackgroundWork:",
+      "insert": "          hasPendingBackgroundWorkForThread: (providerThread) =>\n            Effect.sync(() =>\n              hasConstructOpenCodeMonitor(\n                threads.get(providerThread.nativeThreadRef?.nativeId ?? \"\")?.providerThread,\n              ),\n            ),\n"
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
       "scope": "interruptTurn:",
-      "before": "yield* abortDescendants(sessionId);",
-      "insert": "                if (state !== undefined && hasConstructOpenCodeMonitor(state.providerThread))\n                  yield* updateProviderThread(state, {\n                    pendingBackgroundTasks: withoutConstructOpenCodeMonitors(state.providerThread),\n                  });\n"
+      "before": "const wake = state.wake;",
+      "insert": "                    if (hasConstructOpenCodeMonitor(state.providerThread))\n                      yield* updateProviderThread(state, {\n                        pendingBackgroundTasks: withoutConstructOpenCodeMonitors(state.providerThread),\n                      });\n"
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.test.ts",
