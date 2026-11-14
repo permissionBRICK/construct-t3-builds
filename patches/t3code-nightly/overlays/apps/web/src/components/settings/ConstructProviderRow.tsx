@@ -18,6 +18,7 @@ import {
   type ConstructProviderRow,
 } from "../constructInstances.logic";
 import {
+  withConstructReprovisionOffer,
   getConstructDisabledReason,
   getConstructUpdateActionLabel,
   getConstructUpdateDetail,
@@ -54,30 +55,36 @@ export function ConstructProviderSection() {
 }
 
 function ConstructProviderSectionContent() {
-  const state = useDesktopUpdateState();
-  const info = getConstructUpdateInfo(state);
-  const [isBusy, setIsBusy] = useState(false);
   // The remotes this app is LINKED to. `constructLinkedRemotes` decides which of the
   // app's environments are one, from T3's own statement of what each connection IS
   // (`entry.target._tag`) rather than from what its address looks like.
   const { environments } = useEnvironments();
+  const remotes = useMemo(
+    () =>
+      constructLinkedRemotes(
+        environments.map((environment) => ({
+          environmentId: String(environment.environmentId),
+          label: environment.label,
+          displayUrl: environment.displayUrl,
+          targetKind: environment.entry.target._tag,
+          connected: constructEnvironmentConnected(environment),
+        })),
+      ),
+    [environments],
+  );
+  // The same state and action as the update control in the sidebar.
+  const state = withConstructReprovisionOffer(useDesktopUpdateState(), remotes);
+  const info = getConstructUpdateInfo(state);
+  const [isBusy, setIsBusy] = useState(false);
   const rows = useMemo(
     () =>
       planConstructProviderRows({
-        remotes: constructLinkedRemotes(
-          environments.map((environment) => ({
-            environmentId: String(environment.environmentId),
-            label: environment.label,
-            displayUrl: environment.displayUrl,
-            targetKind: environment.entry.target._tag,
-            connected: constructEnvironmentConnected(environment),
-          })),
-        ),
+        remotes,
         info,
         t3LatestByChannel: info?.t3LatestByChannel ?? {},
         companionInstalled: info?.companionInstalled === true,
       }),
-    [environments, info],
+    [remotes, info],
   );
 
   const runAction = useCallback(async () => {
@@ -171,7 +178,10 @@ function ConstructProviderSectionContent() {
                     <span className="text-sm font-medium">{headline}</span>
                     <span className="text-xs text-muted-foreground">{detail}</span>
                     <span className="text-xs text-muted-foreground">
-                      Construct {info.repo}@{info.ref} · VM {info.vmName} ({info.vmHost}) · T3 Code{" "}
+                      {info.everything === undefined
+                        ? `Construct ${info.repo}@${info.ref} · VM ${info.vmName} (${info.vmHost})`
+                        : `Construct ${info.ref}`}{" "}
+                      · T3 Code{" "}
                       {info.t3Version}
                       {info.t3LatestVersion !== null ? ` (upstream ${info.t3LatestVersion})` : ""}
                     </span>
@@ -222,10 +232,9 @@ function ConstructProviderSectionContent() {
 }
 
 /**
- * One linked remote, or one UNLINKED instance. A linked row this PC's registry
- * recognises offers **Update T3 Code** when only T3 Code is behind and **Reprovision**
- * otherwise, for THAT instance (`reprovisionConstructInstance`, which runs
- * `Update-T3Code.ps1 -InstanceName <name>` with that mode); a remote that matches nothing
+ * One linked remote, or one UNLINKED instance. A linked row says what its VM is missing;
+ * the update itself is the one action of the Construct row and of the update control in
+ * the sidebar, which covers every linked VM that is behind. A remote that matches nothing
  * is read-only and says why. An instance of the registry that runs T3 but that no
  * remote matches offers **Link** — the manual counterpart of the automatic link
  * (ConstructAutoLink.tsx), which also re-adds a connection the user removed by hand.
@@ -241,7 +250,6 @@ function ConstructInstanceRow({
   const detail = getConstructRowDetail(row);
   const offer = row.provisionStale || row.t3UpdateAvailable;
   const action = getConstructRowAction(row);
-  const actionLabel = action === "update-t3" ? "Update T3 Code" : "Reprovision";
   const connectPairing = useAtomCommand(connectPairingAtom, { reportFailure: false });
 
   const link = useCallback(async () => {
@@ -282,39 +290,6 @@ function ConstructInstanceRow({
     }
   }, [connectPairing, isBusy, row.instanceName]);
 
-  const reprovision = useCallback(async () => {
-    const bridge = window.desktopBridge;
-    if (!bridge || row.instanceName === null || isBusy) return;
-    setIsBusy(true);
-    try {
-      const result = await bridge.reprovisionConstructInstance(row.instanceName, action);
-      toastManager.add(
-        result.accepted
-          ? stackedThreadToast({
-              type: "info",
-              title: action === "update-t3" ? `Updating T3 Code on ${row.instanceName}` : `Reprovisioning ${row.instanceName}`,
-              description: "Running in a console window. The app restarts by itself if a new Desktop build is installed.",
-            })
-          : stackedThreadToast({
-              type: "error",
-              title: `Could not start: ${actionLabel} ${row.instanceName}`,
-              description:
-                result.state.message ?? "Another Construct action is running, or updates are disabled.",
-            }),
-      );
-    } catch (error) {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: `Could not start: ${actionLabel} ${row.instanceName}`,
-          description: error instanceof Error ? error.message : "An unexpected error occurred.",
-        }),
-      );
-    } finally {
-      setIsBusy(false);
-    }
-  }, [action, actionLabel, isBusy, row.instanceName]);
-
   return (
     <div className="group flex min-h-19 items-start gap-3 rounded-md px-3 py-2 transition-colors hover:bg-foreground/4">
       <span className="mt-0.5 inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground">
@@ -345,7 +320,7 @@ function ConstructInstanceRow({
         {row.instanceName === null ? null : (
           <ConstructSettingsButton instanceName={row.instanceName} state={row.settingsButton} />
         )}
-        {row.instanceName === null ? null : !row.linked ? (
+        {row.instanceName === null || row.linked ? null : (
           <Button
             type="button"
             size="xs"
@@ -357,19 +332,6 @@ function ConstructInstanceRow({
           >
             {isBusy ? <LoaderIcon className={cn("size-3", "animate-spin")} /> : null}
             Link
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            size="xs"
-            variant={offer ? "default" : "outline"}
-            disabled={isBusy || !row.canReprovision || disabledReason !== null}
-            title={disabledReason ?? (row.canReprovision ? undefined : row.note)}
-            onClick={() => void reprovision()}
-            aria-label={`${actionLabel} ${row.instanceName}`}
-          >
-            {isBusy ? <LoaderIcon className={cn("size-3", "animate-spin")} /> : null}
-            {actionLabel}
           </Button>
         )}
       </span>

@@ -22,6 +22,12 @@
 //      (Update-T3Code.ps1 -Mode quick: updates T3 Code in the VM and installs the
 //      matching Desktop app, without a reprovision).
 //
+// With the new Construct a device agent runs on the PC (../construct/ConstructAgent.ts):
+// then none of the above runs. The control offers the agent's one action instead,
+// "update-everything" (this PC, the hosts the user administers and the user's own VMs, in
+// the background), and pairing links and the panel go through the agent's routes. A PC
+// without an agent keeps the script path unchanged.
+//
 // Everything here is plain TypeScript with injectable IO so it unit-tests
 // without a network, a Windows filesystem, or Electron. DesktopUpdates.ts owns
 // the Effect wiring (pollers, state broadcast, action locking).
@@ -41,6 +47,10 @@ import * as NodeFS from "node:fs";
 import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+
+import * as ConstructAgent from "../construct/ConstructAgent.ts";
+
+export { watchConstructAgent } from "../construct/ConstructAgent.ts";
 
 export const DEFAULT_CONSTRUCT_REPO = "permissionBRICK/The-Construct";
 export const DEFAULT_CONSTRUCT_REF = "main";
@@ -210,6 +220,16 @@ export function findConstructCompanion(
   if (executable === null) return null;
   const marker = NodePath.win32.join(NodePath.win32.dirname(executable), "install.json");
   return fs.fileMtimeMs(marker) !== null && fs.fileMtimeMs(executable) !== null ? executable : null;
+}
+
+/** The device agent's panel (null) or a VM's page, when the agent runs; else the Companion. */
+export async function openConstructPanel(
+  instanceName: string | null,
+  options: Parameters<typeof openConstructCompanion>[1] & { readonly agent: ConstructAgent.ConstructAgentOptions },
+): Promise<boolean> {
+  const agent = await ConstructAgent.findConstructAgent(options.agent);
+  if (agent !== null) return ConstructAgent.openConstructAgentShell(agent, instanceName);
+  return openConstructCompanion(instanceName, options);
 }
 
 /** Start/activate the per-user Companion; never wait for its process to exit. */
@@ -1616,6 +1636,10 @@ export function shortConstructCommit(commit: string | null): string | null {
 /** The `availableVersion` label stock UI code prints ("Update <x> ready to download"). */
 export function constructAvailableVersionLabel(info: ConstructUpdateInfo): string | null {
   const action = info.runningAction ?? info.action;
+  if (action === "update-everything") {
+    const offer = info.everything === undefined ? null : ConstructAgent.constructAgentOfferLabel(info.everything);
+    return offer ?? (info.t3UpdateAvailable && info.t3LatestVersion !== null ? `T3 Code ${info.t3LatestVersion}` : "Construct");
+  }
   if (action === "update-construct") {
     return `Construct ${info.ref}`;
   }
@@ -1708,6 +1732,8 @@ export interface ConstructCheckOptions {
   readonly runningAction: ConstructUpdateAction | null;
   readonly now: () => string;
   readonly joinPath?: JoinPath;
+  /** Where to look for the device agent; omitted, only the script path is checked. */
+  readonly agent?: ConstructAgent.ConstructAgentOptions;
 }
 
 export function constructScriptsMissingMessage(localAppData: string | undefined): string {
@@ -1718,6 +1744,8 @@ export function constructScriptsMissingMessage(localAppData: string | undefined)
 export async function checkConstructUpdates(
   options: ConstructCheckOptions,
 ): Promise<ConstructUpdateInfo> {
+  const agent = options.agent === undefined ? null : await ConstructAgent.findConstructAgent(options.agent);
+  if (agent !== null) return checkConstructAgentUpdates(agent, options);
   const joinPath = options.joinPath ?? defaultJoinPath;
   const t3Version = constructT3BaseVersion(options.appVersion);
   const channel = resolveConstructT3Channel(t3Version);
@@ -1809,6 +1837,94 @@ export async function checkConstructUpdates(
     checkedAt: options.now(),
     error: errors.length > 0 ? errors.join(" ") : null,
   });
+}
+
+/**
+ * The check with a device agent: its view of this device, the user's VMs and a running
+ * "update everything", plus the newest Construct T3 build for this app's channel (a VM's
+ * reprovision installs it, so it is offered as the same one update). A full check asks the
+ * agent to check its channel and every VM's engine; a local one re-reads the agent's own
+ * state and keeps the engines' answers, except right after a run, when they are asked again.
+ */
+export async function checkConstructAgentUpdates(
+  agent: ConstructAgent.ConstructAgent,
+  options: ConstructCheckOptions,
+): Promise<ConstructUpdateInfo> {
+  const t3Version = constructT3BaseVersion(options.appVersion);
+  const channel = resolveConstructT3Channel(t3Version);
+  const previous = options.previous?.everything?.source === "agent" ? options.previous : null;
+  const full = options.fetchJson !== undefined;
+  const read = await ConstructAgent.readConstructAgentUpdates(agent, {
+    check: full,
+    withVms: full || previous === null || previous.everything?.running === true,
+    previous: previous?.everything ?? null,
+  });
+  const t3LatestByChannel = {
+    latest: previous?.t3LatestByChannel?.latest ?? null,
+    nightly: previous?.t3LatestByChannel?.nightly ?? null,
+  };
+  const errors = read.error === null ? [] : [read.error];
+  if (options.fetchJson !== undefined) {
+    t3LatestByChannel[channel] = await fetchConstructT3Build(options.fetchJson, channel);
+    if (t3LatestByChannel[channel] === null) errors.push("Could not check GitHub for T3 Code builds.");
+  }
+  const t3Latest = t3LatestByChannel[channel];
+  const t3UpdateAvailable = isNewerConstructT3Build(t3Latest, options.appVersion.trim(), channel);
+  const joinPath = options.joinPath ?? defaultJoinPath;
+  // The old Construct's state of the same name keeps its link marker and T3 port.
+  const instances = ConstructAgent.constructAgentInstances(read.connections, (name) =>
+    readConstructInstanceState(options.localAppData, name, null, options.fs, joinPath),
+  );
+  const failure = ConstructAgent.constructAgentRunFailure(read.view);
+  if (failure !== null) errors.push(failure);
+  return {
+    companionInstalled: agent.has("shell-open"),
+    repo: "",
+    ref: read.view.version,
+    scriptsDir: null,
+    vmName: instances[0]?.name ?? "",
+    vmHost: instances[0]?.vmHost ?? "",
+    instances,
+    installedCommit: null,
+    provisionedCommit: null,
+    latestCommit: null,
+    constructUpdateAvailable: read.view.available !== null,
+    provisionStale: false,
+    desktopVersion: options.appVersion.trim(),
+    t3Version,
+    t3LatestVersion: t3Latest === null ? null : constructT3BaseVersion(t3Latest),
+    t3LatestByChannel,
+    t3UpdateAvailable,
+    action: ConstructAgent.constructAgentHasUpdate(read.view, t3UpdateAvailable) ? "update-everything" : null,
+    runningAction: read.view.running ? "update-everything" : null,
+    checkedAt: options.now(),
+    error: errors.length > 0 ? errors.join(" ") : null,
+    everything: read.view,
+  };
+}
+
+/** The agent's "update everything", for the control's click. */
+export async function launchConstructAgentUpdate(
+  options: ConstructAgent.ConstructAgentOptions,
+): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }> {
+  const agent = await ConstructAgent.findConstructAgent(options);
+  if (agent === null) return { ok: false, error: "The Construct agent is not running on this PC." };
+  return ConstructAgent.startConstructAgentUpdateEverything(agent);
+}
+
+/** A one-time T3 pairing link for one VM: through the device agent when it runs, else the
+ *  old Construct's hidden script. */
+export async function mintConstructPairingLink(
+  name: string,
+  info: Pick<ConstructUpdateInfo, "scriptsDir" | "instances"> | null,
+  platform: NodeJS.Platform,
+  agentOptions: ConstructAgent.ConstructAgentOptions,
+  fs: ConstructFileSystem = nodeConstructFileSystem,
+): Promise<ConstructPairingLinkResult> {
+  const agent = await ConstructAgent.findConstructAgent(agentOptions);
+  if (agent !== null) return ConstructAgent.mintConstructAgentPairingLink(agent, name);
+  const planned = planConstructPairingLink(name, info, platform, fs);
+  return planned.ok ? runConstructPairingLink(planned.plan) : { ok: false, error: planned.error };
 }
 
 // ── Launching the host scripts ──────────────────────────────────────────────────
@@ -1922,6 +2038,9 @@ function planConstructScript(
 ):
   | { readonly ok: true; readonly scriptPath: string; readonly scriptArgs: ReadonlyArray<string> }
   | { readonly ok: false; readonly error: string } {
+  if (action === "update-everything") {
+    return { ok: false, error: "The device agent runs this update; there is no script for it." };
+  }
   if (platform !== "win32") {
     return {
       ok: false,
