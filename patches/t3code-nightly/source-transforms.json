@@ -358,8 +358,9 @@
     },
     {
       "path": "apps/server/src/cli/pair.ts",
-      "find": "resolveDirectPairingBaseUrl = (state: PersistedServerRuntimeState)",
-      "replace": "resolveDirectPairingBaseUrl = (\n  state: PersistedServerRuntimeState,\n  /** The origin a TLS proxy publishes for this server, when Construct set one. */\n  publicBaseUrl?: string | undefined,\n)"
+      "scope": "const resolveDirectPairingBaseUrl",
+      "after": "platform: NodeJS.Platform,",
+      "insert": "  /** The origin a TLS proxy publishes for this server, when Construct set one. */\n  publicBaseUrl?: string | undefined,\n"
     },
     {
       "path": "apps/server/src/cli/pair.ts",
@@ -368,8 +369,8 @@
     },
     {
       "path": "apps/server/src/cli/pair.ts",
-      "find": "        pairingBaseUrl = resolveDirectPairingBaseUrl(target.state);",
-      "replace": "        pairingBaseUrl = resolveDirectPairingBaseUrl(target.state, publicBaseUrlOrigin());"
+      "find": "resolveDirectPairingBaseUrl(target.state, yield* HostProcess.Platform)",
+      "replace": "resolveDirectPairingBaseUrl(target.state, yield* HostProcess.Platform, publicBaseUrlOrigin())"
     },
     {
       "path": "apps/server/src/environment/ServerEnvironment.ts",
@@ -450,7 +451,7 @@
     },
     {
       "path": "apps/server/src/startupAccess.ts",
-      "after": "{ privateNetworkOnly: serverConfig.privateNetworkOnly },",
+      "after": "{ privateNetworkOnly: serverConfig.privateNetworkOnly, platform },",
       "insert": "    publicBaseUrlOrigin(),\n"
     },
     {
