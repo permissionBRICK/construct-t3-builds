@@ -299,13 +299,13 @@
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "find": "      const result = yield* downloadAvailableUpdate;",
-      "replace": "      const result = constructManaged ? yield* launchConstruct() : yield* downloadAvailableUpdate;"
+      "find": "const result = yield* downloadAvailableUpdate(true);",
+      "replace": "const result = constructManaged ? yield* launchConstruct() : yield* downloadAvailableUpdate(true);"
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "find": "      if (yield* Ref.get(desktopState.quitting)) {",
-      "replace": "      if (constructManaged || (yield* Ref.get(desktopState.quitting))) {"
+      "find": "if (yield* Ref.get(desktopState.quitting)) {",
+      "replace": "if (constructManaged || (yield* Ref.get(desktopState.quitting))) {"
     },
     {
       "path": "apps/server/package.json",
