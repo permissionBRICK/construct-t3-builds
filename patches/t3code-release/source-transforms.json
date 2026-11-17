@@ -239,13 +239,7 @@
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.test.ts",
-      "before": "import { assert, describe, it } from \"@effect/vitest\";",
-      "insert": "// @effect-diagnostics nodeBuiltinImport:off - the Construct-build cases lay out a fake\n// %LOCALAPPDATA%\\The-Construct install on disk for the updater to read.\n",
-      "optional": true
-    },
-    {
-      "path": "apps/desktop/src/updates/DesktopUpdates.test.ts",
-      "import": "import * as NodeFS from \"node:fs\";\nimport * as NodeOS from \"node:os\";\nimport * as NodePath from \"node:path\";\n",
+      "import": "// @effect-diagnostics nodeBuiltinImport:off - the Construct-build cases lay out a fake\n// %LOCALAPPDATA%\\The-Construct install on disk for the updater to read.\nimport * as NodeFS from \"node:fs\";\nimport * as NodeOS from \"node:os\";\nimport * as NodePath from \"node:path\";\n",
       "optional": true
     },
     {
@@ -299,13 +293,13 @@
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "find": "      const result = yield* downloadAvailableUpdate;",
-      "replace": "      const result = constructManaged ? yield* launchConstruct() : yield* downloadAvailableUpdate;"
+      "find": "const result = yield* downloadAvailableUpdate(true);",
+      "replace": "const result = constructManaged ? yield* launchConstruct() : yield* downloadAvailableUpdate(true);"
     },
     {
       "path": "apps/desktop/src/updates/DesktopUpdates.ts",
-      "find": "      if (yield* Ref.get(desktopState.quitting)) {",
-      "replace": "      if (constructManaged || (yield* Ref.get(desktopState.quitting))) {"
+      "find": "if (yield* Ref.get(desktopState.quitting)) {",
+      "replace": "if (constructManaged || (yield* Ref.get(desktopState.quitting))) {"
     },
     {
       "path": "apps/server/package.json",
@@ -358,8 +352,9 @@
     },
     {
       "path": "apps/server/src/cli/pair.ts",
-      "find": "resolveDirectPairingBaseUrl = (state: PersistedServerRuntimeState)",
-      "replace": "resolveDirectPairingBaseUrl = (\n  state: PersistedServerRuntimeState,\n  /** The origin a TLS proxy publishes for this server, when Construct set one. */\n  publicBaseUrl?: string | undefined,\n)"
+      "scope": "const resolveDirectPairingBaseUrl",
+      "after": "platform: NodeJS.Platform,",
+      "insert": "  /** The origin a TLS proxy publishes for this server, when Construct set one. */\n  publicBaseUrl?: string | undefined,\n"
     },
     {
       "path": "apps/server/src/cli/pair.ts",
@@ -368,8 +363,8 @@
     },
     {
       "path": "apps/server/src/cli/pair.ts",
-      "find": "        pairingBaseUrl = resolveDirectPairingBaseUrl(target.state);",
-      "replace": "        pairingBaseUrl = resolveDirectPairingBaseUrl(target.state, publicBaseUrlOrigin());"
+      "find": "resolveDirectPairingBaseUrl(target.state, yield* HostProcess.Platform)",
+      "replace": "resolveDirectPairingBaseUrl(target.state, yield* HostProcess.Platform, publicBaseUrlOrigin())"
     },
     {
       "path": "apps/server/src/environment/ServerEnvironment.ts",
@@ -450,7 +445,7 @@
     },
     {
       "path": "apps/server/src/startupAccess.ts",
-      "after": "{ privateNetworkOnly: serverConfig.privateNetworkOnly },",
+      "after": "{ privateNetworkOnly: serverConfig.privateNetworkOnly, platform },",
       "insert": "    publicBaseUrlOrigin(),\n"
     },
     {
@@ -503,6 +498,7 @@
       "path": "apps/server/src/ws.test.ts",
       "find": "RpcServer.makeNoSerialization(WsRpcGroup,",
       "replace": "RpcServer.makeNoSerialization(WsRpcGroup.omit(...constructWsRpcMethods),",
+      "every": true,
       "optional": true
     },
     {
@@ -923,7 +919,7 @@
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
       "before": "const itemOrdinal =",
-      "insert": "        // Construct: the background plugin's armed watchers are monitors of the root thread.\n        const trackConstructOpenCodeMonitor = Effect.fnUntraced(function* (\n          state: OpenCodeThreadState,\n          part: OpenCodePart,\n        ) {\n          let owner = state;\n          while (owner.parentSubagent !== null) owner = owner.parentSubagent.parentState;\n          const roster = constructOpenCodeMonitorRoster(\n            owner.providerThread.pendingBackgroundTasks ?? [],\n            part,\n            state.messageRoles.get(part.messageID) === \"user\",\n          );\n          if (roster !== null) yield* updateProviderThread(owner, { pendingBackgroundTasks: roster });\n        });\n\n"
+      "insert": "        // Construct: the background plugin's armed watchers are monitors of the root thread.\n        const trackConstructOpenCodeMonitor = Effect.fnUntraced(function* (\n          state: OpenCodeThreadState,\n          part: OpenCodePart,\n          held: ReadonlyArray<OpenCodeEvent> = [],\n        ) {\n          let owner = state;\n          while (owner.parentSubagent !== null) owner = owner.parentSubagent.parentState;\n          const roster = constructOpenCodeMonitorRoster(\n            owner.providerThread.pendingBackgroundTasks ?? [],\n            part,\n            state.messageRoles.get(part.messageID) === \"user\" ||\n              held.some(\n                (event) =>\n                  event.type === \"message.updated\" &&\n                  event.properties.info.id === part.messageID &&\n                  event.properties.info.role === \"user\",\n              ),\n          );\n          if (roster !== null) yield* updateProviderThread(owner, { pendingBackgroundTasks: roster });\n        });\n\n"
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
@@ -932,14 +928,24 @@
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
-      "find": "hasPendingBackgroundWork: Effect.sync(() => busySessionIds.size > 0),",
-      "replace": "hasPendingBackgroundWork: Effect.sync(\n            () =>\n              busySessionIds.size > 0 ||\n              [...threads.values()].some((state) => hasConstructOpenCodeMonitor(state.providerThread)),\n          ),\n          hasPendingBackgroundWorkForThread: (providerThread) =>\n            Effect.sync(() =>\n              hasConstructOpenCodeMonitor(\n                threads.get(providerThread.nativeThreadRef?.nativeId ?? \"\")?.providerThread,\n              ),\n            ),"
+      "after": "const wake = owner.wake;",
+      "insert": "          // Construct: a held wake ends its watcher's monitor now; the run that monitor pins must settle before the wake can run.\n          if (wake !== null && event.type === \"message.part.updated\")\n            yield* trackConstructOpenCodeMonitor(owner, event.properties.part, wake.events);\n"
+    },
+    {
+      "path": "packages/provider-opencode/src/server/adapter.ts",
+      "after": "busySessionIds.size > 0 ||",
+      "insert": "              [...threads.values()].some((state) => hasConstructOpenCodeMonitor(state.providerThread)) ||\n"
+    },
+    {
+      "path": "packages/provider-opencode/src/server/adapter.ts",
+      "before": "hasPendingBackgroundWork:",
+      "insert": "          hasPendingBackgroundWorkForThread: (providerThread) =>\n            Effect.sync(() =>\n              hasConstructOpenCodeMonitor(\n                threads.get(providerThread.nativeThreadRef?.nativeId ?? \"\")?.providerThread,\n              ),\n            ),\n"
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
       "scope": "interruptTurn:",
-      "before": "yield* abortDescendants(sessionId);",
-      "insert": "                if (state !== undefined && hasConstructOpenCodeMonitor(state.providerThread))\n                  yield* updateProviderThread(state, {\n                    pendingBackgroundTasks: withoutConstructOpenCodeMonitors(state.providerThread),\n                  });\n"
+      "before": "const wake = state.wake;",
+      "insert": "                    if (hasConstructOpenCodeMonitor(state.providerThread))\n                      yield* updateProviderThread(state, {\n                        pendingBackgroundTasks: withoutConstructOpenCodeMonitors(state.providerThread),\n                      });\n"
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.test.ts",

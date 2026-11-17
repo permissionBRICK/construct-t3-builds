@@ -77,6 +77,12 @@ function setup(input: { readonly selected: string; readonly installed: ReadonlyA
         installed.delete(modelId);
         if (fallback() === modelId) settings = { ...settings, speechModelId: OTHER };
       }).pipe(Effect.andThen(list)),
+    linkModels: () =>
+      Effect.sync(() => {
+        const replace = !installed.has(fallback());
+        installed.add(OTHER);
+        if (replace) settings = { ...settings, speechModelId: OTHER };
+      }).pipe(Effect.andThen(list)),
     prepareModel: Effect.sync(() => void calls.push("prepare")),
     transcribe: () => Effect.sync(() => (calls.push("local transcribe"), "local text")),
     startStream: () =>
@@ -179,6 +185,19 @@ it.effect(
       expect(active(yield* speech.removeModel(CLAUDE_SPEECH_MODEL_ID))).toEqual([OTHER]);
       expect(fixture.selected()).toBe(OTHER);
     }),
+);
+
+it.effect("keeps Claude chosen when T3 links model files that it would select", () =>
+  Effect.gen(function* () {
+    const claude = setup({ selected: CLAUDE_SPEECH_MODEL_ID, installed: [] });
+    const linked = yield* (yield* claude.make(false)).linkModels("/models");
+    expect(active(linked)).toEqual([CLAUDE_SPEECH_MODEL_ID]);
+    expect(linked.models.find((model) => model.id === OTHER)?.state).toBe("installed");
+    expect(claude.selected()).toBe(CLAUDE_SPEECH_MODEL_ID);
+
+    const local = setup({ selected: LOCAL, installed: [] });
+    expect(active(yield* (yield* local.make(false)).linkModels("/models"))).toEqual([OTHER]);
+  }),
 );
 
 it.effect("makes Claude a VM's model only while no installed model is selected", () =>

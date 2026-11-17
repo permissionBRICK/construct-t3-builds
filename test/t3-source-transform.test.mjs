@@ -145,6 +145,15 @@ test("every: true inserts next to each occurrence of the anchor", () => {
   assert.equal(status(f).alreadyApplied, 2)
 })
 
+test("every: true replaces each occurrence of the find text", () => {
+  const source = 'serve(group, a);\nother();\nserve(group, b);\n'
+  const f = fixture({ source, transforms: [{ path: "owned.ts", find: "serve(group,", replace: "serve(group.omit(x),", every: true }] })
+  assert.equal(run(f).status, 0)
+  assert.equal(owned(f), 'serve(group.omit(x), a);\nother();\nserve(group.omit(x), b);\n')
+  assert.equal(run(f).status, 0)
+  assert.equal(owned(f), 'serve(group.omit(x), a);\nother();\nserve(group.omit(x), b);\n')
+})
+
 test("an ambiguous unscoped anchor is a conflict", () => {
   const source = UPSTREAM + '\nexport function other(): string {\n  return "stock";\n}\n'
   const f = fixture({ source, transforms: [{ path: "owned.ts", find: 'return "stock";', replace: 'return "x";' }] })

@@ -60,8 +60,8 @@ Concretely:
 - **Exactly one match** for an anchor or `find`, unless a `scope` is given: then the
   first match *after* the scope text is used (`"scope": "function Foo"` for an anchor
   such as `</>` that repeats in the file).
-- **`every: true`** inserts next to every occurrence (a prop passed at several identical
-  call sites).
+- **`every: true`** inserts next to, or replaces, every occurrence (a prop passed or an
+  argument changed at several identical call sites).
 - **Idempotent.** An insert whose text is already present, or a `replace` text already
   present, is a no-op, so an interrupted build can re-apply the same tree.
 - **`optional: true`** — a missing file or anchor is skipped instead of failing. Used
