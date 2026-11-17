@@ -247,6 +247,14 @@ export const makeClaudeSpeech = Effect.fn("ConstructClaudeSpeech.make")(function
       }
       return yield* models(false);
     }),
+    linkModels: Effect.fn("ConstructClaudeSpeech.linkModels")(function* (source) {
+      const active = yield* usesClaude("model linking");
+      yield* speech.linkModels(source);
+      // T3 selects a linked model when its selection is not installed; Claude stays chosen.
+      if (active && !(yield* usesClaude("model linking")))
+        yield* selectModelId("model linking", CLAUDE_SPEECH_MODEL_ID);
+      return yield* models(false);
+    }),
     updateAcceleration: Effect.fn("ConstructClaudeSpeech.updateAcceleration")(
       function* (acceleration) {
         yield* speech.updateAcceleration(acceleration);
