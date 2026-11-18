@@ -64,8 +64,11 @@ const fixtures = {name: 'fixtures', setup(b) {
 }};
 const result = await build({
   stdin: {contents: `import {createRoot} from 'react-dom/client';
+    import {initializeI18n} from ${JSON.stringify(path.join(web, 'i18n/initializeI18n.ts'))};
     import {ToastProvider} from ${JSON.stringify(path.join(web, 'components/ui/toast.tsx'))};
     import {ConstructVaultPendingNotification} from ${JSON.stringify(component)};
+    // The app initializes GT at startup; T3's toast UI reads it while rendering.
+    initializeI18n(() => {});
     window.render=()=>createRoot(document.getElementById('root')).render(<ToastProvider><ConstructVaultPendingNotification /></ToastProvider>);`,
   loader: 'tsx', resolveDir: root},
   bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic',
@@ -80,7 +83,9 @@ try {
   const openPage = async () => {
     const opened = await browser.newPage({viewport: {width: 1280, height: 720}});
     opened.on('pageerror', (error) => errors.push(error.message));
-    await opened.setContent('<div id="root"></div>');
+    // An http origin, as the app has: GT's startup reads the locale cookie.
+    await opened.route('http://construct.test/', (route) => route.fulfill({contentType: 'text/html', body: '<div id="root"></div>'}));
+    await opened.goto('http://construct.test/');
     for (const name of css) await opened.addStyleTag({path: path.join(distAssets, name)});
     return opened;
   };
