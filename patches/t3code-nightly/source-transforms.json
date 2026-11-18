@@ -511,7 +511,8 @@
     },
     {
       "path": "apps/web/src/components/desktopUpdate.logic.ts",
-      "after": "export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string {",
+      "scope": "function getDesktopUpdateButtonTooltip(",
+      "after": "): string {",
       "insert": "  // Construct-built Desktop apps: the offer is a host script, not a download.\n  const construct = getConstructUpdateInfo(state);\n  if (construct !== null) {\n    return getConstructUpdateTooltip(construct);\n  }\n"
     },
     {
@@ -573,8 +574,8 @@
     },
     {
       "path": "apps/web/src/components/settings/SettingsPanels.tsx",
-      "after": "<SettingsSection id=\"composer\" title=\"Composer\">",
-      "insert": "        {showVoiceInputSource ? (\n          <SettingsRow\n            {...searchableSetting(\"voice-input-source\")}\n            description=\"Choose where voice input records. Automatic uses this device's microphone when it is available, and the Construct host bridge otherwise.\"\n            resetAction={\n              settings.voiceInputSource !== DEFAULT_UNIFIED_SETTINGS.voiceInputSource ? (\n                <SettingResetButton\n                  label=\"voice input source\"\n                  onClick={() =>\n                    updateSettings({\n                      voiceInputSource: DEFAULT_UNIFIED_SETTINGS.voiceInputSource,\n                    })\n                  }\n                />\n              ) : null\n            }\n            control={\n              <Select\n                value={settings.voiceInputSource}\n                onValueChange={(value) => {\n                  if (isVoiceInputSourcePreference(value)) {\n                    updateSettings({ voiceInputSource: value });\n                  }\n                }}\n              >\n                <SelectTrigger className=\"w-full sm:w-52\" aria-label=\"Voice input source\">\n                  <SelectValue>{VOICE_INPUT_SOURCE_LABELS[settings.voiceInputSource]}</SelectValue>\n                </SelectTrigger>\n                <SelectPopup align=\"end\" alignItemWithTrigger={false}>\n                  {Object.entries(VOICE_INPUT_SOURCE_LABELS).map(([value, label]) => (\n                    <SelectItem hideIndicator key={value} value={value}>\n                      {label}\n                    </SelectItem>\n                  ))}\n                </SelectPopup>\n              </Select>\n            }\n          />\n        ) : null}\n\n"
+      "after": "<SettingsSection id=\"composer\"",
+      "insert": "        {showVoiceInputSource ? (\n          <SettingsRow\n            {...setting(\"voice-input-source\")}\n            description=\"Choose where voice input records. Automatic uses this device's microphone when it is available, and the Construct host bridge otherwise.\"\n            resetAction={\n              settings.voiceInputSource !== DEFAULT_UNIFIED_SETTINGS.voiceInputSource ? (\n                <SettingResetButton\n                  ariaLabel=\"Reset voice input source to default\"\n                  onClick={() =>\n                    updateSettings({\n                      voiceInputSource: DEFAULT_UNIFIED_SETTINGS.voiceInputSource,\n                    })\n                  }\n                />\n              ) : null\n            }\n            control={\n              <Select\n                value={settings.voiceInputSource}\n                onValueChange={(value) => {\n                  if (isVoiceInputSourcePreference(value)) {\n                    updateSettings({ voiceInputSource: value });\n                  }\n                }}\n              >\n                <SelectTrigger className=\"w-full sm:w-52\" aria-label=\"Voice input source\">\n                  <SelectValue>{VOICE_INPUT_SOURCE_LABELS[settings.voiceInputSource]}</SelectValue>\n                </SelectTrigger>\n                <SelectPopup align=\"end\" alignItemWithTrigger={false}>\n                  {Object.entries(VOICE_INPUT_SOURCE_LABELS).map(([value, label]) => (\n                    <SelectItem hideIndicator key={value} value={value}>\n                      {label}\n                    </SelectItem>\n                  ))}\n                </SelectPopup>\n              </Select>\n            }\n          />\n        ) : null}\n\n"
     },
     {
       "path": "apps/web/src/components/settings/settingsSearch.ts",
@@ -587,8 +588,8 @@
     },
     {
       "path": "apps/web/src/components/sidebar/SidebarUpdatePill.tsx",
-      "find": "(idleTooltip?.title ?? \"Check for updates\")",
-      "replace": "state?.construct && !idleTooltip?.detail\n          ? \"Check for Construct and T3 Code updates\"\n          : (idleTooltip?.title ?? \"Check for updates\")"
+      "find": "(idleTooltip?.title ?? gt(\"Check for updates\"))",
+      "replace": "state?.construct && !idleTooltip?.detail\n          ? \"Check for Construct and T3 Code updates\"\n          : (idleTooltip?.title ?? gt(\"Check for updates\"))"
     },
     {
       "path": "apps/web/src/components/sidebar/SidebarUpdatePill.tsx",
@@ -1154,25 +1155,25 @@
     },
     {
       "path": "apps/web/src/components/settings/VoiceSettingsPanel.tsx",
-      "scope": "{...searchableSetting(\"voice-transcription-destination\")}",
+      "scope": "{...setting(\"voice-transcription-destination\")}",
       "after": "if (!value) return;",
       "insert": "                  if (constructClaudeVoice.choose(value)) {\n                    setPendingCloud(null);\n                    return;\n                  }\n"
     },
     {
       "path": "apps/web/src/components/settings/VoiceSettingsPanel.tsx",
-      "scope": "{...searchableSetting(\"voice-transcription-destination\")}",
+      "scope": "{...setting(\"voice-transcription-destination\")}",
       "after": "<SelectValue>",
       "insert": "                    {constructClaudeVoice.label ?? (\n                    <>\n"
     },
     {
       "path": "apps/web/src/components/settings/VoiceSettingsPanel.tsx",
-      "scope": "{...searchableSetting(\"voice-transcription-destination\")}",
+      "scope": "{...setting(\"voice-transcription-destination\")}",
       "before": "</SelectValue>",
       "insert": "                    </>\n                    )}\n"
     },
     {
       "path": "apps/web/src/components/settings/VoiceSettingsPanel.tsx",
-      "scope": "{...searchableSetting(\"voice-transcription-destination\")}",
+      "scope": "{...setting(\"voice-transcription-destination\")}",
       "before": "</SelectPopup>",
       "insert": "                  {constructClaudeVoice.options}\n"
     },
