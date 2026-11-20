@@ -41,7 +41,9 @@ const mocks = {
 };
 const result = await build({
   stdin: {contents: `import {createRoot} from 'react-dom/client';
+    import {initializeI18n} from ${JSON.stringify(resolve(source, 'apps/web/src/i18n/initializeI18n.ts'))};
     import {SidebarUpdatePill} from ${JSON.stringify(resolve(source, 'apps/web/src/components/sidebar/SidebarUpdatePill.tsx'))};
+    initializeI18n(() => {});
     const root=createRoot(document.getElementById('root'));
     window.render=()=>root.render(<SidebarUpdatePill />);`, loader:'tsx', resolveDir:resolve(source, 'apps/web')},
   bundle:true,write:false,format:'iife',platform:'browser',jsx:'automatic',
@@ -87,6 +89,7 @@ try {
           return {accepted:true,completed:false,state:{...window.updateState,construct:{...window.updateState.construct,runningAction:action}}}; },
         checkForUpdate: async () => { window.calls.push(['check']); return {checked:true,state:window.updateState}; },
         getSystemLocale: () => 'en-US',
+        getAppBranding: () => null,
       };
     }, fixture);
     if (fixture.vm) await page.evaluate(vm => {
