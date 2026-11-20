@@ -21,6 +21,7 @@ import * as SpeechService from "./SpeechService.ts";
 
 const LOCAL = "local/whisper";
 const OTHER = "local/parakeet";
+const CANCELLED = "local/cancelled";
 
 function upstreamModel(id: string, installed: boolean, selected: string): EnvironmentSpeechModel {
   return {
@@ -66,7 +67,11 @@ function setup(input: { readonly selected: string; readonly installed: ReadonlyA
     })),
     models: () => list,
     downloadModel: (modelId) =>
-      Effect.sync(() => installed.add(modelId)).pipe(Effect.andThen(list)),
+      Effect.sync(() => installed.add(modelId)).pipe(
+        Effect.andThen(list),
+        // A download of CANCELLED is cancelled before it completes.
+        Effect.map((models) => ({ ...models, cancelled: modelId === CANCELLED })),
+      ),
     selectModel: (modelId) =>
       Effect.sync(() => {
         settings = { ...settings, speechModelId: modelId };
@@ -76,6 +81,12 @@ function setup(input: { readonly selected: string; readonly installed: ReadonlyA
       Effect.sync(() => {
         installed.delete(modelId);
         if (fallback() === modelId) settings = { ...settings, speechModelId: OTHER };
+      }).pipe(Effect.andThen(list)),
+    linkModels: () =>
+      Effect.sync(() => {
+        const replace = !installed.has(fallback());
+        installed.add(OTHER);
+        if (replace) settings = { ...settings, speechModelId: OTHER };
       }).pipe(Effect.andThen(list)),
     prepareModel: Effect.sync(() => void calls.push("prepare")),
     transcribe: () => Effect.sync(() => (calls.push("local transcribe"), "local text")),
@@ -179,6 +190,32 @@ it.effect(
       expect(active(yield* speech.removeModel(CLAUDE_SPEECH_MODEL_ID))).toEqual([OTHER]);
       expect(fixture.selected()).toBe(OTHER);
     }),
+);
+
+it.effect("reports T3's download cancellation, and none for choosing Claude", () =>
+  Effect.gen(function* () {
+    const fixture = setup({ selected: LOCAL, installed: [LOCAL] });
+    const speech = yield* fixture.make(false);
+
+    expect((yield* speech.downloadModel(CANCELLED)).cancelled).toBe(true);
+    expect((yield* speech.downloadModel(OTHER)).cancelled).toBe(false);
+    const claude = yield* speech.downloadModel(CLAUDE_SPEECH_MODEL_ID);
+    expect(claude.cancelled).toBe(false);
+    expect(active(claude)).toEqual([CLAUDE_SPEECH_MODEL_ID]);
+  }),
+);
+
+it.effect("keeps Claude chosen when T3 links model files that it would select", () =>
+  Effect.gen(function* () {
+    const claude = setup({ selected: CLAUDE_SPEECH_MODEL_ID, installed: [] });
+    const linked = yield* (yield* claude.make(false)).linkModels("/models");
+    expect(active(linked)).toEqual([CLAUDE_SPEECH_MODEL_ID]);
+    expect(linked.models.find((model) => model.id === OTHER)?.state).toBe("installed");
+    expect(claude.selected()).toBe(CLAUDE_SPEECH_MODEL_ID);
+
+    const local = setup({ selected: LOCAL, installed: [] });
+    expect(active(yield* (yield* local.make(false)).linkModels("/models"))).toEqual([OTHER]);
+  }),
 );
 
 it.effect("makes Claude a VM's model only while no installed model is selected", () =>

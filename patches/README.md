@@ -60,8 +60,8 @@ Concretely:
 - **Exactly one match** for an anchor or `find`, unless a `scope` is given: then the
   first match *after* the scope text is used (`"scope": "function Foo"` for an anchor
   such as `</>` that repeats in the file).
-- **`every: true`** inserts next to every occurrence (a prop passed at several identical
-  call sites).
+- **`every: true`** inserts next to, or replaces, every occurrence (a prop passed or an
+  argument changed at several identical call sites).
 - **Idempotent.** An insert whose text is already present, or a `replace` text already
   present, is a no-op, so an interrupted build can re-apply the same tree.
 - **`optional: true`** — a missing file or anchor is skipped instead of failing. Used
@@ -201,7 +201,13 @@ through re-indentation) and the list of `conflicts`.
 - **Auto-link** (`ConstructAutoLink`, Windows Desktop app): every Construct VM of the PC
   that runs T3 and is not yet a remote environment is linked on its own. The main process
   runs `Get-ConstructT3PairingLink.ps1` hidden to mint a link over SSH. A marker in the
-  instance's state keeps a connection the user removed from being added back. A linked VM
+  instance's state keeps a connection the user removed from being added back. When the app
+  has the VM's environment saved under another address (the VM was renamed or moved behind
+  another forward), T3 refuses a plain link to it. The Providers row's Link then names the
+  saved environment the server reports at `/.well-known/t3/environment` and, once the user
+  confirms, adds the new address as a route of it, as T3's "Add route" does; the old address
+  stays saved until the user removes it in Settings → Connections. The automatic link never
+  adds a route. A linked VM
   (matched by its paired address, or else by the environment id its marker recorded, which
   also covers a connection the user paired through a proxy of their own) whose session still has T3's
   old permission set (upstream's

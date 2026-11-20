@@ -1,6 +1,7 @@
 import { ArrowUpCircleIcon, LoaderIcon, RefreshCwIcon, ServerCogIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
+import { requestConfirmDialog } from "~/confirmDialog";
 import { connectPairing as connectPairingAtom } from "~/connection/onboarding";
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
@@ -251,6 +252,7 @@ function ConstructInstanceRow({
   const offer = row.provisionStale || row.t3UpdateAvailable;
   const action = getConstructRowAction(row);
   const connectPairing = useAtomCommand(connectPairingAtom, { reportFailure: false });
+  const { environments } = useEnvironments();
 
   const link = useCallback(async () => {
     const bridge = window.desktopBridge;
@@ -267,13 +269,34 @@ function ConstructInstanceRow({
     }
     setIsBusy(true);
     try {
-      const outcome = await linkConstructInstance({ bridge, name: row.instanceName, connectPairing });
+      const name = row.instanceName;
+      // T3 refuses a new address for a saved environment unless the pairing names it, so
+      // the user confirms that the environment the VM reports is the one to extend.
+      const outcome = await linkConstructInstance({
+        bridge,
+        name,
+        connectPairing,
+        savedEnvironments: environments.map((environment) => environment.entry),
+        confirmRoute: async (saved) =>
+          (await requestConfirmDialog(
+            `${name} reports itself as "${saved.label}", which this app has already saved` +
+              (saved.previousAddress === null ? "" : ` at ${saved.previousAddress}`) +
+              `. Add ${saved.address} as a route of "${saved.label}"?`,
+          )) ?? false,
+      });
       if (outcome.ok) {
+        const saved = outcome.savedRoute;
         toastManager.add(
           stackedThreadToast({
             type: "success",
-            title: `Linked ${row.instanceName}`,
-            description: "Added as a remote environment.",
+            title: `Linked ${name}`,
+            description:
+              saved === undefined
+                ? "Added as a remote environment."
+                : `${saved.address} is now a route of "${saved.label}".` +
+                  (saved.previousAddress === null
+                    ? ""
+                    : ` Its old address ${saved.previousAddress} stays saved until you remove it in Settings → Connections.`),
           }),
         );
       } else if (!outcome.interrupted) {
@@ -288,7 +311,7 @@ function ConstructInstanceRow({
     } finally {
       setIsBusy(false);
     }
-  }, [connectPairing, isBusy, row.instanceName]);
+  }, [connectPairing, environments, isBusy, row.instanceName]);
 
   return (
     <div className="group flex min-h-19 items-start gap-3 rounded-md px-3 py-2 transition-colors hover:bg-foreground/4">

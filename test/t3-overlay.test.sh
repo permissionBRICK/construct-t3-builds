@@ -54,7 +54,7 @@ src="${T3_SOURCE_DIR:-}"
 if [[ -z "${src}" ]]; then
   src="$(find /var/cache/construct/t3code-source -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort | tail -1)"
 fi
-if [[ -z "${src}" || ! -x "${src}/node_modules/.bin/vitest" || ! -d "${src}/.git" ]]; then
+if [[ -z "${src}" || ! -x "${src}/node_modules/.bin/vp" || ! -d "${src}/.git" ]]; then
   echo "  SKIP  no T3 git checkout with node_modules (set T3_SOURCE_DIR to one built by bin/build-t3code.sh)"
   finish
 fi
@@ -144,10 +144,13 @@ run_in() {
 
 # The TRANSFORMED runtime: contracts, the IPC method + handler + preload, the desktop
 # service and the Providers UI all have to typecheck together, not just the pure files.
-run_in "typecheck (transformed runtime)" desktop "${work}/node_modules/.bin/tsc" --noEmit
-run_in "typecheck (transformed runtime)" web "${work}/node_modules/.bin/tsc" --noEmit
-run_in "overlay vitest" desktop "${work}/node_modules/.bin/vitest" run src/updates/ConstructUpdates.test.ts
-run_in "overlay vitest" web "${work}/node_modules/.bin/vitest" run \
+# Upstream's own toolchain: `effect-tsgo tsrs` is what its package typecheck scripts run,
+# and `vp test` is its Vitest (there is no node_modules/.bin/vitest or tsc at the root).
+run_in "typecheck (transformed runtime)" desktop "${work}/node_modules/.bin/effect-tsgo" tsrs --noEmit -p .
+run_in "typecheck (transformed runtime)" web "${work}/node_modules/.bin/effect-tsgo" tsrs --noEmit -p .
+run_in "overlay vitest" desktop "${work}/node_modules/.bin/vp" test run --project unit src/updates/ConstructUpdates.test.ts
+run_in "overlay vitest" web "${work}/node_modules/.bin/vp" test run --project unit \
+  src/components/ConstructAutoLink.test.tsx src/components/constructInstances.link.test.ts \
   src/components/constructInstances.logic.test.ts src/components/constructUpdate.logic.test.ts \
   src/state/constructSessionRenewal.logic.test.ts
 

@@ -218,9 +218,11 @@ export const makeClaudeSpeech = Effect.fn("ConstructClaudeSpeech.make")(function
         : yield* speech.startStream(options);
     }),
     downloadModel: Effect.fn("ConstructClaudeSpeech.downloadModel")(function* (modelId) {
+      // Claude has nothing to download; another model reports T3's own cancellation.
+      let cancelled = false;
       if (modelId === CLAUDE_SPEECH_MODEL_ID) yield* selectModelId("model selection", modelId);
-      else yield* speech.downloadModel(modelId);
-      return yield* models(false);
+      else cancelled = (yield* speech.downloadModel(modelId)).cancelled;
+      return { ...(yield* models(false)), cancelled };
     }),
     selectModel: Effect.fn("ConstructClaudeSpeech.selectModel")(function* (modelId) {
       if (modelId === CLAUDE_SPEECH_MODEL_ID) yield* selectModelId("model selection", modelId);
@@ -245,6 +247,14 @@ export const makeClaudeSpeech = Effect.fn("ConstructClaudeSpeech.make")(function
         );
         yield* selectModelId("model removal", installed?.id ?? DEFAULT_SPEECH_MODEL_ID);
       }
+      return yield* models(false);
+    }),
+    linkModels: Effect.fn("ConstructClaudeSpeech.linkModels")(function* (source) {
+      const active = yield* usesClaude("model linking");
+      yield* speech.linkModels(source);
+      // T3 selects a linked model when its selection is not installed; Claude stays chosen.
+      if (active && !(yield* usesClaude("model linking")))
+        yield* selectModelId("model linking", CLAUDE_SPEECH_MODEL_ID);
       return yield* models(false);
     }),
     updateAcceleration: Effect.fn("ConstructClaudeSpeech.updateAcceleration")(

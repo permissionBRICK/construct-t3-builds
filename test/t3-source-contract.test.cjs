@@ -151,6 +151,12 @@ for (const channel of ["release", "nightly"]) {
     /sessionHasLegacyPermissions\(session\.value\)/.test(relink) && /planConstructRelink\(\{/.test(relink) &&
     /relinkAttemptedRef\.current\.add\(plan\.name\)/.test(relink) &&
     /host: input\.baseUrl,\n\s*pairingCode: token,\n\s*expectedEnvironmentId: input\.environmentId,/.test(relinkLink));
+  const providerRow = fs.readFileSync(path.join(components, "settings", "ConstructProviderRow.tsx"), "utf8");
+  ok(`auto-link (${channel}): Link pairs a VM the app saved under another address as its route, once the user confirms`,
+    /\{ pairingUrl: minted\.pairUrl, expectedEnvironmentId: routeOf\.environmentId \}/.test(relinkLink) &&
+    /"\/\.well-known\/t3\/environment"/.test(relinkLink) &&
+    /savedEnvironments: environments\.map\(\(environment\) => environment\.entry\),\n\s*confirmRoute:/.test(providerRow) &&
+    /requestConfirmDialog\(/.test(providerRow));
   ok(`auto-link (${channel}): upstream's pair-again notice is dismissed by a layout effect for the VMs Construct re-links`,
     /useLayoutEffect\(\(\) => \{[^}]*setLocalStorageItem\(`t3code:permission-update:v1:\$\{environmentId\}`/.test(relink));
 }

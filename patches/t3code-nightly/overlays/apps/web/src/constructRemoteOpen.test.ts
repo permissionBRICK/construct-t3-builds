@@ -43,6 +43,7 @@ function editorUrl(entry: ReturnType<typeof pairedEntry>, instances: ConstructUp
     sshTarget: constructSshTargetFor(String(HAUS), entry, instances),
     remoteOpenTargets: ADVERTISED,
     isDesktopRenderer: true,
+    hostEnvironmentId: null,
   });
   if (state.mode !== "remote-links") return state.mode;
   return buildRemoteOpenUrl({

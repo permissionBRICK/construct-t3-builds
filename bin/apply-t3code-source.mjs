@@ -19,8 +19,8 @@
 //     with their own indentation) goes after/before it.
 //   * "scope": "<text>" starts the search after that text — only for the rare anchor
 //     that occurs more than once in the file.
-//   * "every": true — insert next to every occurrence (a prop passed at several
-//     identical call sites).
+//   * "every": true — insert next to, or replace, every occurrence (a prop passed
+//     or an argument changed at several identical call sites).
 //   * "optional": true — a missing file or anchor is skipped, not a conflict (used
 //     for upstream TEST files: they never affect the built server/Desktop app).
 //   * One inventory per channel (patches/t3code-release, patches/t3code-nightly),
@@ -156,6 +156,13 @@ function runTransform(operation, content) {
   }
   if (operation.find !== undefined) {
     if (content.includes(operation.replace)) return { state: "applied" }
+    if (operation.every) {
+      const hits = findAll(content, operation.find)
+      if (!hits.length) return { state: operation.optional ? "skipped" : "conflict", detail: "find anchor not found" }
+      let updated = content
+      for (const hit of [...hits].reverse()) updated = updated.slice(0, hit.start) + operation.replace + updated.slice(hit.end)
+      return { state: "pending", content: updated, detail: hits[0].how }
+    }
     const found = locate(content, operation.find, operation.scope, ambiguous)
     if (!found) return { state: operation.optional ? "skipped" : "conflict", detail: describeMiss("find", ambiguous) }
     return {
