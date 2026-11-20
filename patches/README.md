@@ -275,6 +275,12 @@ through re-indentation) and the list of `conflicts`.
   `constructOpenCodeMonitor.ts`). The entry bundle is marked, so the runtime patchers
   in `extension/vm/` report it compatible and leave it unchanged. There is no Claude
   usage-limit park; upstream's "Auto-resume limited threads" setting replaces it.
+  The OpenCode monitor shows the jobs Construct's OpenCode background plugin is still
+  watching as monitors of the thread ("Waiting on monitor") and keeps the session from
+  idling out until the job's wake arrives or the job is killed. It hooks both OpenCode
+  adapters: OpenCode 1 (`adapter.ts`, from the plugin's message parts) and OpenCode 2
+  (`v2/adapter.ts`, from the plugin's tool metadata and its wake message, added to the
+  roster T3 builds from OpenCode's own background shells).
 - **New-project folder** (`constructProjectsRoot.ts`): on a Construct VM, "New project"
   creates its folder in the VM's `WORKSPACE_ROOT` from `/etc/construct/config.env`
   (`/root/repos` by default) instead of upstream's `~/.t3/projects`, so new projects sit

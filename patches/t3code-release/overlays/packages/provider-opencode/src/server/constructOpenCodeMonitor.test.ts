@@ -5,6 +5,7 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   constructOpenCodeMonitorRoster,
   hasConstructOpenCodeMonitor,
+  makeConstructOpenCode2Monitors,
   withoutConstructOpenCodeMonitors,
 } from "./constructOpenCodeMonitor.ts";
 
@@ -72,5 +73,43 @@ describe("monitor probes", () => {
     expect(hasConstructOpenCodeMonitor(thread([command]))).toBe(false);
     expect(hasConstructOpenCodeMonitor(undefined)).toBe(false);
     expect(withoutConstructOpenCodeMonitors(thread([monitor, command]))).toEqual([command]);
+  });
+});
+
+describe("makeConstructOpenCode2Monitors", () => {
+  const armed = { id: "bg_1", pid: 42, wait: true, description: " watch CI " };
+  const root = { sessionId: "ses_root" };
+  const child = { sessionId: "ses_child" };
+
+  it("arms a waiting background call as a monitor of its session once", () => {
+    const monitors = makeConstructOpenCode2Monitors();
+    expect(monitors.tool("ses_root", "background", armed)).toBe(true);
+    expect(monitors.tool("ses_root", "background", armed)).toBe(false);
+    expect(monitors.tool("ses_root", "background", { id: "bg_2", wait: false })).toBe(false);
+    expect(monitors.tool("ses_root", "shell", { id: "bg_3", wait: true })).toBe(false);
+    expect(monitors.has("ses_root")).toBe(true);
+    expect(monitors.tasks([root])).toEqual([monitor]);
+  });
+
+  it("ends a monitor on its wake or on background_kill, in its own session only", () => {
+    const monitors = makeConstructOpenCode2Monitors();
+    monitors.tool("ses_root", "background", armed);
+    monitors.tool("ses_child", "background", { id: "bg_1", wait: true });
+    expect(monitors.tasks([root, child])).toHaveLength(2);
+    expect(monitors.wake("ses_root", { source: "shell", id: "bg_1" })).toBe(false);
+    expect(monitors.wake("ses_root", { source: "construct-background", id: "bg_1" })).toBe(true);
+    expect(monitors.has("ses_root")).toBe(false);
+    expect(monitors.tasks([root, child])).toEqual([{ taskId: "bg_1", kind: "monitor" }]);
+    expect(monitors.tool("ses_child", "background_kill", { id: "bg_9" })).toBe(false);
+    expect(monitors.tool("ses_child", "background_kill", { id: "bg_1" })).toBe(true);
+    expect(monitors.tasks([root, child])).toEqual([]);
+  });
+
+  it("clears the monitors of stopped sessions", () => {
+    const monitors = makeConstructOpenCode2Monitors();
+    monitors.tool("ses_root", "background", armed);
+    expect(monitors.clear([child])).toBe(false);
+    expect(monitors.clear([root, child])).toBe(true);
+    expect(monitors.has("ses_root")).toBe(false);
   });
 });
