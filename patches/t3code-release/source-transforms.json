@@ -961,6 +961,40 @@
       "optional": true
     },
     {
+      "path": "packages/provider-opencode/src/server/v2/adapter.ts",
+      "import": "import {\n  makeConstructOpenCode2Monitors,\n  markConstructOpenCodeStop,\n} from \"../constructOpenCodeMonitor.ts\";\n"
+    },
+    {
+      "path": "packages/provider-opencode/src/server/v2/adapter.ts",
+      "before": "const owesWork =",
+      "insert": "    // Construct: the background plugin's armed watchers (constructOpenCodeMonitor.ts).\n    const constructMonitors = makeConstructOpenCode2Monitors();\n"
+    },
+    {
+      "path": "packages/provider-opencode/src/server/v2/adapter.ts",
+      "after": "const owesWork =",
+      "insert": "      constructMonitors.has(state.sessionId) ||\n"
+    },
+    {
+      "path": "packages/provider-opencode/src/server/v2/adapter.ts",
+      "before": "const allTasks =",
+      "insert": "      roster.push(...constructMonitors.tasks(sessionsOf(state)));\n"
+    },
+    {
+      "path": "packages/provider-opencode/src/server/v2/adapter.ts",
+      "after": "case \"session.tool.success\": {",
+      "insert": "          // Construct: the background plugin's `background` call arms a monitor, `background_kill` ends it.\n          if (constructMonitors.tool(state.sessionId, turn.tools.get(event.data.id)?.name, event.data.metadata))\n            yield* syncRosterAncestors(state);\n"
+    },
+    {
+      "path": "packages/provider-opencode/src/server/v2/adapter.ts",
+      "after": "if (event.type === \"session.inbox.enqueued\" && event.data.item.type === \"synthetic\") {",
+      "insert": "        // Construct: the background plugin's wake ends its watcher's monitor.\n        if (constructMonitors.wake(state.sessionId, event.data.item.payload.metadata))\n          yield* syncRosterAncestors(state);\n"
+    },
+    {
+      "path": "packages/provider-opencode/src/server/v2/adapter.ts",
+      "after": "const stopBackground =",
+      "insert": "      // Construct: Stop drops the background plugin's monitors and disarms its watchers: the plugin\n      // never wakes a session for a `wait: true` task started before that session's stop marker.\n      if (constructMonitors.clear(sessionsOf(state))) yield* syncRosterAncestors(state);\n      yield* Effect.sync(() => {\n        for (const session of sessionsOf(state)) markConstructOpenCodeStop(session.sessionId);\n      });\n"
+    },
+    {
       "path": "apps/server/src/bin.ts",
       "after": "import { isEntrypoint } from \"./entrypoint.ts\";",
       "insert": "\n/**\n * Construct builds the Codex capacity retry and the OpenCode monitor into this server.\n * Its runtime patchers read only this entry bundle and leave it unchanged on these markers:\n * __T3PARK source__ __CONSTRUCT_T3_OPENCODE_MONITOR source__\n */\n"

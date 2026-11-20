@@ -12,6 +12,7 @@ import { environmentSession } from "../state/session";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
   CONSTRUCT_LINKED_TARGET_KIND,
+  constructCanPairVms,
   constructEnvironmentConnected,
   constructLinkedRemotes,
   constructRelinkCandidates,
@@ -23,6 +24,7 @@ import {
   linkConstructInstance,
   relinkConstructInstance,
 } from "./constructInstances.link";
+import { setConstructLinkedRemotes } from "./constructUpdate";
 import { getConstructUpdateInfo } from "./constructUpdate.logic";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
@@ -80,6 +82,9 @@ function ConstructAutoLinkContent() {
     [environments],
   );
 
+  // The update control's Construct actions target these connections.
+  useEffect(() => setConstructLinkedRemotes(remotes), [remotes]);
+
   // The same remotes, at the address of the route they were PAIRED at (the re-link's).
   const pairedRemotes = useMemo(
     () =>
@@ -94,7 +99,7 @@ function ConstructAutoLinkContent() {
   const canLink = typeof window.desktopBridge?.linkConstructInstance === "function";
   // The remotes this PC's Construct would pair again: only their sessions are probed.
   const managedEnvironmentIds = useMemo(() => {
-    if (!canLink || info === null || info.scriptsDir === null) return [];
+    if (!canLink || info === null || !constructCanPairVms(info)) return [];
     const ids = new Set(
       constructRelinkCandidates(pairedRemotes, info.instances).map((candidate) => candidate.environmentId),
     );
