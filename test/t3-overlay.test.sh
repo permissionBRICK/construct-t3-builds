@@ -11,7 +11,7 @@
 # WITHOUT such a tree there is nothing to run against and the script SKIPS (exit 0): a
 # Linux CI box that never built T3 must not go red for a suite it cannot host.
 #
-#   T3_SOURCE_DIR=/path/to/t3-checkout  bash test/t3-overlay.test.sh
+#   T3_SOURCE_DIR=/path/to/t3-checkout  [T3_TEST_CHANNEL=release|nightly]  bash test/t3-overlay.test.sh
 #
 # Only the inventory whose tag the source actually IS can be applied; the other channel's
 # anchors are written against a different upstream tag and are reported as not checked.
@@ -33,9 +33,12 @@ echo ""
 echo "=== T3 overlay + transform inventory ==="
 
 # The inventories target different upstream tags. Their file sets must agree;
-# their contents can differ to match each channel's current APIs.
-release_files="$(cd "${repo}/patches/t3code-release/overlays" && find . -type f | sort)"
-nightly_files="$(cd "${repo}/patches/t3code-nightly/overlays" && find . -type f | sort)"
+# their contents can differ to match each channel's current APIs. The exception is a
+# feature that ships on nightly first: Construct updates through the device agent, while
+# the release inventory keeps its update popup until the feature is ported.
+channel_only='^\./(apps/desktop/src/construct/ConstructAgent|apps/server/src/constructVmUpdate|apps/web/src/state/constructVmUpdate|packages/contracts/src/constructVmUpdate|apps/web/src/components/ConstructUpdateNotification|apps/web/src/components/useConstructUpdateState)(\.test)?\.tsx?$'
+release_files="$(cd "${repo}/patches/t3code-release/overlays" && find . -type f | grep -Ev "${channel_only}" | sort)"
+nightly_files="$(cd "${repo}/patches/t3code-nightly/overlays" && find . -type f | grep -Ev "${channel_only}" | sort)"
 ok "the release and nightly inventories carry the same overlay paths" "$([[ "${release_files}" == "${nightly_files}" ]] && echo 0 || echo 1)"
 if [[ "${release_files}" != "${nightly_files}" ]]; then
   comm -3 <(printf '%s\n' "${release_files}") <(printf '%s\n' "${nightly_files}")
@@ -60,10 +63,12 @@ if [[ -z "${src}" || ! -x "${src}/node_modules/.bin/vp" || ! -d "${src}/.git" ]]
 fi
 echo "  using T3 source: ${src}"
 
-# Which inventory is written against THIS source? The package version of the checkout.
+# Which inventory is written against THIS source? The package version of the checkout, which
+# the build recipe sets; a plain clone of a nightly tag carries no nightly version, so
+# T3_TEST_CHANNEL=release|nightly names the inventory, as for the browser checks.
 version="$(node -e 'try{process.stdout.write(require(process.argv[1]).version||"")}catch{}' "${src}/apps/server/package.json" 2>/dev/null)"
-channel=release
-[[ "${version}" == *"nightly"* ]] && channel=nightly
+channel="${T3_TEST_CHANNEL:-release}"
+[[ -z "${T3_TEST_CHANNEL:-}" && "${version}" == *"nightly"* ]] && channel=nightly
 echo "  T3 ${version:-unknown} -> the ${channel} inventory (the other channel targets a different tag and is not checked here)"
 
 work="$(mktemp -d /tmp/t3-overlay-XXXXXX)"
