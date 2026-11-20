@@ -218,9 +218,11 @@ export const makeClaudeSpeech = Effect.fn("ConstructClaudeSpeech.make")(function
         : yield* speech.startStream(options);
     }),
     downloadModel: Effect.fn("ConstructClaudeSpeech.downloadModel")(function* (modelId) {
+      // Claude has nothing to download; another model reports T3's own cancellation.
+      let cancelled = false;
       if (modelId === CLAUDE_SPEECH_MODEL_ID) yield* selectModelId("model selection", modelId);
-      else yield* speech.downloadModel(modelId);
-      return yield* models(false);
+      else cancelled = (yield* speech.downloadModel(modelId)).cancelled;
+      return { ...(yield* models(false)), cancelled };
     }),
     selectModel: Effect.fn("ConstructClaudeSpeech.selectModel")(function* (modelId) {
       if (modelId === CLAUDE_SPEECH_MODEL_ID) yield* selectModelId("model selection", modelId);

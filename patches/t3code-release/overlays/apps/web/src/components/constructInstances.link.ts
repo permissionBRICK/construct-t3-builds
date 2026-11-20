@@ -1,5 +1,6 @@
 import {
   type ConnectionCatalogEntry,
+  connectionRouteAddress,
   connectionRouteId,
   connectionRoutes,
   credentialConnectionId,
@@ -23,12 +24,17 @@ import {
  *   1. ask the main process for a one-time pairing link — it runs
  *      Get-ConstructT3PairingLink.ps1 hidden, which mints the link on the VM over SSH,
  *   2. register the remote through the app's own connect command (what the Connections
- *      dialog does when a link is pasted; the environment takes the remote's own label),
+ *      dialog does when a link is pasted; the environment takes the remote's own label).
+ *      T3 refuses a plain link to an environment the app has already saved under another
+ *      address (the VM's address changed). The Link button can then add the address as a
+ *      route of that environment, as T3's "Add route" does, once the user confirms it;
+ *      the automatic path does not,
  *   3. report the outcome back so the instance's state file remembers it — done once,
  *      backed off after a failure, and never re-added after the user removes it.
  *
  * Resolves with the outcome; never rejects. A step-2 interruption (the app is closing)
- * records nothing, so the next start tries again.
+ * records nothing, so the next start tries again; a route the user declines records nothing
+ * either.
  */
 export type ConstructLinkBridge = Pick<
   DesktopBridge,
@@ -41,7 +47,7 @@ export type ConstructLinkBridge = Pick<
  *  (its descriptor), the same as when a link is pasted into the Connections dialog. */
 export type ConstructConnectPairing = (
   input:
-    | { readonly pairingUrl: string }
+    | { readonly pairingUrl: string; readonly expectedEnvironmentId?: EnvironmentId }
     | {
         readonly host: string;
         readonly pairingCode: string;
@@ -50,8 +56,23 @@ export type ConstructConnectPairing = (
 ) => Promise<AtomCommandResult<unknown, unknown>>;
 
 export type ConstructLinkOutcome =
-  | { readonly ok: true; readonly environmentId: string; readonly baseUrl: string | null }
+  | {
+      readonly ok: true;
+      readonly environmentId: string;
+      readonly baseUrl: string | null;
+      /** Set when the link was paired as a route of an environment the app had saved. */
+      readonly savedRoute?: ConstructSavedRoute;
+    }
   | { readonly ok: false; readonly error: string; readonly interrupted: boolean };
+
+/** A link at a new address whose server reports itself as an environment the app has
+ *  saved: the link's address, the saved environment's label, and the address its paired
+ *  route uses (null when it has no paired bearer route). */
+export interface ConstructSavedRoute {
+  readonly address: string;
+  readonly label: string;
+  readonly previousAddress: string | null;
+}
 
 /** The origin a pairing link names (the token rides in the fragment); null when the
  *  link is not an http(s) URL. Pure. */
@@ -97,6 +118,29 @@ export function constructPairedRouteUrl(entry: ConnectionCatalogEntry): string |
   return profile?._tag === "BearerConnectionProfile" ? profile.httpBaseUrl : null;
 }
 
+/** The environment id a T3 server reports at `/.well-known/t3/environment`, the descriptor
+ *  T3 reads before it pairs; null when the server does not answer with one. */
+export async function constructServerEnvironmentId(
+  baseUrl: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string | null> {
+  try {
+    const response = await fetchImpl(new URL("/.well-known/t3/environment", baseUrl), {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return null;
+    const descriptor: unknown = await response.json();
+    const environmentId =
+      typeof descriptor === "object" && descriptor !== null && "environmentId" in descriptor
+        ? descriptor.environmentId
+        : null;
+    return typeof environmentId === "string" && environmentId !== "" ? environmentId : null;
+  } catch {
+    return null;
+  }
+}
+
 function marker(
   status: ConstructT3LinkInfo["status"],
   over: Partial<Omit<ConstructT3LinkInfo, "status" | "at">>,
@@ -115,6 +159,12 @@ export async function linkConstructInstance(input: {
   readonly bridge: ConstructLinkBridge;
   readonly name: string;
   readonly connectPairing: ConstructConnectPairing;
+  /** The app's saved environments, and the user's answer to pairing the link as a route
+   *  of the one its server reports itself as. T3 refuses a new address for a saved
+   *  environment unless the pairing names it; without both, a link is never a route. */
+  readonly savedEnvironments?: ReadonlyArray<ConnectionCatalogEntry>;
+  readonly confirmRoute?: (route: ConstructSavedRoute) => Promise<boolean>;
+  readonly fetch?: typeof fetch;
   readonly now?: () => string;
 }): Promise<ConstructLinkOutcome> {
   const now = input.now ?? (() => new Date().toISOString());
@@ -138,7 +188,46 @@ export async function linkConstructInstance(input: {
   }
 
   const baseUrl = constructPairingLinkOrigin(minted.pairUrl);
-  const result = await input.connectPairing({ pairingUrl: minted.pairUrl });
+  const confirmRoute = input.confirmRoute;
+  const savedEnvironments = input.savedEnvironments ?? [];
+  const serverEnvironmentId =
+    baseUrl === null || savedEnvironments.length === 0 || confirmRoute === undefined
+      ? null
+      : await constructServerEnvironmentId(baseUrl, input.fetch);
+  // The app's own backend is never a VM's environment.
+  const saved =
+    savedEnvironments.find(
+      (entry) =>
+        entry.target._tag !== "PrimaryConnectionTarget" &&
+        String(entry.target.environmentId) === serverEnvironmentId,
+    ) ?? null;
+  // An environment that already has a route to the link's address takes the plain link:
+  // T3 accepts it and replaces that route's credential in place.
+  const knownAddress =
+    saved !== null &&
+    connectionRoutes(saved).some((route) => {
+      const address = connectionRouteAddress(route);
+      return address !== null && constructPairingLinkOrigin(address) === baseUrl;
+    });
+  const routeOf =
+    saved === null || baseUrl === null || knownAddress
+      ? null
+      : {
+          environmentId: saved.target.environmentId,
+          route: {
+            address: baseUrl,
+            label: saved.target.label,
+            previousAddress: constructPairedRouteUrl(saved),
+          } satisfies ConstructSavedRoute,
+        };
+  if (routeOf !== null && (confirmRoute === undefined || !(await confirmRoute(routeOf.route)))) {
+    return { ok: false, error: "The link was cancelled.", interrupted: true };
+  }
+  const result = await input.connectPairing(
+    routeOf === null
+      ? { pairingUrl: minted.pairUrl }
+      : { pairingUrl: minted.pairUrl, expectedEnvironmentId: routeOf.environmentId },
+  );
   if (result._tag === "Failure") {
     if (isAtomCommandInterrupted(result)) {
       return { ok: false, error: "The link was interrupted.", interrupted: true };
@@ -151,7 +240,9 @@ export async function linkConstructInstance(input: {
 
   const environmentId = String(result.value);
   await record(marker("linked", { environmentId, baseUrl }, now));
-  return { ok: true, environmentId, baseUrl };
+  return routeOf === null
+    ? { ok: true, environmentId, baseUrl }
+    : { ok: true, environmentId, baseUrl, savedRoute: routeOf.route };
 }
 
 /**
