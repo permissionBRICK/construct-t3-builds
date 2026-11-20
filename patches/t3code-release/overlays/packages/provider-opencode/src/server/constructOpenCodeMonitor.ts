@@ -64,7 +64,8 @@ export function withoutConstructOpenCodeMonitors(
  * the plugin's wake (a synthetic message with `metadata.source ===
  * "construct-background"` and `metadata.id`) or a completed `background_kill` call
  * with `metadata.id` ends it. The adapter adds the monitors to the session's roster and
- * counts them as pending background work.
+ * counts them as pending background work. Stop also writes markConstructOpenCodeStop
+ * for each of the stopped sessions.
  */
 export function makeConstructOpenCode2Monitors() {
   const monitors = new Map<string, ReadonlyArray<PendingBackgroundTask>>();
@@ -107,7 +108,7 @@ export function makeConstructOpenCode2Monitors() {
     has: (sessionId: string) => monitors.has(sessionId),
     tasks: (sessions: ReadonlyArray<{ readonly sessionId: string }>) =>
       sessions.flatMap((session) => monitors.get(session.sessionId) ?? []),
-    /** Stop drops the sessions' monitors; the plugin's own watcher is not killed. */
+    /** Stop drops the sessions' monitors; markConstructOpenCodeStop disarms the plugin's watchers. */
     clear(sessions: ReadonlyArray<{ readonly sessionId: string }>): boolean {
       let changed = false;
       for (const session of sessions) changed = monitors.delete(session.sessionId) || changed;

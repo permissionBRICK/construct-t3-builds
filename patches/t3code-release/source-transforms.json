@@ -962,7 +962,7 @@
     },
     {
       "path": "packages/provider-opencode/src/server/v2/adapter.ts",
-      "import": "import { makeConstructOpenCode2Monitors } from \"../constructOpenCodeMonitor.ts\";\n"
+      "import": "import {\n  makeConstructOpenCode2Monitors,\n  markConstructOpenCodeStop,\n} from \"../constructOpenCodeMonitor.ts\";\n"
     },
     {
       "path": "packages/provider-opencode/src/server/v2/adapter.ts",
@@ -992,7 +992,7 @@
     {
       "path": "packages/provider-opencode/src/server/v2/adapter.ts",
       "after": "const stopBackground =",
-      "insert": "      // Construct: Stop drops the background plugin's monitors; the plugin's own watcher is not killed.\n      if (constructMonitors.clear(sessionsOf(state))) yield* syncRosterAncestors(state);\n"
+      "insert": "      // Construct: Stop drops the background plugin's monitors and disarms its watchers: the plugin\n      // never wakes a session for a `wait: true` task started before that session's stop marker.\n      if (constructMonitors.clear(sessionsOf(state))) yield* syncRosterAncestors(state);\n      yield* Effect.sync(() => {\n        for (const session of sessionsOf(state)) markConstructOpenCodeStop(session.sessionId);\n      });\n"
     },
     {
       "path": "apps/server/src/bin.ts",
