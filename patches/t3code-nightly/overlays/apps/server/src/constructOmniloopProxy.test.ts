@@ -55,6 +55,18 @@ function startFakeOmniloop(): Promise<{ port: number; close: () => void; seen: N
   });
 }
 
+// The proxy reads omniloop's config through process.env, outside Effect.
+function useOmniloopHome(home: string): () => void {
+  const previous = { home: process.env.OMNILOOP_HOME, port: process.env.OMNILOOP_PORT };
+  process.env.OMNILOOP_HOME = home;
+  delete process.env.OMNILOOP_PORT;
+  return () => {
+    if (previous.home === undefined) delete process.env.OMNILOOP_HOME;
+    else process.env.OMNILOOP_HOME = previous.home;
+    if (previous.port !== undefined) process.env.OMNILOOP_PORT = previous.port;
+  };
+}
+
 describe("constructOmniloopProxyRouteLayer", () => {
   it.effect("proxies the dashboard under a ticket and rewrites its absolute references", () =>
     Effect.scoped(
@@ -62,16 +74,12 @@ describe("constructOmniloopProxyRouteLayer", () => {
         const upstream = yield* Effect.promise(startFakeOmniloop);
         const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "omniloop-proxy-test-"));
         NodeFS.writeFileSync(NodePath.join(home, "config.toml"), `port = ${upstream.port}\ntoken = "ol_cfg_test"\n`);
-        const previous = { home: process.env.OMNILOOP_HOME, port: process.env.OMNILOOP_PORT };
-        process.env.OMNILOOP_HOME = home;
-        delete process.env.OMNILOOP_PORT;
+        const restoreEnvironment = useOmniloopHome(home);
         yield* Effect.addFinalizer(() =>
           Effect.sync(() => {
             upstream.close();
             NodeFS.rmSync(home, { recursive: true, force: true });
-            if (previous.home === undefined) delete process.env.OMNILOOP_HOME;
-            else process.env.OMNILOOP_HOME = previous.home;
-            if (previous.port !== undefined) process.env.OMNILOOP_PORT = previous.port;
+            restoreEnvironment();
           }),
         );
 

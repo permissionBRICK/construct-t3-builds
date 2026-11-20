@@ -182,7 +182,6 @@ function Composer() {
   const speech = useEnvironmentSpeechInput({
     environmentId: "vm" as never,
     ownerKey: "thread",
-    draftText: draft,
     disabled: false,
     readDraft: () => ({ text: draft, selection: { start: 0, end: 0 } }),
     commitDraft: () => {},
@@ -242,12 +241,7 @@ function Composer() {
             onCancel={() => speech.cancel()}
             onSkipPostProcessing={() => speech.skipPostProcessing()}
           />
-          <ComposerSpeechButton
-            state={speech.state}
-            progress={null}
-            onStart={() => void speech.start()}
-            onCancel={() => speech.cancel()}
-          />
+          <ComposerSpeechButton state={speech.state} onStart={() => void speech.start()} />
         </>
       ) : null}
     </form>
