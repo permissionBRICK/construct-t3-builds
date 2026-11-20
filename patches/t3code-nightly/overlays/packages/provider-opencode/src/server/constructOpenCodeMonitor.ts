@@ -1,3 +1,8 @@
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off - The background plugin's stop marker is a plain file written synchronously on Stop.
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
 import type { Part as OpenCodePart } from "@opencode-ai/sdk/v2";
 import type { OrchestrationV2ProviderThread } from "@t3tools/contracts";
 
@@ -45,7 +50,7 @@ export function hasConstructOpenCodeMonitor(
   return (providerThread?.pendingBackgroundTasks ?? []).some((task) => task.kind === "monitor");
 }
 
-/** Stop on a settled turn drops the monitors; the plugin's own watcher is not killed. */
+/** Stop on a settled turn drops the monitors; markConstructOpenCodeStop disarms the plugin's watchers. */
 export function withoutConstructOpenCodeMonitors(
   providerThread: OrchestrationV2ProviderThread,
 ): ReadonlyArray<PendingBackgroundTask> {
@@ -109,4 +114,30 @@ export function makeConstructOpenCode2Monitors() {
       return changed;
     },
   };
+}
+
+/**
+ * Construct: Stop also disarms the background plugin's watchers. The plugin reads this
+ * marker (`<XDG_STATE_HOME or ~/.local/state>/opencode/background/<sessionID>/stopped`,
+ * epoch milliseconds of the last Stop) and never wakes a session for a `wait: true`
+ * task started before it. A Stop of a running turn aborts the session, which the
+ * plugin sees by itself; a Stop of a settled turn reaches OpenCode only through this.
+ */
+export function markConstructOpenCodeStop(
+  sessionId: string,
+  at: number = Date.now(),
+  stateHome: string = process.env.XDG_STATE_HOME || NodePath.join(NodeOS.homedir(), ".local", "state"),
+): boolean {
+  if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) return false;
+  try {
+    const dir = NodePath.join(stateHome, "opencode", "background", sessionId);
+    NodeFS.mkdirSync(dir, { recursive: true });
+    const file = NodePath.join(dir, "stopped");
+    const part = `${file}.${process.pid}.part`;
+    NodeFS.writeFileSync(part, String(at));
+    NodeFS.renameSync(part, file);
+    return true;
+  } catch {
+    return false;
+  }
 }

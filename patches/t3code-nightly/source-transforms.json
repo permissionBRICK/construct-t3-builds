@@ -1005,7 +1005,7 @@
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
-      "import": "import {\n  constructOpenCodeMonitorRoster,\n  hasConstructOpenCodeMonitor,\n  withoutConstructOpenCodeMonitors,\n} from \"./constructOpenCodeMonitor.ts\";\n"
+      "import": "import {\n  constructOpenCodeMonitorRoster,\n  hasConstructOpenCodeMonitor,\n  markConstructOpenCodeStop,\n  withoutConstructOpenCodeMonitors,\n} from \"./constructOpenCodeMonitor.ts\";\n"
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.ts",
@@ -1036,7 +1036,13 @@
       "path": "packages/provider-opencode/src/server/adapter.ts",
       "scope": "interruptTurn:",
       "before": "const wake = state.wake;",
-      "insert": "                    if (hasConstructOpenCodeMonitor(state.providerThread))\n                      yield* updateProviderThread(state, {\n                        pendingBackgroundTasks: withoutConstructOpenCodeMonitors(state.providerThread),\n                      });\n"
+      "insert": "                    if (hasConstructOpenCodeMonitor(state.providerThread))\n                      yield* updateProviderThread(state, {\n                        pendingBackgroundTasks: withoutConstructOpenCodeMonitors(state.providerThread),\n                      });\n                    // Disarm the plugin too, or its watcher wakes the stopped session later.\n                    yield* Effect.sync(() => markConstructOpenCodeStop(sessionId));\n"
+    },
+    {
+      "path": "packages/provider-opencode/src/server/adapter.ts",
+      "scope": "interruptTurn:",
+      "before": "turn.interrupted = true;",
+      "insert": "                  // Construct: a Stop of a running turn also drops the monitors and disarms the background\n                  // plugin; no wake-up arrives afterwards that would clear them.\n                  if (hasConstructOpenCodeMonitor(state.providerThread))\n                    yield* updateProviderThread(state, {\n                      pendingBackgroundTasks: withoutConstructOpenCodeMonitors(state.providerThread),\n                    });\n                  yield* Effect.sync(() => markConstructOpenCodeStop(sessionId));\n"
     },
     {
       "path": "packages/provider-opencode/src/server/adapter.test.ts",

@@ -1,3 +1,8 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
 import type { Part as OpenCodePart } from "@opencode-ai/sdk/v2";
 import type { OrchestrationV2ProviderThread } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
@@ -6,6 +11,7 @@ import {
   constructOpenCodeMonitorRoster,
   hasConstructOpenCodeMonitor,
   makeConstructOpenCode2Monitors,
+  markConstructOpenCodeStop,
   withoutConstructOpenCodeMonitors,
 } from "./constructOpenCodeMonitor.ts";
 
@@ -111,5 +117,22 @@ describe("makeConstructOpenCode2Monitors", () => {
     expect(monitors.clear([child])).toBe(false);
     expect(monitors.clear([root, child])).toBe(true);
     expect(monitors.has("ses_root")).toBe(false);
+  });
+});
+
+describe("markConstructOpenCodeStop", () => {
+  it("writes the background plugin's stop marker for the session", () => {
+    const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "construct-stop-"));
+    try {
+      expect(markConstructOpenCodeStop("ses_abc123", 1234, home)).toBe(true);
+      const file = NodePath.join(home, "opencode", "background", "ses_abc123", "stopped");
+      expect(NodeFS.readFileSync(file, "utf8")).toBe("1234");
+      expect(markConstructOpenCodeStop("ses_abc123", 5678, home)).toBe(true);
+      expect(NodeFS.readFileSync(file, "utf8")).toBe("5678");
+      expect(markConstructOpenCodeStop("../escape", 1, home)).toBe(false);
+      expect(NodeFS.existsSync(NodePath.join(home, "opencode", "escape"))).toBe(false);
+    } finally {
+      NodeFS.rmSync(home, { recursive: true, force: true });
+    }
   });
 });
