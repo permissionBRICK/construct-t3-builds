@@ -34,10 +34,15 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => state.session }));
 vi.mock("../state/session", () => ({ environmentSession: { sessionStateAtom: () => null } }));
-vi.mock("../state/presentation", () => ({ environmentSummaries: { identitiesAtom: null } }));
+const ENVIRONMENT_IDS = vi.hoisted(() => ({ atom: "environmentIds" }));
+vi.mock("../state/presentation", () => ({
+  environmentSummaries: { identitiesAtom: null, environmentIdsAtom: ENVIRONMENT_IDS },
+}));
 vi.mock("../rpc/atomRegistry", () => ({
   appAtomRegistry: {
-    subscribe: (_atom: unknown, listener: NonNullable<typeof state.notices>, options?: { immediate?: boolean }) => {
+    subscribe: (atom: unknown, listener: NonNullable<typeof state.notices>, options?: { immediate?: boolean }) => {
+      // Upstream's second subscription withdraws the notices of removed environments.
+      if (atom === ENVIRONMENT_IDS) return () => {};
       state.notices = listener;
       if (options?.immediate) listener([]);
       return () => void (state.notices = null);
