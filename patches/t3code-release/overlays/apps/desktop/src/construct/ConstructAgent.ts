@@ -537,11 +537,24 @@ export function constructAgentInstances(
   });
 }
 
-/** The connection an instance name (its alias) stands for, re-read from the agent. A name
- *  two engines' VMs share stands for neither: never the other engine's VM. */
-async function connectionByName(agent: ConstructAgent, name: string): Promise<ConstructAgentConnection | null> {
-  const matches = (await listConstructAgentConnections(agent))?.filter((connection) => connection.alias === name) ?? [];
+/** The connection an instance name (its alias) stands for in the agent's list. A name two
+ *  engines' VMs share stands for neither: never the other engine's VM. */
+function connectionByName(
+  connections: ReadonlyArray<ConstructAgentConnection> | null,
+  name: string,
+): ConstructAgentConnection | null {
+  const matches = connections?.filter((connection) => connection.alias === name) ?? [];
   return matches.length === 1 ? matches[0]! : null;
+}
+
+/** A VM's page in the agent's window, named as the Construct UI names it: the VM's name where no
+ *  other engine has a VM of that name, else `<engine>/<name>` (the slash encoded, one route part). */
+function constructAgentVmRoute(
+  connections: ReadonlyArray<ConstructAgentConnection>,
+  connection: ConstructAgentConnection,
+): string {
+  const shared = connections.filter((other) => other.vm === connection.vm).length > 1;
+  return `home/${encodeURIComponent(shared ? `${connection.engine}/${connection.vm}` : connection.vm)}`;
 }
 
 // ── Pairing link, panel, a VM's page ──────────────────────────────────────
@@ -552,7 +565,7 @@ export async function mintConstructAgentPairingLink(
   name: string,
 ): Promise<ConstructPairingLinkResult> {
   if (!agent.has("t3-pairing")) return { ok: false, error: "This Construct agent cannot mint T3 pairing links." };
-  const connection = await connectionByName(agent, name);
+  const connection = connectionByName(await listConstructAgentConnections(agent), name);
   if (connection === null) return { ok: false, error: `"${name}" is not one of your Construct VMs.` };
   const result = await agent.call(
     "POST",
@@ -590,9 +603,10 @@ export async function openConstructAgentShell(agent: ConstructAgent, name: strin
   if (!agent.has("shell-open")) return false;
   let route: string | null = null;
   if (name !== null) {
-    const connection = await connectionByName(agent, name);
+    const connections = (await listConstructAgentConnections(agent)) ?? [];
+    const connection = connectionByName(connections, name);
     if (connection === null) return false;
-    route = `home/${encodeURIComponent(connection.vm)}`;
+    route = constructAgentVmRoute(connections, connection);
   }
   const result = await agent.call(
     "POST",

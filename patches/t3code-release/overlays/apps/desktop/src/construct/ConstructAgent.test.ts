@@ -367,6 +367,24 @@ describe("pairing link and panel", () => {
     const opens = agent.seen.filter((seen) => seen.url === "/api/shell/open").map((seen) => JSON.parse(seen.body));
     assert.deepEqual(opens, [{ surface: "pop" }, { surface: "win", route: "home/dev" }]);
   });
+
+  it("names the VM's page as the Construct window does: `<engine>/<vm>` where two engines have that VM", async () => {
+    agent.connections = [
+      connection("agent-vm"),
+      { ...connection("agent-vm"), engine: "eng2", alias: "agent-vm-2" },
+      connection("dev"),
+    ];
+    const live = await found();
+    assert.isTrue(await openConstructAgentShell(live, "agent-vm-2"));
+    assert.isTrue(await openConstructAgentShell(live, "agent-vm"));
+    assert.isTrue(await openConstructAgentShell(live, "dev"));
+    const opens = agent.seen.filter((seen) => seen.url === "/api/shell/open").map((seen) => JSON.parse(seen.body));
+    assert.deepEqual(opens, [
+      { surface: "win", route: "home/eng2%2Fagent-vm" },
+      { surface: "win", route: "home/eng1%2Fagent-vm" },
+      { surface: "win", route: "home/dev" },
+    ]);
+  });
 });
 
 describe("events", () => {
