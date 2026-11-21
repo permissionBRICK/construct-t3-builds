@@ -3,12 +3,13 @@ import type {
   ConstructVaultApprovalsResult,
   ConstructVaultDecideResult,
   ConstructVaultDecision,
+  ConstructVaultEntryInput,
   DesktopBridge,
   EnvironmentId,
 } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { KeyRoundIcon } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { readConstructVaultPending } from "../state/constructVaultPending";
 import { useServerConfigs } from "../state/entities";
@@ -144,10 +145,12 @@ export function ConstructVaultPendingNotification() {
       }
     };
 
-    const decide = (id: string, decision: ConstructVaultDecision) => {
+    const decide = (id: string, decision: ConstructVaultDecision, entry?: ConstructVaultEntryInput) => {
       if (bridge === null || busy || cancelled || decided.has(id)) return;
       const approval = approvals.find((item) => item.id === id);
       if (approval === undefined) return;
+      // An entry request saves only a value the user typed.
+      if (approval.entry === true && decision === "approve" && (entry === undefined || entry.value === "")) return;
       if (decision === "approve" && !isVaultApproveArmed(shownSince.get(id), Date.now())) return;
       // Gone at once; the items below move up, so their Approve arms again.
       busy = true;
@@ -160,7 +163,7 @@ export function ConstructVaultPendingNotification() {
       shownSince.clear();
       render();
       void bridge
-        .constructVaultDecide(id, decision)
+        .constructVaultDecide(id, decision, approval.entry === true ? entry : undefined)
         .catch((): ConstructVaultDecideResult => ({ ok: false, reason: "error" }))
         .then((outcome) => {
           if (cancelled) return;
@@ -409,13 +412,53 @@ function ConstructVaultApprovalDetails({
   );
 }
 
+/** A device agent's entry request: the value goes to the agent with Save and is not kept here. */
+function ConstructVaultEntryButtons({
+  item,
+  busy,
+  onDecide,
+}: {
+  readonly item: { readonly id: string; readonly approveLabel: string; readonly denyLabel: string; readonly armed: boolean; readonly names: string };
+  readonly busy: boolean;
+  readonly onDecide: (id: string, decision: ConstructVaultDecision, entry?: ConstructVaultEntryInput) => void;
+}) {
+  const [value, setValue] = useState("");
+  return (
+    <span className="flex items-center justify-end gap-2">
+      <input
+        aria-label={`Value of ${item.names}`}
+        autoComplete="off"
+        className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-0.5 text-xs text-foreground"
+        onChange={(event) => setValue(event.currentTarget.value)}
+        spellCheck={false}
+        type="password"
+        value={value}
+      />
+      <Button disabled={busy} onClick={() => onDecide(item.id, "deny")} size="xs" variant="outline">
+        {item.denyLabel}
+      </Button>
+      <Button
+        disabled={busy || !item.armed || value === ""}
+        onClick={() => {
+          const entered = value;
+          setValue("");
+          onDecide(item.id, "approve", { value: entered });
+        }}
+        size="xs"
+      >
+        {item.approveLabel}
+      </Button>
+    </span>
+  );
+}
+
 /** Inline elements only: the toast renders its description inside a paragraph. */
 function ConstructVaultBannerBody({
   banner,
   onDecide,
 }: {
   readonly banner: ConstructVaultBanner;
-  readonly onDecide: (id: string, decision: ConstructVaultDecision) => void;
+  readonly onDecide: (id: string, decision: ConstructVaultDecision, entry?: ConstructVaultEntryInput) => void;
 }) {
   return (
     <span className="mt-0.5 flex flex-col gap-1.5" data-slot="construct-vault-pending">
@@ -431,23 +474,27 @@ function ConstructVaultBannerBody({
             ) : (
               <ConstructVaultApprovalDetails details={item.details} />
             )}
-            <span className="flex justify-end gap-2">
-              <Button
-                disabled={banner.busy}
-                onClick={() => onDecide(item.id, "deny")}
-                size="xs"
-                variant="outline"
-              >
-                {item.denyLabel}
-              </Button>
-              <Button
-                disabled={banner.busy || !item.armed}
-                onClick={() => onDecide(item.id, "approve")}
-                size="xs"
-              >
-                {item.approveLabel}
-              </Button>
-            </span>
+            {item.entry ? (
+              <ConstructVaultEntryButtons item={item} busy={banner.busy} onDecide={onDecide} />
+            ) : (
+              <span className="flex justify-end gap-2">
+                <Button
+                  disabled={banner.busy}
+                  onClick={() => onDecide(item.id, "deny")}
+                  size="xs"
+                  variant="outline"
+                >
+                  {item.denyLabel}
+                </Button>
+                <Button
+                  disabled={banner.busy || !item.armed}
+                  onClick={() => onDecide(item.id, "approve")}
+                  size="xs"
+                >
+                  {item.approveLabel}
+                </Button>
+              </span>
+            )}
           </span>
         ) : (
           <span className="flex items-start gap-2" key={item.key}>

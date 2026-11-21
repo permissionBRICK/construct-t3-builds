@@ -58,6 +58,66 @@ export function withoutConstructOpenCodeMonitors(
 }
 
 /**
+ * Construct: the same watchers under OpenCode 2 (`v2/adapter.ts`), where the plugin's
+ * tools report through their metadata. A completed `background` call with
+ * `metadata.wait === true` arms `metadata.id` as a monitor of the session that ran it;
+ * the plugin's wake (a synthetic message with `metadata.source ===
+ * "construct-background"` and `metadata.id`) or a completed `background_kill` call
+ * with `metadata.id` ends it. The adapter adds the monitors to the session's roster and
+ * counts them as pending background work. Stop also writes markConstructOpenCodeStop
+ * for each of the stopped sessions.
+ */
+export function makeConstructOpenCode2Monitors() {
+  const monitors = new Map<string, ReadonlyArray<PendingBackgroundTask>>();
+  const idOf = (metadata: Readonly<Record<string, unknown>> | undefined) => {
+    const raw = metadata?.["id"];
+    return typeof raw === "string" ? raw.trim() : "";
+  };
+  const end = (sessionId: string, id: string) => {
+    const current = monitors.get(sessionId) ?? [];
+    if (id === "" || !current.some((task) => task.taskId === id)) return false;
+    const rest = current.filter((task) => task.taskId !== id);
+    if (rest.length === 0) monitors.delete(sessionId);
+    else monitors.set(sessionId, rest);
+    return true;
+  };
+  return {
+    /** A completed tool call; true when it armed or ended a monitor. */
+    tool(
+      sessionId: string,
+      tool: string | undefined,
+      metadata: Readonly<Record<string, unknown>> | undefined,
+    ): boolean {
+      const id = idOf(metadata);
+      if (tool === "background_kill") return end(sessionId, id);
+      if (tool !== "background" || metadata?.["wait"] !== true || id === "") return false;
+      const current = monitors.get(sessionId) ?? [];
+      if (current.some((task) => task.taskId === id)) return false;
+      const raw = metadata["description"];
+      const description = typeof raw === "string" ? raw.trim() : "";
+      monitors.set(sessionId, [
+        ...current,
+        { taskId: id, kind: "monitor", ...(description ? { description } : {}) },
+      ]);
+      return true;
+    },
+    /** A synthetic message admitted to the session; true when it was a wake that ended a monitor. */
+    wake(sessionId: string, metadata: Readonly<Record<string, unknown>> | undefined): boolean {
+      return metadata?.["source"] === "construct-background" && end(sessionId, idOf(metadata));
+    },
+    has: (sessionId: string) => monitors.has(sessionId),
+    tasks: (sessions: ReadonlyArray<{ readonly sessionId: string }>) =>
+      sessions.flatMap((session) => monitors.get(session.sessionId) ?? []),
+    /** Stop drops the sessions' monitors; markConstructOpenCodeStop disarms the plugin's watchers. */
+    clear(sessions: ReadonlyArray<{ readonly sessionId: string }>): boolean {
+      let changed = false;
+      for (const session of sessions) changed = monitors.delete(session.sessionId) || changed;
+      return changed;
+    },
+  };
+}
+
+/**
  * Construct: Stop also disarms the background plugin's watchers. The plugin reads this
  * marker (`<XDG_STATE_HOME or ~/.local/state>/opencode/background/<sessionID>/stopped`,
  * epoch milliseconds of the last Stop) and never wakes a session for a `wait: true`
