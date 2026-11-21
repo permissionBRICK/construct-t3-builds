@@ -258,6 +258,12 @@ export const CONSTRUCT_AUTO_LINK_RETRY_MS = 30 * 60 * 1000;
  *
  * Pure.
  */
+/** Can this PC mint pairing links for its VMs: the old Construct's scripts are installed,
+ *  or the device agent of the new Construct runs. Pure. */
+export function constructCanPairVms(info: ConstructUpdateInfo): boolean {
+  return info.scriptsDir !== null || info.everything?.source === "agent";
+}
+
 export function planConstructAutoLink(input: {
   readonly info: ConstructUpdateInfo | null;
   readonly remotes: ReadonlyArray<ConstructLinkedRemote>;
@@ -266,7 +272,7 @@ export function planConstructAutoLink(input: {
   readonly retryAfterMs?: number;
 }): ReadonlyArray<string> {
   const info = input.info;
-  if (info === null || info.runningAction !== null || info.scriptsDir === null) return [];
+  if (info === null || info.runningAction !== null || !constructCanPairVms(info)) return [];
   const retryAfter = input.retryAfterMs ?? CONSTRUCT_AUTO_LINK_RETRY_MS;
   const linked = constructLinkedInstanceNames(input.remotes, info.instances);
   const out: string[] = [];
@@ -362,7 +368,7 @@ export function planConstructRelink(input: {
   readonly inFlight: ReadonlySet<string>;
 }): ReadonlyArray<ConstructRelinkPlan> {
   const info = input.info;
-  if (info === null || info.runningAction !== null || info.scriptsDir === null) return [];
+  if (info === null || info.runningAction !== null || !constructCanPairVms(info)) return [];
   return constructRelinkCandidates(input.remotes, info.instances).filter(
     (candidate) => input.legacy.has(candidate.environmentId) && !input.inFlight.has(candidate.name),
   );

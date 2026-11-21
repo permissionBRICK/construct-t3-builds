@@ -1,10 +1,15 @@
-import { ConstructVaultApprovalsResult, ConstructVaultDecideResult } from "@t3tools/contracts";
+import {
+  ConstructVaultApprovalsResult,
+  ConstructVaultDecideResult,
+  ConstructVaultEntryInput,
+} from "@t3tools/contracts";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
+import * as ConstructAgent from "../../construct/ConstructAgent.ts";
 import * as ConstructVaultApprovals from "../../construct/ConstructVaultApprovals.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
@@ -25,12 +30,35 @@ const companionOptions = Effect.gen(function* () {
   } satisfies ConstructVaultApprovals.ConstructVaultCompanionOptions;
 });
 
-/** The key vault approvals the Construct Companion on this PC waits on. */
+/** The device agent on this PC (the new Construct), or null: then the Companion answers. */
+const findAgent = Effect.gen(function* () {
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const env = {
+    CONSTRUCT_AGENT_HOME: yield* optionalEnv("CONSTRUCT_AGENT_HOME"),
+    LOCALAPPDATA: yield* optionalEnv("LOCALAPPDATA"),
+    XDG_DATA_HOME: yield* optionalEnv("XDG_DATA_HOME"),
+  };
+  return yield* Effect.promise(() =>
+    ConstructAgent.findConstructAgent({
+      platform: environment.platform,
+      homeDirectory: environment.homeDirectory,
+      env,
+    }),
+  );
+});
+
+/** The key vault approvals the device agent's engines, or the Construct Companion on this
+ *  PC, wait on. */
 export const constructVaultApprovals = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.CONSTRUCT_VAULT_APPROVALS_CHANNEL,
   payload: Schema.Void,
   result: ConstructVaultApprovalsResult,
   handler: Effect.fn("desktop.ipc.constructVault.approvals")(function* () {
+    const agent = yield* findAgent;
+    if (agent !== null) {
+      const approvals = yield* Effect.promise(() => ConstructAgent.listConstructAgentApprovals(agent));
+      return approvals === null ? { available: false as const } : { available: true as const, approvals };
+    }
     const options = yield* companionOptions;
     return yield* Effect.promise(() =>
       ConstructVaultApprovals.listConstructVaultApprovals(options),
@@ -38,12 +66,23 @@ export const constructVaultApprovals = DesktopIpc.makeIpcMethod({
   }),
 });
 
-/** Approve or deny one of them; the id and decision are validated in the main process. */
+/** Approve or deny one of them, or save an entry request's value; the id and decision are
+ *  validated in the main process. */
 export const constructVaultDecide = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.CONSTRUCT_VAULT_DECIDE_CHANNEL,
-  payload: Schema.Struct({ id: Schema.String, decision: Schema.String }),
+  payload: Schema.Struct({
+    id: Schema.String,
+    decision: Schema.String,
+    entry: Schema.optionalKey(ConstructVaultEntryInput),
+  }),
   result: ConstructVaultDecideResult,
   handler: Effect.fn("desktop.ipc.constructVault.decide")(function* (input) {
+    const agent = ConstructAgent.parseConstructAgentApprovalId(input.id) === null ? null : yield* findAgent;
+    if (agent !== null) {
+      return yield* Effect.promise(() =>
+        ConstructAgent.decideConstructAgentApproval(agent, input.id, input.decision, input.entry),
+      );
+    }
     const options = yield* companionOptions;
     return yield* Effect.promise(() =>
       ConstructVaultApprovals.decideConstructVaultApproval(input.id, input.decision, options),
@@ -58,6 +97,8 @@ export const constructVaultDisplayed = DesktopIpc.makeIpcMethod({
   payload: Schema.Struct({ ids: Schema.Array(Schema.String) }),
   result: Schema.Void,
   handler: Effect.fn("desktop.ipc.constructVault.displayed")(function* (input) {
+    // The agent has no such report: its own pop-out decides when to show.
+    if ((yield* findAgent) !== null) return;
     const options = yield* companionOptions;
     yield* Effect.promise(() =>
       ConstructVaultApprovals.reportConstructVaultDisplayed(input.ids, options),

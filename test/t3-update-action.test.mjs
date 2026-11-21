@@ -33,8 +33,8 @@ for(const channel of ['release','nightly']) {
  assert.equal(calls,1,'one explicit action must launch without a second confirmation');
  assert.equal(await startConstructUpdate(bridge,{...info,runningAction:'reprovision'}),false);
  assert.equal(calls,1);
- // Nightly reprovisions every VM that is behind in one console, named; release the displayed one.
- assert.deepEqual(targets,[channel==='nightly'?['thread-vm']:'thread-vm'],'reprovision must name the VM');
+ // A reprovision names every VM that is behind, for one console.
+ assert.deepEqual(targets,[['thread-vm']],'reprovision must name the VM');
  assert.equal(hostCalls,0,'reprovision must not use the host/default-VM launch');
  assert.deepEqual(actions,['reprovision'],'a reprovision must say so');
  assert.equal(await startConstructUpdate(bridge,{...info,action:'update-t3'}),false);
@@ -52,7 +52,7 @@ for(const channel of ['release','nightly']) {
  assert.equal(calls,1);
  assert.equal(await startConstructUpdate(bridge,{...info,action:null,constructUpdateAvailable:false,latestCommit:null}),false);
  assert.equal(hostCalls,1,'no published offer must not launch a host update');
- if(channel==='nightly'){
+ {
   // The new Construct: the one Update goes to the main process (the device agent) once...
   bridge.next='update-everything';
   const everything={...info,action:'update-everything',everything:{source:'agent',version:'1.4.0',available:'1.5.0',vms:[],running:false,parts:[]}};
@@ -75,5 +75,5 @@ for(const channel of ['release','nightly']) {
  const {getConstructUpdateDetail}=await load(channel,'constructUpdate.logic.ts');
  assert.equal(getConstructUpdateDetail({...info,action:'update-construct'}),
   "A new Construct update is available. Click to install it on this PC. This doesn't interrupt your work in T3 Code.");
- console.log(`PASS ${channel}: one click launches once; reprovision and T3 Code updates name their VMs; running/no-offer actions guarded${channel==='nightly'?'; the one Update goes to the agent or the VM':''}`);
+ console.log(`PASS ${channel}: one click launches once; reprovision and T3 Code updates name their VMs; running/no-offer actions guarded; the one Update goes to the agent or the VM`);
 }
