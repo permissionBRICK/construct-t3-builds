@@ -119,6 +119,8 @@ export interface ConstructVaultBannerApprovalItem {
   readonly denyLabel: string;
   /** Approve is enabled (shown for at least a second). */
   readonly armed: boolean;
+  /** A device agent's entry request: Approve saves the value typed into the item. */
+  readonly entry: boolean;
 }
 
 export type ConstructVaultBannerItem =
@@ -267,6 +269,10 @@ export function vaultDecisionResultText(
 ): string {
   const names = formatVaultNames(approval.names);
   const what = `${approval.op === "autoApprove" ? `auto-approve of ${names}` : names} for ${approvalVm(approval)}`;
+  if (approval.entry === true) {
+    if (result === "pending") return decision === "approve" ? `Saving ${what}…` : `Declining ${what}…`;
+    if (result.ok) return decision === "approve" ? `Saved ${what}.` : `Declined ${what}.`;
+  }
   if (result === "pending")
     return decision === "approve" ? `Approving ${what}…` : `Denying ${what}…`;
   if (result.ok) return decision === "approve" ? `Approved ${what}.` : `Denied ${what}.`;
@@ -386,6 +392,7 @@ export function buildConstructVaultBanner(
         approveLabel: approval.action !== "" ? approval.action : "Approve",
         denyLabel: approval.deny !== "" ? approval.deny : "Deny",
         armed,
+        entry: approval.entry === true,
       };
     });
   const listed = waiting.length > 1;

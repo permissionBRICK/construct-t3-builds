@@ -33,12 +33,9 @@ echo ""
 echo "=== T3 overlay + transform inventory ==="
 
 # The inventories target different upstream tags. Their file sets must agree;
-# their contents can differ to match each channel's current APIs. The exception is a
-# feature that ships on nightly first: Construct updates through the device agent, while
-# the release inventory keeps its update popup until the feature is ported.
-channel_only='^\./(apps/desktop/src/construct/ConstructAgent|apps/server/src/constructVmUpdate|apps/web/src/state/constructVmUpdate|packages/contracts/src/constructVmUpdate|apps/web/src/components/ConstructUpdateNotification|apps/web/src/components/useConstructUpdateState)(\.test)?\.tsx?$'
-release_files="$(cd "${repo}/patches/t3code-release/overlays" && find . -type f | grep -Ev "${channel_only}" | sort)"
-nightly_files="$(cd "${repo}/patches/t3code-nightly/overlays" && find . -type f | grep -Ev "${channel_only}" | sort)"
+# their contents can differ to match each channel's current APIs.
+release_files="$(cd "${repo}/patches/t3code-release/overlays" && find . -type f | sort)"
+nightly_files="$(cd "${repo}/patches/t3code-nightly/overlays" && find . -type f | sort)"
 ok "the release and nightly inventories carry the same overlay paths" "$([[ "${release_files}" == "${nightly_files}" ]] && echo 0 || echo 1)"
 if [[ "${release_files}" != "${nightly_files}" ]]; then
   comm -3 <(printf '%s\n' "${release_files}") <(printf '%s\n' "${nightly_files}")
@@ -153,10 +150,11 @@ run_in() {
 # and `vp test` is its Vitest (there is no node_modules/.bin/vitest or tsc at the root).
 run_in "typecheck (transformed runtime)" desktop "${work}/node_modules/.bin/effect-tsgo" tsrs --noEmit -p .
 run_in "typecheck (transformed runtime)" web "${work}/node_modules/.bin/effect-tsgo" tsrs --noEmit -p .
-run_in "overlay vitest" desktop "${work}/node_modules/.bin/vp" test run --project unit src/updates/ConstructUpdates.test.ts
+run_in "overlay vitest" desktop "${work}/node_modules/.bin/vp" test run --project unit src/updates/ConstructUpdates.test.ts \
+  src/construct/ConstructAgent.test.ts
 run_in "overlay vitest" web "${work}/node_modules/.bin/vp" test run --project unit \
   src/components/ConstructAutoLink.test.tsx src/components/constructInstances.link.test.ts \
   src/components/constructInstances.logic.test.ts src/components/constructUpdate.logic.test.ts \
-  src/state/constructSessionRenewal.logic.test.ts
+  src/components/constructVaultPending.logic.test.ts src/state/constructSessionRenewal.logic.test.ts
 
 finish

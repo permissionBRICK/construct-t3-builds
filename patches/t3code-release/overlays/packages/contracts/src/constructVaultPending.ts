@@ -42,7 +42,8 @@ export const ConstructVaultPending = Schema.Struct({
 export type ConstructVaultPending = typeof ConstructVaultPending.Type;
 
 /**
- * Key vault approvals the Construct Companion on this PC waits on (T3 Desktop only).
+ * Key vault approvals the Construct Companion on this PC waits on (T3 Desktop only), or,
+ * on a PC with the new Construct, the device agent's approvals and entry requests.
  *
  * The Desktop main process asks the Companion's loopback IPC (`GET /v1/vault/approvals`)
  * with the bearer from the Companion's endpoint file; the token never reaches the
@@ -52,6 +53,13 @@ export type ConstructVaultPending = typeof ConstructVaultPending.Type;
  */
 export const ConstructVaultDecision = Schema.Literals(["approve", "deny"]);
 export type ConstructVaultDecision = typeof ConstructVaultDecision.Type;
+
+/** The value an entry request's Approve saves; never logged, never kept. */
+export const ConstructVaultEntryInput = Schema.Struct({
+  value: Schema.String,
+  username: Schema.optionalKey(Schema.String),
+});
+export type ConstructVaultEntryInput = typeof ConstructVaultEntryInput.Type;
 
 /** One secret an approval is about; `description` is "" when it has none. */
 export const ConstructVaultApprovalSecret = Schema.Struct({
@@ -105,6 +113,9 @@ export const ConstructVaultApproval = Schema.Struct({
   names: Schema.Array(Schema.String),
   /** Absent from a Companion that sends only the plain `message`. */
   details: Schema.optionalKey(ConstructVaultApprovalDetails),
+  /** A device agent's secret entry request (`construct secret ask`): the user types the
+   *  value, Approve saves it, Deny declines. Absent for an approval. */
+  entry: Schema.optionalKey(Schema.Boolean),
   /** Epoch ms on this PC's clock. */
   createdAt: Schema.Number,
   deadline: Schema.NullOr(Schema.Number),

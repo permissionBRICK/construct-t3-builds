@@ -3,13 +3,14 @@
 // the Desktop app without one (the old Construct's scripts), and in a browser without the
 // Desktop app (the VM's own update). The control is upstream's SidebarUpdatePill from the
 // patched checkout; desktop IPC, the environments and the RPC commands are fixtures.
-// T3_TEST_SOURCE: the patched upstream checkout with installed dependencies (nightly).
-// T3_TEST_TOOLS: a package directory providing esbuild + playwright.
+// T3_TEST_SOURCE: the patched upstream checkout with installed dependencies.
+// T3_TEST_TOOLS: a package directory providing esbuild + playwright; T3_TEST_CHANNEL: release|nightly.
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
 const source = process.env.T3_TEST_SOURCE;
 if (!source) throw new Error('Set T3_TEST_SOURCE');
+const channel = process.env.T3_TEST_CHANNEL || 'release';
 const toolRequire = createRequire(resolve(process.env.T3_TEST_TOOLS || '.', 'package.json'));
 const {build} = toolRequire('esbuild');
 const {chromium} = toolRequire('playwright');
@@ -162,5 +163,5 @@ try {
   page = await open({globals:{isElectron:false},updateState:null,vm:{available:false,running:false,version:null,host:false,appliedCommit:'0123456'}});
   assert.equal(await label(page), null);
   await page.close();
-  console.log('PASS nightly: the sidebar update control shows and starts Construct updates (agent, scripts, VM; available, running, failed, done)');
+  console.log(`PASS ${channel}: the sidebar update control shows and starts Construct updates (agent, scripts, VM; available, running, failed, done)`);
 } finally { await browser.close(); }

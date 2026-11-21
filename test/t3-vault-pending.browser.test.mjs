@@ -179,7 +179,7 @@ try {
 
   await desktopFlow(await openPage());
   assert.deepEqual(errors, []);
-  console.log(`PASS ${channel}: Desktop inline approval through the Companion (matching, arming, optimistic decide, answered elsewhere, host and Companion failures, displayed reports only while visible, notes held back for the Companion${channel === 'nightly' ? '; an agent\'s entry request saves the typed value' : ''})`);
+  console.log(`PASS ${channel}: Desktop inline approval through the Companion (matching, arming, optimistic decide, answered elsewhere, host and Companion failures, displayed reports only while visible, notes held back for the Companion; an agent's entry request saves the typed value)`);
 } finally {
   await browser.close();
 }
@@ -480,7 +480,7 @@ async function desktopFlow(page) {
   assert.equal(await structured.locator('button').count(), 2);
   await shot('desktop-structured');
 
-  if (channel === 'nightly') {
+  {
     // A device agent's secret entry request: the value typed here goes with Save, only then.
     await set(`window.companion.hold = false; window.companion.reply = {ok: true}; window.companion.decisions = [];
       window.companion.answer.approvals = [approval('e~eng1~ask-3', {names: ['npm-token'], title: 'Enter the secret npm-token',
