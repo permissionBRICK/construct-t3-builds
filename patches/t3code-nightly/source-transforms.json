@@ -1274,8 +1274,8 @@
     },
     {
       "path": "apps/web/src/components/settings/VoiceSettingsPanel.tsx",
-      "find": "const destinationValue = destination.cloudProvider",
-      "replace": "const destinationValue = constructClaudeVoice.value !== null\n    ? constructClaudeVoice.value\n    : destination.cloudProvider"
+      "find": "const destinationValue =",
+      "replace": "const destinationValue = constructClaudeVoice.value !== null\n    ? constructClaudeVoice.value\n    :"
     },
     {
       "path": "apps/web/src/components/settings/VoiceSettingsPanel.tsx",
