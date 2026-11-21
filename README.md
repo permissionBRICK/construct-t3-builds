@@ -36,8 +36,8 @@ Nightly discovery: `/repos/permissionBRICK/construct-t3-builds/releases`, filter
 non-draft prereleases with a nightly identity and all four assets.
 
 The Desktop app learns about Construct updates from the Construct device agent on the PC when one
-runs (the new Construct, nightly inventory), else from the published release manifest, the same as the
-control panel; T3 Code updates come from this repository's manifests above. In a browser without the
+runs (the new Construct), else from the published release manifest, the same as the control
+panel; T3 Code updates come from this repository's manifests above. In a browser without the
 Desktop app, the T3 server asks its VM (`construct update status --json`).
 
 ## Identity and local builds
@@ -78,8 +78,8 @@ python3 scripts/publisher.py plan --channel stable
 python3 scripts/publisher.py plan --channel nightly --work work-nightly
 ```
 
-The browser-driven checks (`test/*.browser.test.mjs`: the update popup, the
-microphone capture shim, the key vault banner with its inline Desktop approval,
+The browser-driven checks (`test/*.browser.test.mjs`: the sidebar update control, the
+microphone capture shim, the key vault banner with its inline Desktop approval and entry input,
 displayed reports and the notes held back for the Companion, through a stubbed Companion
 bridge) are manual and not part of the build. Run one for an inventory with
 `T3_TEST_SOURCE` pointing at its patched upstream checkout with installed

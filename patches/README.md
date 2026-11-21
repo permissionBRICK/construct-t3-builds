@@ -171,8 +171,7 @@ through re-indentation) and the list of `conflicts`.
   T3's real button, pill and shortcut and is run by hand.
 - **Public base URL** (`T3CODE_PUBLIC_BASE_URL` for pairing URLs behind the TLS proxy).
 - **Construct updates** in T3's own update control at the bottom of the sidebar, beside
-  the provider updates: the new version and one click, with no notice of its own (nightly;
-  the release inventory still shows its popup and Providers buttons until it is ported).
+  the provider updates: the new version and one click, with no notice of its own.
   - *Desktop with the new Construct* (`construct/ConstructAgent.ts`, the one integration
     module): the device agent's token file (`%LOCALAPPDATA%\Construct\agent\endpoint.json`,
     `$XDG_DATA_HOME/construct-agent` or `~/.local/share/construct-agent`, or
