@@ -150,10 +150,11 @@ run_in() {
 # and `vp test` is its Vitest (there is no node_modules/.bin/vitest or tsc at the root).
 run_in "typecheck (transformed runtime)" desktop "${work}/node_modules/.bin/effect-tsgo" tsrs --noEmit -p .
 run_in "typecheck (transformed runtime)" web "${work}/node_modules/.bin/effect-tsgo" tsrs --noEmit -p .
-run_in "overlay vitest" desktop "${work}/node_modules/.bin/vp" test run --project unit src/updates/ConstructUpdates.test.ts
+run_in "overlay vitest" desktop "${work}/node_modules/.bin/vp" test run --project unit src/updates/ConstructUpdates.test.ts \
+  src/construct/ConstructAgent.test.ts
 run_in "overlay vitest" web "${work}/node_modules/.bin/vp" test run --project unit \
   src/components/ConstructAutoLink.test.tsx src/components/constructInstances.link.test.ts \
   src/components/constructInstances.logic.test.ts src/components/constructUpdate.logic.test.ts \
-  src/state/constructSessionRenewal.logic.test.ts
+  src/components/constructVaultPending.logic.test.ts src/state/constructSessionRenewal.logic.test.ts
 
 finish
