@@ -1323,8 +1323,18 @@
     },
     {
       "path": "apps/web/src/remoteOpen.ts",
-      "find": "profile !== null && profile._tag === \"SshConnectionProfile\" ? profile.target : null,",
-      "replace": "profile !== null && profile._tag === \"SshConnectionProfile\" ? profile.target : constructSshTarget(get, environmentId, entry),"
+      "after": "function resolveRemoteOpenState",
+      "insert": "  readonly constructSshTarget?: ReturnType<typeof constructSshTarget>;\n"
+    },
+    {
+      "path": "apps/web/src/remoteOpen.ts",
+      "find": "firstSshTarget(input.routes)",
+      "replace": "firstSshTarget(input.routes) ?? input.constructSshTarget ?? null"
+    },
+    {
+      "path": "apps/web/src/remoteOpen.ts",
+      "after": "resolveRemoteOpenState({",
+      "insert": "        constructSshTarget: constructSshTarget(get, environmentId, entry),\n"
     }
   ]
 }

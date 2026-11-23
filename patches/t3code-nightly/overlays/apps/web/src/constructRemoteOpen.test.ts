@@ -1,3 +1,4 @@
+import { connectionRoutes } from "@t3tools/client-runtime/connection";
 import { buildRemoteOpenUrl, EnvironmentId, type ConstructInstanceInfo, type ConstructUpdateInfo } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -39,8 +40,9 @@ const HAUS_VM = instance({
 
 function editorUrl(entry: ReturnType<typeof pairedEntry>, instances: ConstructUpdateInfo | null) {
   const state = resolveRemoteOpenState({
+    constructSshTarget: constructSshTargetFor(String(HAUS), entry, instances),
     target: entry.target,
-    sshTarget: constructSshTargetFor(String(HAUS), entry, instances),
+    routes: connectionRoutes(entry),
     remoteOpenTargets: ADVERTISED,
     isDesktopRenderer: true,
     hostEnvironmentId: null,
