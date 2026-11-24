@@ -1913,12 +1913,22 @@ export async function checkConstructAgentUpdates(
   };
 }
 
-/** The agent's "update everything", for the control's click. */
+/** The agent's update action, for the control's click. When only T3 Code is behind and the agent
+ *  supports targeted T3 Desktop updates, updates T3 on the VMs and this Desktop app without a full reprovision. */
 export async function launchConstructAgentUpdate(
   options: ConstructAgent.ConstructAgentOptions,
+  info?: Pick<ConstructUpdateInfo, "t3UpdateAvailable" | "everything"> | null,
 ): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }> {
   const agent = await ConstructAgent.findConstructAgent(options);
   if (agent === null) return { ok: false, error: "The Construct agent is not running on this PC." };
+  const t3Only =
+    info?.t3UpdateAvailable === true &&
+    info.everything?.source === "agent" &&
+    info.everything.available === null &&
+    info.everything.vms.length === 0;
+  if (t3Only && agent.has("t3-desktop-update")) {
+    return ConstructAgent.startConstructAgentT3Update(agent);
+  }
   return ConstructAgent.startConstructAgentUpdateEverything(agent);
 }
 

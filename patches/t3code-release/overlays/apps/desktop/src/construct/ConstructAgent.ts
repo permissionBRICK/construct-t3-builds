@@ -39,6 +39,7 @@ export const CONSTRUCT_AGENT_CLIENT_FEATURES = [
   "connections",
   "t3-pairing",
   "shell-open",
+  "t3-desktop-update",
 ] as const;
 export type ConstructAgentFeature = (typeof CONSTRUCT_AGENT_CLIENT_FEATURES)[number];
 
@@ -330,7 +331,7 @@ function readPart(raw: unknown): ConstructEverythingPart | null {
   if (!isRecord(raw)) return null;
   const part = raw.part;
   const state = raw.state;
-  if (part !== "engine" && part !== "vms" && part !== "device") return null;
+  if (part !== "engine" && part !== "vms" && part !== "t3-desktop" && part !== "device") return null;
   if (
     state !== "pending" &&
     state !== "running" &&
@@ -409,6 +410,42 @@ export async function readConstructAgentUpdates(
   }
   const everythingAnswer = await agent.call("GET", "/api/update/everything");
   const everything = everythingAnswer.ok ? readConstructAgentEverything(everythingAnswer.value) : null;
+  let running = everything?.running ?? false;
+  const parts: ConstructEverythingPart[] = [...(everything?.parts ?? [])];
+  if (agent.has("t3-desktop-update")) {
+    const t3Desktop = await agent.call("GET", "/api/t3-desktop/update");
+    if (t3Desktop.ok && isRecord(t3Desktop.value)) {
+      const state = typeof t3Desktop.value.state === "string" ? t3Desktop.value.state : null;
+      const waitingForClose = t3Desktop.value.waitingForClose === true;
+      const error = typeof t3Desktop.value.error === "string" ? t3Desktop.value.error.slice(0, 300) : null;
+      const hasT3Part = parts.some((p) => p.part === "t3-desktop");
+      if (state === "downloading" || state === "installing") {
+        running = true;
+        if (!hasT3Part) {
+          parts.push({
+            part: "t3-desktop",
+            name: "T3 Code Desktop",
+            state: "running",
+            detail: state === "downloading" ? "Downloading." : "Installing; T3 Code restarts.",
+          });
+        }
+      } else if (waitingForClose && !running && !hasT3Part) {
+        parts.push({
+          part: "t3-desktop",
+          name: "T3 Code Desktop",
+          state: "pending",
+          detail: "Ready; installs when T3 Code closes.",
+        });
+      } else if (state === "failed" && error !== null && !running && !hasT3Part) {
+        parts.push({
+          part: "t3-desktop",
+          name: "T3 Code Desktop",
+          state: "failed",
+          detail: error,
+        });
+      }
+    }
+  }
   const listed = await listConstructAgentConnections(agent);
   if (listed === null) errors.push("The Construct agent could not list your VMs.");
   const connections = listed ?? [];
@@ -438,8 +475,8 @@ export async function readConstructAgentUpdates(
       version,
       available,
       vms,
-      running: everything?.running ?? false,
-      parts: everything?.parts ?? [],
+      running,
+      parts,
     },
     connections,
     error: errors.length > 0 ? errors.join(" ") : null,
@@ -522,6 +559,31 @@ export async function startConstructAgentUpdateEverything(
   const result = await agent.call("POST", "/api/update/everything");
   if (result.ok && readConstructAgentEverything(result.value) !== null) return { ok: true };
   return { ok: false, error: "The Construct agent did not start the update." };
+}
+
+/**
+ * Fast T3-only update when Construct itself and the VMs' Construct payloads are already current:
+ * asks each VM's engine to run the targeted T3 update (`POST /vms/{vm}/agents/t3/update`, no full
+ * reprovision) and asks the agent to install/relaunch T3 Code Desktop (`POST /api/t3-desktop/update/install`).
+ */
+export async function startConstructAgentT3Update(
+  agent: ConstructAgent,
+): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }> {
+  if (!agent.has("t3-desktop-update")) {
+    return startConstructAgentUpdateEverything(agent);
+  }
+  if (agent.has("engine-proxy")) {
+    const connections = (await listConstructAgentConnections(agent)) ?? [];
+    for (const connection of connections) {
+      await agent.call(
+        "POST",
+        `/api/engines/${encodeURIComponent(connection.engine)}/api/v1/vms/${encodeURIComponent(connection.vm)}/agents/t3/update`,
+      );
+    }
+  }
+  const desktop = await agent.call("POST", "/api/t3-desktop/update/install");
+  if (desktop.ok) return { ok: true };
+  return { ok: false, error: "The Construct agent did not start the T3 Code Desktop update." };
 }
 
 /** The agent's VMs as the instances the renderer pairs with its remotes. The link marker and

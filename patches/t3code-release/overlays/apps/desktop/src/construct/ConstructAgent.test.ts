@@ -6,7 +6,7 @@ import type * as NodeNet from "node:net";
 
 import type { ConstructUpdateInfo } from "@t3tools/contracts";
 
-import { checkConstructUpdates, type ConstructFileSystem } from "../updates/ConstructUpdates.ts";
+import { checkConstructUpdates, launchConstructAgentUpdate, type ConstructFileSystem } from "../updates/ConstructUpdates.ts";
 import {
   constructAgentDisplayedItems,
   constructAgentEndpointPath,
@@ -23,6 +23,7 @@ import {
   parseConstructAgentEndpoint,
   readConstructAgentUpdates,
   reportConstructAgentDisplayed,
+  startConstructAgentT3Update,
   startConstructAgentUpdateEverything,
   type ConstructAgentOptions,
 } from "./ConstructAgent.ts";
@@ -43,6 +44,7 @@ const agent = {
   health: { status: "ok", version: "1.4.0", pid: 1, startedAt: "2026-11-14T00:00:00Z" } as Record<string, unknown>,
   update: { version: "1.4.0", channel: "stable", available: null as string | null, state: "idle", error: null, installed: true, checkedAt: null },
   everything: { running: false, parts: [] as Array<Record<string, unknown>> },
+  t3DesktopUpdate: { supported: true, installed: true, channel: "stable", version: "0.1.11", buildHash: "a", available: null, availableDesktopVersion: null, state: "idle", error: null, checkedAt: null, waitingForClose: false } as Record<string, unknown>,
   connections: [] as Array<Record<string, unknown>>,
   vmUpdates: new Map<string, { status: number; body: unknown }>(),
   approvals: [] as Array<Record<string, unknown>>,
@@ -84,7 +86,15 @@ beforeAll(async () => {
         if (request.method === "POST") agent.everything = { running: true, parts: [{ part: "device", engine: null, name: "This device", state: "pending" }] };
         return json(request.method === "POST" ? 202 : 200, agent.everything);
       }
+      if (url === "/api/t3-desktop/update" && request.method === "GET") return json(200, agent.t3DesktopUpdate);
+      if (url === "/api/t3-desktop/update/install" && request.method === "POST") {
+        agent.t3DesktopUpdate = { ...agent.t3DesktopUpdate, state: "installing" };
+        return json(202, agent.t3DesktopUpdate);
+      }
       if (url === "/api/connections") return json(200, agent.connections);
+      if (/^\/api\/engines\/[^/]+\/api\/v1\/vms\/[^/]+\/agents\/t3\/update$/.test(url) && request.method === "POST") {
+        return json(202, { jobId: "t3-job-1", kind: "update-agents", replayed: false });
+      }
       const vm = /^\/api\/engines\/([^/]+)\/api\/v1\/vms\/([^/]+)\/update$/.exec(url);
       if (vm) {
         const answer = agent.vmUpdates.get(`${vm[1]}/${vm[2]}`) ?? { status: 404, body: { code: "not-found" } };
@@ -112,6 +122,7 @@ beforeEach(() => {
   agent.health = { status: "ok", version: "1.4.0", pid: 1, startedAt: "2026-11-14T00:00:00Z" };
   agent.update = { ...agent.update, available: null };
   agent.everything = { running: false, parts: [] };
+  agent.t3DesktopUpdate = { supported: true, installed: true, channel: "stable", version: "0.1.11", buildHash: "a", available: null, availableDesktopVersion: null, state: "idle", error: null, checkedAt: null, waitingForClose: false };
   agent.connections = [];
   agent.vmUpdates = new Map();
   agent.approvals = [];
@@ -294,6 +305,38 @@ describe("the update control's state", () => {
     agent.vmUpdates.set("eng1/dev", { status: 200, body: { newerPayload: false, availableCommit: null, appliedCommit: "abcdef1234", hostUpdate: null } });
     const local = await check(offered, false);
     assert.isNull(local.action);
+  });
+
+  it("uses the targeted T3-only update path when only T3 Code is behind and the agent supports t3-desktop-update", async () => {
+    agent.health = {
+      ...agent.health,
+      apiFeatures: ["update", "update-everything", "engine-proxy", "connections", "t3-desktop-update"],
+    };
+    agent.connections = [connection("dev")];
+    agent.t3DesktopUpdate = { ...agent.t3DesktopUpdate, state: "waiting", waitingForClose: true };
+    const read = await readConstructAgentUpdates(await found(), { check: false, withVms: false, previous: null });
+    assert.deepEqual(read.view.parts, [
+      { part: "t3-desktop", name: "T3 Code Desktop", state: "pending", detail: "Ready; installs when T3 Code closes." },
+    ]);
+
+    const t3OnlyInfo: Pick<ConstructUpdateInfo, "t3UpdateAvailable" | "everything"> = {
+      t3UpdateAvailable: true,
+      everything: { source: "agent", version: "1.4.0", available: null, vms: [], running: false, parts: read.view.parts },
+    };
+    assert.isTrue((await launchConstructAgentUpdate(options(), t3OnlyInfo)).ok);
+    assert.isTrue(agent.seen.some((seen) => seen.url === "/api/engines/eng1/api/v1/vms/dev/agents/t3/update" && seen.method === "POST"));
+    assert.isTrue(agent.seen.some((seen) => seen.url === "/api/t3-desktop/update/install" && seen.method === "POST"));
+    assert.isFalse(agent.seen.some((seen) => seen.url === "/api/update/everything" && seen.method === "POST"));
+
+    const during = await readConstructAgentUpdates(await found(), { check: false, withVms: false, previous: null });
+    assert.isTrue(during.view.running);
+    assert.equal(during.view.parts[0]?.part, "t3-desktop");
+
+    // When an older agent lacks t3-desktop-update, falls back to /api/update/everything.
+    agent.seen = [];
+    agent.health = { ...agent.health, apiFeatures: ["update", "update-everything"] };
+    assert.isTrue((await startConstructAgentT3Update(await found())).ok);
+    assert.isTrue(agent.seen.some((seen) => seen.url === "/api/update/everything" && seen.method === "POST"));
   });
 
   it("falls back to the scripts when no agent answers", async () => {
