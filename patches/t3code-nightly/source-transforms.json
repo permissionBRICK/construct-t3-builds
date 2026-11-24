@@ -461,8 +461,13 @@
     },
     {
       "path": "apps/server/src/serverRuntimeStartup.ts",
-      "find": "  const baseTarget = serverConfig.devUrl?.toString() ?? bindUrl;",
-      "replace": "  // The desktop app loads its own UI, so only served modes follow the public\n  // origin a TLS proxy publishes on this server's behalf.\n  const publicBaseUrl = yield* resolvePublicBaseUrlForServing(serverConfig.mode);\n  const baseTarget = serverConfig.devUrl?.toString() ?? publicBaseUrl ?? bindUrl;"
+      "before": "const baseTarget =",
+      "insert": "  // The desktop app loads its own UI, so only served modes follow the public\n  // origin a TLS proxy publishes on this server's behalf.\n  const publicBaseUrl = yield* resolvePublicBaseUrlForServing(serverConfig.mode);\n"
+    },
+    {
+      "path": "apps/server/src/serverRuntimeStartup.ts",
+      "find": "serverConfig.devUrl?.toString() ??",
+      "replace": "serverConfig.devUrl?.toString() ?? publicBaseUrl ??"
     },
     {
       "path": "apps/server/src/serverRuntimeStartup.ts",
