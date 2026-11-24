@@ -184,7 +184,9 @@ through re-indentation) and the list of `conflicts`.
     user administers, the user's VMs, in the background) and the agent's events follow the
     run until it ends, or show what failed. Pairing links (`t3-pairing`), the panel and a
     VM's page (`/api/shell/open`) and key vault approvals and entry requests
-    (`/api/vault/...`, decided only for the request the banner shows) go through the agent too.
+    (`/api/vault/...`, decided only for the request the banner shows, with displayed items
+    and visible heartbeats reported to `POST /api/vault/approvals/displayed` when the agent
+    advertises `vault-approvals-displayed`) go through the agent too.
   - *Desktop with the old Construct* (no agent answers): the same control runs today's
     scripts: `Update-Construct.ps1`, a reprovision of the default VM and of every linked VM
     that is behind (in one console), or `Update-T3Code.ps1 -Mode quick` for this app and

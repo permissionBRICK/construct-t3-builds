@@ -177,6 +177,14 @@ for (const channel of ["release", "nightly"]) {
     !manifest.transforms.some((t) => t.path === "apps/desktop/src/preload.ts" && /agent|token/i.test(t.insert || "")));
   ok(`agent (${channel}): capabilities both ways (apiFeatures from health, this build's features on every request)`,
     /body\.apiFeatures/.test(agent) && /X-Construct-Client-Features/.test(agent));
+  const vaultIpc = read("apps/desktop/src/ipc/methods/constructVault.ts");
+  const v1FeaturesBlock = /const CONSTRUCT_AGENT_V1_FEATURES[\s\S]*?;/.exec(agent)?.[0] ?? "";
+  ok(`agent (${channel}): displayed vault approvals are reported only when the agent advertises vault-approvals-displayed`,
+    /CONSTRUCT_AGENT_CLIENT_FEATURES[\s\S]*?"vault-approvals-displayed"/.test(agent) &&
+    v1FeaturesBlock !== "" && !/"vault-approvals-displayed"/.test(v1FeaturesBlock) &&
+    /if \(!agent\.has\("vault-approvals-displayed"\)\) return;/.test(agent) &&
+    /agent\.call\("POST", "\/api\/vault\/approvals\/displayed"/.test(agent) &&
+    /ConstructAgent\.reportConstructAgentDisplayed\(agent, input\.ids\)/.test(vaultIpc));
   ok(`update control (${channel}): no own notice; the sidebar control shows and starts Construct's update`,
     !manifest.overlays.includes("apps/web/src/components/ConstructUpdateNotification.tsx") &&
     !/ConstructUpdateNotification/.test(inserts) &&

@@ -90,15 +90,21 @@ export const constructVaultDecide = DesktopIpc.makeIpcMethod({
   }),
 });
 
-/** Which Companion approvals the banner shows inline; the ids are checked here, and
- *  nothing about the report comes back (the Companion's pop-out covers failures). */
+/** Which approvals the banner shows inline (the device agent's, or the Construct
+ *  Companion's); the ids are checked before sending, and nothing about the report comes
+ *  back (the tray's own pop-out covers failures). */
 export const constructVaultDisplayed = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.CONSTRUCT_VAULT_DISPLAYED_CHANNEL,
   payload: Schema.Struct({ ids: Schema.Array(Schema.String) }),
   result: Schema.Void,
   handler: Effect.fn("desktop.ipc.constructVault.displayed")(function* (input) {
-    // The agent has no such report: its own pop-out decides when to show.
-    if ((yield* findAgent) !== null) return;
+    const agent = yield* findAgent;
+    if (agent !== null) {
+      yield* Effect.promise(() =>
+        ConstructAgent.reportConstructAgentDisplayed(agent, input.ids),
+      );
+      return;
+    }
     const options = yield* companionOptions;
     yield* Effect.promise(() =>
       ConstructVaultApprovals.reportConstructVaultDisplayed(input.ids, options),
