@@ -121,9 +121,16 @@ function getConstructEverythingDetail(info: ConstructUpdateInfo, view: Construct
       : `Updating in the background: ${active.name}${active.detail === null ? "" : ` (${active.detail})`}.`;
   }
   if (info.action === "update-everything") {
-    return view.source === "vm"
-      ? `Click Update to update this VM${view.vms.some((vm) => vm.host) ? " and its host" : ""} in the background. T3 Code restarts with it and continues your threads.`
-      : "Click Update to update this PC, the hosts you administer and your VMs in the background. T3 Code restarts with them and continues your threads.";
+    if (view.source === "vm") {
+      return `Click Update to update this VM${view.vms.some((vm) => vm.host) ? " and its host" : ""} in the background. T3 Code restarts with it and continues your threads.`;
+    }
+    if (view.available === null && view.vms.length === 0 && info.t3UpdateAvailable) {
+      const staged = view.parts.some((part) => part.part === "t3-desktop" && part.state === "pending" && part.detail !== null);
+      return staged
+        ? "T3 Code update is ready and will install when you close this app, or click Update to update your VMs and restart now."
+        : "Click Update to update T3 Code on your VMs and in this app. T3 Code restarts and continues your threads.";
+    }
+    return "Click Update to update this PC, the hosts you administer and your VMs in the background. T3 Code restarts with them and continues your threads.";
   }
   if (info.error !== null) return info.error;
   return `Up to date · Construct ${view.version} · T3 Code ${info.t3Version}`;

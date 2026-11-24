@@ -247,6 +247,21 @@ describe("the one Update of the new Construct", () => {
     );
     const vmOnly = { ...agent, everything: { ...agentView, available: null } };
     expect(getConstructUpdateHeadline(vmOnly)).toBe("Construct abcdef1 available");
+    const t3Only = {
+      ...agent,
+      t3UpdateAvailable: true,
+      t3LatestVersion: "0.1.11",
+      everything: { ...agentView, available: null, vms: [] },
+    };
+    expect(getConstructUpdateDetail(t3Only)).toContain("update T3 Code on your VMs and in this app");
+    const t3Staged = {
+      ...t3Only,
+      everything: {
+        ...t3Only.everything,
+        parts: [{ part: "t3-desktop" as const, name: "T3 Code Desktop", state: "pending" as const, detail: "Ready; installs when T3 Code closes." }],
+      },
+    };
+    expect(getConstructUpdateDetail(t3Staged)).toContain("install when you close this app");
   });
 
   it("shows a running run's part, a failure, and nothing when current", () => {

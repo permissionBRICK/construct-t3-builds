@@ -185,12 +185,18 @@ for (const channel of ["release", "nightly"]) {
     /if \(!agent\.has\("vault-approvals-displayed"\)\) return;/.test(agent) &&
     /agent\.call\("POST", "\/api\/vault\/approvals\/displayed"/.test(agent) &&
     /ConstructAgent\.reportConstructAgentDisplayed\(agent, input\.ids\)/.test(vaultIpc));
+  ok(`agent (${channel}): T3 Desktop updates are queried and triggered only when the agent advertises t3-desktop-update`,
+    /CONSTRUCT_AGENT_CLIENT_FEATURES[\s\S]*?"t3-desktop-update"/.test(agent) &&
+    v1FeaturesBlock !== "" && !/"t3-desktop-update"/.test(v1FeaturesBlock) &&
+    /if \(agent\.has\("t3-desktop-update"\)\)/.test(agent) &&
+    /agent\.call\("GET", "\/api\/t3-desktop\/update"\)/.test(agent) &&
+    /agent\.call\("POST", "\/api\/t3-desktop\/update\/install"\)/.test(agent));
   ok(`update control (${channel}): no own notice; the sidebar control shows and starts Construct's update`,
     !manifest.overlays.includes("apps/web/src/components/ConstructUpdateNotification.tsx") &&
     !/ConstructUpdateNotification/.test(inserts) &&
     manifest.transforms.some((t) => t.path === "apps/web/src/components/sidebar/SidebarUpdatePill.tsx" &&
       t.replace === "const state = useConstructUpdateState(useDesktopUpdateState());") &&
-    /ConstructUpdates\.launchConstructAgentUpdate\(constructAgentOptions\)/.test(inserts));
+    /ConstructUpdates\.launchConstructAgentUpdate\(constructAgentOptions,\s*info\)/.test(inserts));
   const vmUpdate = read("apps/server/src/constructVmUpdate.ts");
   ok(`update control (${channel}): the web UI asks the VM with fixed argv, no shell, one run at a time`,
     /\["update", "status", "--json"\]/.test(vmUpdate) && /\["update", "run", "--json"\]/.test(vmUpdate) &&
