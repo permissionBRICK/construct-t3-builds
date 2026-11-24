@@ -3,6 +3,7 @@ import {
   ConstructVaultDecideResult,
   ConstructVaultEntryInput,
 } from "@t3tools/contracts";
+import * as Electron from "electron";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -13,6 +14,16 @@ import * as ConstructAgent from "../../construct/ConstructAgent.ts";
 import * as ConstructVaultApprovals from "../../construct/ConstructVaultApprovals.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
+
+let lastApprovalsBackend: "agent" | "companion" | null = null;
+
+function isSenderWindowForeground(event: DesktopIpc.DesktopIpcInvokeEvent | undefined): boolean {
+  if (event === undefined) return false;
+  const sender = Electron.webContents.fromId(event.sender.id);
+  if (!sender || sender.isDestroyed()) return false;
+  const win = Electron.BrowserWindow.fromWebContents(sender);
+  return win !== null && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && win.isFocused();
+}
 
 const optionalEnv = (name: string) =>
   Config.String(name).pipe(
@@ -57,12 +68,15 @@ export const constructVaultApprovals = DesktopIpc.makeIpcMethod({
     const agent = yield* findAgent;
     if (agent !== null) {
       const approvals = yield* Effect.promise(() => ConstructAgent.listConstructAgentApprovals(agent));
+      lastApprovalsBackend = approvals === null ? null : "agent";
       return approvals === null ? { available: false as const } : { available: true as const, approvals };
     }
     const options = yield* companionOptions;
-    return yield* Effect.promise(() =>
+    const result = yield* Effect.promise(() =>
       ConstructVaultApprovals.listConstructVaultApprovals(options),
     );
+    lastApprovalsBackend = result.available ? "companion" : null;
+    return result;
   }),
 });
 
@@ -97,15 +111,20 @@ export const constructVaultDisplayed = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.CONSTRUCT_VAULT_DISPLAYED_CHANNEL,
   payload: Schema.Struct({ ids: Schema.Array(Schema.String) }),
   result: Schema.Void,
-  handler: Effect.fn("desktop.ipc.constructVault.displayed")(function* (input) {
-    const agent = yield* findAgent;
-    if (agent !== null) {
+  handler: Effect.fn("desktop.ipc.constructVault.displayed")(function* (input, event) {
+    if (!isSenderWindowForeground(event)) return;
+    const backend = lastApprovalsBackend;
+    if (backend === null) return;
+    if (backend === "agent") {
+      const agent = yield* findAgent;
+      if (agent === null || !isSenderWindowForeground(event)) return;
       yield* Effect.promise(() =>
         ConstructAgent.reportConstructAgentDisplayed(agent, input.ids),
       );
       return;
     }
     const options = yield* companionOptions;
+    if (!isSenderWindowForeground(event)) return;
     yield* Effect.promise(() =>
       ConstructVaultApprovals.reportConstructVaultDisplayed(input.ids, options),
     );

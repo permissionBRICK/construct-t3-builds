@@ -327,16 +327,23 @@ export function ConstructVaultPendingNotification() {
       pollServers();
       pollCompanion();
     };
+    const onWindowFocus = () => {
+      if (document.visibilityState !== "visible") return;
+      // Regaining foreground focus resumes reporting to the tray so it steps back immediately.
+      pollCompanion();
+    };
     pollServers();
     pollCompanion();
     const timer = setInterval(pollServers, VAULT_POLL_INTERVAL_MS);
     document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", onWindowFocus);
     return () => {
       cancelled = true;
       clearInterval(timer);
       if (companionTimer !== null) clearTimeout(companionTimer);
       if (renderTimer !== null) clearTimeout(renderTimer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", onWindowFocus);
       closeBanner();
     };
   }, [environmentKey, read]);
