@@ -70,6 +70,12 @@ jobs:
       - name: Build and test the matched pair
         if: steps.plan.outputs.build == 'true'
         run: |
+          # Avoid throttled regional EC2 Ubuntu mirrors during wine/mingw installs.
+          for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+            if [ -f "$f" ]; then
+              sudo sed -i -E 's|https?://[a-z0-9-]+\.ec2\.archive\.ubuntu\.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' "$f"
+            fi
+          done
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends p7zip-full
           # A restored cache belongs to runner, but the builder/Wine run as root.
