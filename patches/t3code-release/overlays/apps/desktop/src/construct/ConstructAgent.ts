@@ -35,6 +35,7 @@ export const CONSTRUCT_AGENT_CLIENT_FEATURES = [
   "events",
   "vault-approvals",
   "vault-entry-requests",
+  "vault-approvals-displayed",
   "connections",
   "t3-pairing",
   "shell-open",
@@ -42,14 +43,26 @@ export const CONSTRUCT_AGENT_CLIENT_FEATURES = [
 export type ConstructAgentFeature = (typeof CONSTRUCT_AGENT_CLIENT_FEATURES)[number];
 
 /** An agent whose health answer names no `apiFeatures` serves the committed v1 contract,
- *  which has every route above. One that names them is taken at its word. */
-const CONSTRUCT_AGENT_V1_FEATURES: ReadonlyArray<string> = CONSTRUCT_AGENT_CLIENT_FEATURES;
+ *  which predates features added after v1 (such as `vault-approvals-displayed`).
+ *  One that names them is taken at its word. */
+const CONSTRUCT_AGENT_V1_FEATURES: ReadonlyArray<string> = [
+  "update",
+  "update-everything",
+  "engine-proxy",
+  "events",
+  "vault-approvals",
+  "vault-entry-requests",
+  "connections",
+  "t3-pairing",
+  "shell-open",
+];
 
 export const CONSTRUCT_AGENT_CLIENT_HEADER = "X-Construct-Client";
 export const CONSTRUCT_AGENT_FEATURES_HEADER = "X-Construct-Client-Features";
 
 const HEALTH_TIMEOUT_MS = 1_500;
 const CALL_TIMEOUT_MS = 8_000;
+const DISPLAYED_TIMEOUT_MS = 2_000;
 const MAX_ENDPOINT_BYTES = 16 * 1024;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const MAX_EVENT_LINE = 64 * 1024;
@@ -764,6 +777,46 @@ export async function decideConstructAgentApproval(
   if (result.status === 409) return { ok: false, reason: "already-decided" };
   if (result.status === 403 || result.status === 502) return { ok: false, reason: "host-failed" };
   return { ok: false, reason: "error" };
+}
+
+export interface ConstructAgentDisplayedItem {
+  readonly kind: "approval" | "entry-request";
+  readonly engine: string;
+  readonly id: string;
+}
+
+/** The items of a displayed report: at most 50 valid agent approval/entry-request ids, or null. */
+export function constructAgentDisplayedItems(
+  ids: unknown,
+): ReadonlyArray<ConstructAgentDisplayedItem> | null {
+  if (!Array.isArray(ids) || ids.length > MAX_ITEMS) return null;
+  const items: ConstructAgentDisplayedItem[] = [];
+  for (const rawId of ids) {
+    const parsed = parseConstructAgentApprovalId(rawId);
+    if (parsed === null) return null;
+    items.push({
+      kind: parsed.kind === "a" ? "approval" : "entry-request",
+      engine: parsed.engine,
+      id: parsed.id,
+    });
+  }
+  return items;
+}
+
+/**
+ * Tell the device agent which of its approvals and entry requests the banner shows inline
+ * right now (an empty list is a heartbeat while visible), so that its tray pop-out waits
+ * for them. Skips silently when the agent does not advertise `vault-approvals-displayed`,
+ * when any id is malformed, or when the call fails.
+ */
+export async function reportConstructAgentDisplayed(
+  agent: ConstructAgent,
+  ids: unknown,
+): Promise<void> {
+  if (!agent.has("vault-approvals-displayed")) return;
+  const items = constructAgentDisplayedItems(ids);
+  if (items === null) return;
+  await agent.call("POST", "/api/vault/approvals/displayed", { items }, DISPLAYED_TIMEOUT_MS);
 }
 
 // ── Events ───────────────────────────────────────────────────────────────────

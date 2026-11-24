@@ -8,6 +8,7 @@ import type { ConstructUpdateInfo } from "@t3tools/contracts";
 
 import { checkConstructUpdates, type ConstructFileSystem } from "../updates/ConstructUpdates.ts";
 import {
+  constructAgentDisplayedItems,
   constructAgentEndpointPath,
   constructAgentOfferLabel,
   constructAgentRunFailure,
@@ -21,6 +22,7 @@ import {
   parseConstructAgentApprovalId,
   parseConstructAgentEndpoint,
   readConstructAgentUpdates,
+  reportConstructAgentDisplayed,
   startConstructAgentUpdateEverything,
   type ConstructAgentOptions,
 } from "./ConstructAgent.ts";
@@ -185,17 +187,24 @@ describe("finding the agent", () => {
   it("checks capabilities both ways", async () => {
     const all = await found();
     assert.isTrue(all.has("update-everything") && all.has("t3-pairing"));
+    // An older v1 agent that omits apiFeatures does not implicitly advertise post-v1 features.
+    assert.isFalse(all.has("vault-approvals-displayed"));
     // Health is asked without the token; every other route with it, and with this build's features.
     const health = agent.seen.find((seen) => seen.url === "/api/health")!;
     assert.isUndefined(health.authorization);
     assert.include(health.features ?? "", "update-everything");
+    assert.include(health.features ?? "", "vault-approvals-displayed");
     assert.isUndefined(health.origin);
     agent.health = { ...agent.health, apiFeatures: ["update"] };
     const narrow = await found();
     assert.isFalse(narrow.has("update-everything"));
+    assert.isFalse(narrow.has("vault-approvals-displayed"));
     const started = await startConstructAgentUpdateEverything(narrow);
     assert.isFalse(started.ok);
     assert.isFalse(agent.seen.some((seen) => seen.url === "/api/update/everything" && seen.method === "POST"));
+    agent.health = { ...agent.health, apiFeatures: ["vault-approvals", "vault-approvals-displayed"] };
+    const advertised = await found();
+    assert.isTrue(advertised.has("vault-approvals-displayed"));
   });
 });
 
@@ -334,6 +343,48 @@ describe("approvals and entry requests", () => {
     assert.deepEqual(posts.slice(1), [
       ["/api/vault/entry-requests/eng1/ask-3", JSON.stringify({ value: "s3cret" })],
       ["/api/vault/entry-requests/eng1/ask-3/decline", ""],
+    ]);
+  });
+
+  it("reports displayed approvals and entry requests only when vault-approvals-displayed is advertised", async () => {
+    assert.deepEqual(constructAgentDisplayedItems([]), []);
+    assert.deepEqual(constructAgentDisplayedItems(["a~eng1~req-7", "e~eng1~ask-3"]), [
+      { kind: "approval", engine: "eng1", id: "req-7" },
+      { kind: "entry-request", engine: "eng1", id: "ask-3" },
+    ]);
+    assert.isNull(constructAgentDisplayedItems("a~eng1~req-7"));
+    assert.isNull(constructAgentDisplayedItems(["plain-companion-id"]));
+    assert.isNull(constructAgentDisplayedItems(["a~../x~y"]));
+    assert.isNull(
+      constructAgentDisplayedItems(Array.from({ length: 51 }, (_, i) => `a~eng1~req-${i}`)),
+    );
+
+    // Without apiFeatures (v1 agent) or without the feature flag: sends nothing.
+    await reportConstructAgentDisplayed(await found(), ["a~eng1~req-7"]);
+    agent.health = { ...agent.health, apiFeatures: ["vault-approvals", "vault-entry-requests"] };
+    await reportConstructAgentDisplayed(await found(), ["a~eng1~req-7"]);
+    assert.isFalse(agent.seen.some((seen) => seen.url === "/api/vault/approvals/displayed"));
+
+    // With vault-approvals-displayed advertised: reports valid items and empty heartbeats, skips malformed ids.
+    agent.health = { ...agent.health, apiFeatures: ["vault-approvals", "vault-approvals-displayed"] };
+    const capable = await found();
+    await reportConstructAgentDisplayed(capable, ["a~eng1~req-7", "e~eng1~ask-3"]);
+    await reportConstructAgentDisplayed(capable, []);
+    await reportConstructAgentDisplayed(capable, ["not-an-agent-id"]);
+    const reported = agent.seen
+      .filter((seen) => seen.url === "/api/vault/approvals/displayed" && seen.method === "POST")
+      .map((seen) => ({ auth: seen.authorization, body: JSON.parse(seen.body) }));
+    assert.deepEqual(reported, [
+      {
+        auth: `Bearer ${TOKEN}`,
+        body: {
+          items: [
+            { kind: "approval", engine: "eng1", id: "req-7" },
+            { kind: "entry-request", engine: "eng1", id: "ask-3" },
+          ],
+        },
+      },
+      { auth: `Bearer ${TOKEN}`, body: { items: [] } },
     ]);
   });
 });

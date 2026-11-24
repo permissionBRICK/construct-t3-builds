@@ -679,6 +679,15 @@ describe("reporting what the banner shows to the Companion", () => {
     expect(report("hidden", [], none, companion([]))).toBeNull();
   });
 
+  it("reports device agent approval and entry-request ids while visible and nothing while hidden", () => {
+    const view = companion([
+      approval("a~eng1~req-7", { deadline: CLIENT_NOW + 2 * MIN }),
+      approval("e~eng1~ask-3", { entry: true, deadline: CLIENT_NOW + 5 * MIN }),
+    ]);
+    expect(report("visible", [], none, view)).toEqual(["a~eng1~req-7", "e~eng1~ask-3"]);
+    expect(report("hidden", [], none, view)).toBeNull();
+  });
+
   it("reports nothing while the user keeps the banner closed, and again once another request waits", () => {
     const view = companion([approval("c1")]);
     const hidden = new Set(buildConstructVaultBanner([], CLIENT_NOW, none, view)?.keys);
