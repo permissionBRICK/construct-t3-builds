@@ -13,6 +13,8 @@ import {
   type VoiceTranscriptionDestination,
 } from "@t3tools/contracts";
 
+import type { AudioDestination } from "../speech/voiceConsent";
+
 export const CLAUDE_VOICE_KIND = "claude-code";
 
 export type ClaudeVoiceDestination = Extract<
@@ -21,7 +23,7 @@ export type ClaudeVoiceDestination = Extract<
 >;
 
 /** The value of T3's saved choice: a grant, "off", or nothing chosen yet (null). */
-type AudioChoice = { readonly destination: VoiceTranscriptionDestination } | "off" | null;
+type AudioChoice = { readonly destination: AudioDestination } | "off" | null;
 
 type Capabilities = {
   readonly voiceInput?: boolean | undefined;
