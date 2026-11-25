@@ -1,3 +1,4 @@
+import { connectionRoutes } from "@t3tools/client-runtime/connection";
 import { buildRemoteOpenUrl, EnvironmentId, type ConstructInstanceInfo, type ConstructUpdateInfo } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -39,8 +40,9 @@ const HAUS_VM = instance({
 
 function editorUrl(entry: ReturnType<typeof pairedEntry>, instances: ConstructUpdateInfo | null) {
   const state = resolveRemoteOpenState({
+    constructSshTarget: constructSshTargetFor(String(HAUS), entry, instances),
     target: entry.target,
-    sshTarget: constructSshTargetFor(String(HAUS), entry, instances),
+    routes: connectionRoutes(entry),
     remoteOpenTargets: ADVERTISED,
     isDesktopRenderer: true,
     hostEnvironmentId: null,
@@ -63,7 +65,7 @@ describe("constructSshTargetFor", () => {
     });
     // No user part: the config block's User applies and the link is the Companion's own.
     expect(editorUrl(entry, info([AGENT, HAUS_VM]))).toBe(
-      "vscode://vscode-remote/ssh-remote+haus-ssh/root/repos/construct",
+      "vscode://vscode-remote/ssh-remote+haus-ssh/root/repos/construct?windowId=_blank",
     );
   });
 
@@ -87,7 +89,7 @@ describe("constructSshTargetFor", () => {
     expect(constructSshTargetFor(String(HAUS), entry, info([AGENT, HAUS_VM]))).toBeNull();
     expect(constructSshTargetFor(String(HAUS), pairedEntry(HAUS, "https://haus-vm.haus.example.net/"), null)).toBeNull();
     expect(editorUrl(entry, info([AGENT, HAUS_VM]))).toBe(
-      "vscode://vscode-remote/ssh-remote+root%40haus-vm.local/root/repos/construct",
+      "vscode://vscode-remote/ssh-remote+root%40haus-vm.local/root/repos/construct?windowId=_blank",
     );
   });
 });
