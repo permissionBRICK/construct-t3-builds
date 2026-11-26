@@ -225,7 +225,7 @@ export function constructInstanceHasT3(instance: ConstructInstanceInfo): boolean
   return instance.t3Enabled === true || instance.t3Port !== null || instance.t3BaseUrl !== null;
 }
 
-/** The instances at least one linked remote matches (matchConstructRemoteToInstance's
+/** The instances at least one linked remote matches (constructInstanceForRemote's
  *  rule, so "linked" here means exactly what the Providers rows show). Pure. */
 export function constructLinkedInstanceNames(
   remotes: ReadonlyArray<ConstructLinkedRemote>,
@@ -233,7 +233,7 @@ export function constructLinkedInstanceNames(
 ): ReadonlySet<string> {
   const names = new Set<string>();
   for (const remote of remotes) {
-    const instance = matchConstructRemoteToInstance(remote.baseUrl, instances);
+    const instance = constructInstanceForRemote(remote, instances);
     if (instance !== null) names.add(instance.name);
   }
   return names;
@@ -478,7 +478,7 @@ export function planConstructProviderRows(input: {
     });
   return [...input.remotes.map((remote) => {
     const endpoint = constructRemoteEndpoint(remote.baseUrl);
-    const instance = matchConstructRemoteToInstance(remote.baseUrl, instances);
+    const instance = constructInstanceForRemote(remote, instances);
     const host = endpoint?.host ?? "";
     const base = {
       id: remote.id,

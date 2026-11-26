@@ -296,6 +296,8 @@ export interface ConstructAgentConnection {
   readonly alias: string;
   readonly state: string;
   readonly host: string | null;
+  /** The name the engine advertises this VM's web forwards under (`PublicHostPattern`), or null. */
+  readonly publicHost: string | null;
   /** `direct` (the VM's own address) or the engine's `forwarded` endpoint. */
   readonly kind: string | null;
 }
@@ -321,6 +323,10 @@ export async function listConstructAgentConnections(
       alias,
       state: typeof raw.state === "string" ? raw.state.slice(0, 32) : "unknown",
       host: address !== null && typeof address.host === "string" ? address.host.slice(0, 253) : null,
+      publicHost:
+        typeof raw.publicHost === "string" && raw.publicHost.trim() !== ""
+          ? raw.publicHost.trim().slice(0, 253)
+          : null,
       kind: address !== null && typeof address.kind === "string" ? address.kind.slice(0, 32) : null,
     });
   }
@@ -594,16 +600,29 @@ export function constructAgentInstances(
 ): ReadonlyArray<ConstructInstanceInfo> {
   return connections.map((connection, index) => {
     const old = legacy(connection.alias);
+    const publicHost = connection.kind === "direct" ? null : (connection.publicHost ?? connection.host);
+    // With the device agent, legacy instances/<name>.json is no longer refreshed by provisioning,
+    // so a stored t3Port can be stale (e.g. 443 vs a raw forward port like 2310). Drop it when
+    // this VM has a unique per-VM publicHost (PublicHostPattern) so host matching pairs both ports.
+    // Compat cleanup deadline: 2027-03-01.
+    const uniquePerVmPublicHost =
+      publicHost !== null &&
+      connections.filter(
+        (other) =>
+          (other.kind === "direct" ? null : (other.publicHost ?? other.host))?.toLowerCase() ===
+          publicHost.toLowerCase(),
+      ).length === 1 &&
+      (connection.host === null || publicHost.toLowerCase() !== connection.host.toLowerCase());
     return {
       name: connection.alias,
       vmHost: connection.host ?? connection.alias,
       // A forwarded VM's T3 port is the engine's to allocate, as for a host service's VM.
-      publicHost: connection.kind === "direct" ? null : connection.host,
+      publicHost,
       hostAlias: connection.alias,
       isDefault: index === 0,
       provisionedCommit: null,
       channel: old?.channel ?? null,
-      t3Port: old?.t3Port ?? null,
+      t3Port: uniquePerVmPublicHost ? null : (old?.t3Port ?? null),
       // A running VM of the user's is worth a pairing attempt; the agent says when it has no T3.
       t3Enabled: connection.state === "running",
       t3BaseUrl: old?.t3BaseUrl ?? null,

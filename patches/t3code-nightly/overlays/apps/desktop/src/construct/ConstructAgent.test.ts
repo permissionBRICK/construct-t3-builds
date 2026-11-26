@@ -352,6 +352,45 @@ describe("the update control's state", () => {
     assert.isUndefined(info.everything);
     assert.notEqual(info.action, "update-everything");
   });
+
+  it("uses per-VM publicHost from /api/connections and drops stale legacy t3Port", async () => {
+    agent.connections = [
+      {
+        ...connection("remote-vm"),
+        address: { host: "construct.example", port: 2202, kind: "forwarded" },
+        publicHost: "remote-vm.example",
+      },
+      {
+        ...connection("sleepy-vm", "off"),
+        address: null,
+        publicHost: "sleepy-vm.example",
+      },
+    ];
+    const legacyFs: ConstructFileSystem = {
+      listDirectories: () => [],
+      fileMtimeMs: () => null,
+      readTextFile: (path) =>
+        path.endsWith("remote-vm.json")
+          ? JSON.stringify({ t3Port: 443, t3BaseUrl: "https://remote-vm.example" })
+          : null,
+    };
+    const result = await checkConstructUpdates({
+      appVersion: "0.1.12-construct.abcdef12",
+      localAppData: "C:\\Users\\u\\AppData\\Local",
+      fs: legacyFs,
+      previous: null,
+      runningAction: null,
+      now: () => "2026-11-26T00:00:00Z",
+      agent: options(),
+    });
+    const running = result.instances.find((i) => i.name === "remote-vm")!;
+    assert.equal(running.vmHost, "construct.example");
+    assert.equal(running.publicHost, "remote-vm.example");
+    assert.isNull(running.t3Port);
+    const stopped = result.instances.find((i) => i.name === "sleepy-vm")!;
+    assert.equal(stopped.publicHost, "sleepy-vm.example");
+    assert.isNull(stopped.t3Port);
+  });
 });
 
 describe("approvals and entry requests", () => {

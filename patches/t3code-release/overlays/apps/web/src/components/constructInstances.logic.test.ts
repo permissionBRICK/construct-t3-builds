@@ -361,6 +361,30 @@ describe("planConstructProviderRows", () => {
     assert.include(detail, "reprovision pending");
     assert.include(detail, "T3 Code 0.0.39-nightly.20260904.1 available");
   });
+
+  it("matches a linked remote by t3Link environmentId without duplicating the instance row", () => {
+    const vm = instance({
+      name: "remote-vm",
+      vmHost: "construct.example",
+      publicHost: "remote-vm.example",
+      t3Port: 443,
+      t3Enabled: true,
+      t3Link: {
+        status: "linked",
+        at: "2026-11-26T09:00:00Z",
+        environmentId: "env-remote",
+        baseUrl: "https://remote-vm.example:2310",
+        error: null,
+      },
+    });
+    const rows = planConstructProviderRows({
+      remotes: [{ id: "env-remote", baseUrl: "https://remote-vm.example:2310", label: "remote-vm" }],
+      info: info({ instances: [vm] }),
+    });
+    assert.lengthOf(rows, 1);
+    assert.equal(rows[0]!.instanceName, "remote-vm");
+    assert.isTrue(rows[0]!.linked);
+  });
 });
 
 describe("stale nudges only a connected remote", () => {
