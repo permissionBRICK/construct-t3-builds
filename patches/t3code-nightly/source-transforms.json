@@ -163,7 +163,7 @@
     },
     {
       "path": "apps/web/src/components/RightPanelTabs.tsx",
-      "after": "export function RightPanelTabs(props: RightPanelTabsProps) {",
+      "after": "function RightPanelTabs(",
       "insert": "  // Offered only where the caller can open it (the thread view) and the VM's daemon runs.\n  const omniloopAvailable = props.omniloopAvailable === true && props.onAddOmniloop !== undefined;\n  const onAddOmniloop = props.onAddOmniloop ?? (() => {});\n"
     },
     {
